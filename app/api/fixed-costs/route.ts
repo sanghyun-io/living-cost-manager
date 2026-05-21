@@ -6,6 +6,8 @@ const fixedCosts = [
   { name: "교통 정기권", categoryId: "transport", paymentMethodId: "debit-card", paymentOptionId: "", amount: 120000, billingDay: 1 }
 ];
 
+export const dynamic = "force-static";
+
 const categories = [
   { id: "housing", label: "주거" },
   { id: "telecom", label: "통신" },
