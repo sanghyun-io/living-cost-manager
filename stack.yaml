@@ -1,0 +1,16 @@
+app:
+  name: living-cost-manager
+  target: web
+  type: b2b-saas
+stack:
+  frontend: nextjs
+  backend: nextjs-api-routes
+  database: sqlite
+  orm: prisma
+  auth: none
+  styling: tailwind
+  ui: shadcn
+  deploy: local
+preferences:
+  packageManager: pnpm
+  testing: vitest

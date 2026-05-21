@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MonthlyFixedCost {
+  id            String   @id @default(cuid())
+  name          String
+  categoryId    String
+  paymentMethodId String
+  paymentOptionId String
+  amount        Int
+  billingDay    Int
+  memo          String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

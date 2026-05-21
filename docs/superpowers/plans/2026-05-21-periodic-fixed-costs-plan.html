@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>주기 기반 고정비 구현 계획</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+      main {
+        width: min(980px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e4e4e7;
+        padding-top: 28px;
+      }
+      section,
+      .summary {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #fff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+      code {
+        padding: 2px 5px;
+      }
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+      ul {
+        padding-left: 22px;
+      }
+      li {
+        margin: 6px 0;
+      }
+      .meta {
+        color: #52525b;
+      }
+      .task-label {
+        display: inline-block;
+        margin-bottom: 8px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #134e4a;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .checklist li {
+        list-style: none;
+      }
+      .checklist li::before {
+        content: "☐";
+        margin-right: 8px;
+        color: #0f766e;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>주기 기반 고정비 구현 계획</h1>
+      <p class="meta">
+        For agentic workers: REQUIRED SUB-SKILL: Use <code>superpowers:subagent-driven-development</code>
+        or <code>superpowers:executing-plans</code> to implement this plan task-by-task.
+      </p>
+
+      <div class="summary">
+        <p><strong>Goal:</strong> 기존 "고정비 항목" UX는 유지하면서 각 항목에 개월 단위 주기를 추가하고, 요약과 차트는 월 환산액 기준으로 계산한다.</p>
+        <p><strong>Architecture:</strong> 계산 규칙은 <code>app/lib/budget.ts</code>에 집중시킨다. UI, CSV, LCM 백업은 이 모델을 소비하도록 얇게 확장한다.</p>
+        <p><strong>Tech Stack:</strong> Next.js, React, TypeScript, Vitest, 로컬 스토리지 기반 상태 저장.</p>
+      </div>
+
+      <h2>파일 구조</h2>
+      <section>
+        <ul>
+          <li><code>app/lib/budget.ts</code>: <code>periodMonths</code> 타입, 정규화, 월 환산 헬퍼, 요약/카테고리 집계 변경.</li>
+          <li><code>app/lib/budgetImportExport.ts</code>: CSV 템플릿에 <code>주기</code> 컬럼 추가 및 import 파싱.</li>
+          <li><code>app/lib/backup.ts</code>: <code>.lcm</code> 백업에 <code>periodMonths</code> 저장, 구버전 백업 호환.</li>
+          <li><code>app/page.tsx</code>: 테이블에 주기 입력과 월 환산 표시 추가, 요약/필터 라벨 조정.</li>
+          <li><code>app/globals.css</code>: 테이블 컬럼 증가에 맞춘 grid/반응형 스타일 조정.</li>
+          <li><code>tests/smoke.test.ts</code>: 월 환산 계산, CSV/백업 호환, UI 라벨 영향 테스트 보강.</li>
+        </ul>
+      </section>
+
+      <h2>Task 1: Budget Model</h2>
+      <section>
+        <span class="task-label">TDD</span>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> <code>tests/smoke.test.ts</code>에 기본 주기와 월 환산 계산 실패 테스트를 추가한다.</li>
+        </ul>
+        <pre><code>test("calculates monthly equivalent fixed costs by period", () =&gt; {
+  const fixedCosts = [
+    createFixedCost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000, billingDay: 25 }),
+    createFixedCost({ id: "litter", name: "고양이 모래", categoryId: "other", amount: 45000, billingDay: 1, periodMonths: 3 })
+  ];
+
+  const summary = buildBudgetSummary(fixedCosts, 3_000_000);
+
+  expect(fixedCosts[0].periodMonths).toBe(1);
+  expect(fixedCosts[1].periodMonths).toBe(3);
+  expect(summary.monthlyExpense).toBe(665_000);
+  expect(summary.annualExpense).toBe(7_980_000);
+  expect(summary.remainingIncome).toBe(2_335_000);
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> <code>pnpm test -- tests/smoke.test.ts</code>를 실행해 <code>periodMonths</code> 타입/기대값 실패를 확인한다.</li>
+          <li><strong>Step 3:</strong> <code>FixedCost</code>, <code>FixedCostInput</code>에 <code>periodMonths?: number</code> 입력과 <code>periodMonths: number</code> 출력을 추가한다.</li>
+          <li><strong>Step 4:</strong> <code>getMonthlyEquivalentAmount(item)</code> 헬퍼를 추가하고 요약 집계에 사용한다.</li>
+        </ul>
+        <pre><code>export function getMonthlyEquivalentAmount(item: FixedCost): number {
+  return Math.round(item.amount / Math.max(1, item.periodMonths));
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 5:</strong> <code>buildBudgetSummary</code>와 <code>getCategoryBuckets</code>를 월 환산액 기준으로 바꾼다.</li>
+          <li><strong>Step 6:</strong> 테스트를 다시 실행해 통과를 확인한다.</li>
+        </ul>
+      </section>
+
+      <h2>Task 2: Import and Backup Compatibility</h2>
+      <section>
+        <span class="task-label">Data format</span>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> CSV export/import 테스트에 <code>periodMonths: 3</code> 항목을 추가하고 <code>주기</code> 컬럼을 검증한다.</li>
+          <li><strong>Step 2:</strong> <code>columns</code> 배열에 <code>주기</code>를 추가하고 export row에 <code>String(item.periodMonths)</code>를 넣는다.</li>
+          <li><strong>Step 3:</strong> import에서 <code>parseCurrencyAmount(getCell(row, headerMap, "주기")) || 1</code> 값을 <code>createFixedCost</code>에 전달한다.</li>
+          <li><strong>Step 4:</strong> <code>buildLivingCostBackup</code>의 fixedCosts header에 <code>periodMonths</code>를 추가한다.</li>
+          <li><strong>Step 5:</strong> <code>parseLivingCostBackup</code>는 8번째 칸이 없으면 <code>1</code>로 import하도록 만든다.</li>
+        </ul>
+        <pre><code>periodMonths: sanitizeNumber(Number(row[7]), 1) || 1</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 6:</strong> 구버전 LCM 문자열을 직접 만든 backward compatibility 테스트를 추가한다.</li>
+          <li><strong>Step 7:</strong> <code>pnpm test -- tests/smoke.test.ts</code>로 CSV/LCM 테스트 통과를 확인한다.</li>
+        </ul>
+      </section>
+
+      <h2>Task 3: UI Table and Summary</h2>
+      <section>
+        <span class="task-label">React UI</span>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> <code>app/page.tsx</code> import에 <code>getMonthlyEquivalentAmount</code>를 추가한다.</li>
+          <li><strong>Step 2:</strong> <code>visibleFixedCostTotal</code>을 <code>item.amount</code> 합계에서 월 환산 합계로 변경한다.</li>
+        </ul>
+        <pre><code>const visibleFixedCostTotal = useMemo(
+  () =&gt; visibleFixedCosts.reduce((total, item) =&gt; total + getMonthlyEquivalentAmount(item), 0),
+  [visibleFixedCosts]
+);</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> 요약 카드 라벨을 <code>이번 달 고정비</code>에서 <code>월 환산 고정비</code>로 바꾼다.</li>
+          <li><strong>Step 4:</strong> 테이블 header에 <code>주기</code>, <code>월 환산</code>을 추가한다.</li>
+          <li><strong>Step 5:</strong> 각 row에 주기 입력을 추가한다.</li>
+        </ul>
+        <pre><code>&lt;input
+  id={item.id + "-period"}
+  inputMode="numeric"
+  min="1"
+  type="number"
+  value={item.periodMonths}
+  onChange={(event) =&gt; handleItemChange(item.id, { periodMonths: parseCurrencyInput(event.target.value) || 1 })}
+/&gt;</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 6:</strong> 각 row에 <code>{formatWon(getMonthlyEquivalentAmount(item))}</code> 읽기 전용 값을 표시한다.</li>
+          <li><strong>Step 7:</strong> 가장 큰 항목의 보조 금액도 월 환산액 기준으로 표시한다.</li>
+        </ul>
+      </section>
+
+      <h2>Task 4: Styling and Responsive Layout</h2>
+      <section>
+        <span class="task-label">CSS</span>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> <code>.table-row</code> grid columns를 8개 데이터 컬럼에 맞춘다.</li>
+          <li><strong>Step 2:</strong> <code>.table-row.delete-mode</code>는 선택 컬럼까지 포함하도록 별도 grid를 유지한다.</li>
+          <li><strong>Step 3:</strong> <code>.monthly-equivalent-cell</code> 같은 클래스를 만들면 숫자 정렬과 줄바꿈을 고정한다.</li>
+          <li><strong>Step 4:</strong> 작은 화면에서는 기존 스크롤/카드형 동작이 깨지지 않는지 확인한다.</li>
+        </ul>
+      </section>
+
+      <h2>Task 5: Verification</h2>
+      <section>
+        <span class="task-label">Checks</span>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> <code>pnpm test</code> 실행. Expected: 모든 Vitest 테스트 PASS.</li>
+          <li><strong>Step 2:</strong> <code>pnpm build</code> 실행. Expected: Next.js production build 성공.</li>
+          <li><strong>Step 3:</strong> 로컬 서버에서 주기 3개월 항목을 추가하고 요약, 필터 총합, 차트 금액이 월 환산으로 바뀌는지 확인한다.</li>
+          <li><strong>Step 4:</strong> CSV export/import 후 <code>주기</code> 값이 유지되는지 확인한다.</li>
+          <li><strong>Step 5:</strong> LCM export/import 후 <code>periodMonths</code> 값이 유지되는지 확인한다.</li>
+          <li><strong>Step 6:</strong> 현재 폴더는 git 저장소가 아니므로 커밋은 저장소 초기화 이후 별도 수행한다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
