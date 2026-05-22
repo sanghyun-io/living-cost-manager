@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>계정 및 동기화 UX 고도화 설계</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(980px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e4e4e7;
+        padding-top: 28px;
+      }
+
+      h3 {
+        margin-top: 24px;
+      }
+
+      section {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+
+      code {
+        padding: 2px 5px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .meta {
+        color: #52525b;
+      }
+
+      .badge {
+        display: inline-block;
+        margin-right: 8px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #134e4a;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .warn {
+        border-color: #fde68a;
+        background: #fffbeb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>계정 및 동기화 UX 고도화 설계</h1>
+      <p class="meta">
+        공개 API 배포 이후, 사용자가 로컬 저장과 서버 동기화의 차이를 명확히 이해하고 안전하게 데이터를 옮길 수 있게 만드는 1차 UX 고도화 설계입니다.
+      </p>
+
+      <h2>목표</h2>
+      <section>
+        <p>
+          현재 앱은 localStorage 기반 사용 흐름과 서버 계정 기반 동기화 흐름을 함께 제공합니다.
+          이번 고도화의 목표는 사용자가 어느 저장 모드에 있는지, 서버와 언제 동기화됐는지,
+          실패했을 때 무엇을 해야 하는지 한눈에 알 수 있게 만드는 것입니다.
+        </p>
+        <ul>
+          <li>로컬 모드와 서버 계정 모드를 명확히 분리합니다.</li>
+          <li>서버 연결 상태와 마지막 동기화 시각을 표시합니다.</li>
+          <li>로컬 데이터와 서버 데이터가 충돌할 때 선택지를 명확히 제공합니다.</li>
+          <li>동기화 실패가 데이터 손실로 보이지 않도록 로컬 저장 유지 상태를 안내합니다.</li>
+          <li>공유/멤버 관리는 동기화 설정 안에서 자연스럽게 접근하게 합니다.</li>
+        </ul>
+      </section>
+
+      <h2>비목표</h2>
+      <section>
+        <ul>
+          <li>새 분석 리포트 추가</li>
+          <li>고정비 데이터 모델 변경</li>
+          <li>실시간 공동 편집</li>
+          <li>비밀번호 재설정 이메일</li>
+          <li>Cloudflare Pages 이전 작업</li>
+        </ul>
+      </section>
+
+      <h2>접근안</h2>
+      <section>
+        <h3><span class="badge">추천</span>상태 중심 동기화 패널</h3>
+        <p>
+          기존 데이터 관리 영역 안에 계정/동기화 패널을 정리하되, 상태 표시를 가장 위에 둡니다.
+          로그인 폼보다 현재 상태, 마지막 동기화, 다음 액션을 먼저 보여줘 사용자가 판단하기 쉽게 합니다.
+        </p>
+
+        <h3>온보딩 위저드</h3>
+        <p>
+          서버 계정 사용을 처음 시작할 때 단계형 마법사를 제공하는 방식입니다.
+          이해는 쉽지만 현재 앱 규모에 비해 화면 전환이 커지고, 반복 사용 시 번거로울 수 있습니다.
+        </p>
+
+        <h3>자동 동기화 우선</h3>
+        <p>
+          로그인만 하면 자동으로 서버 데이터를 덮어쓰거나 업로드하는 방식입니다.
+          빠르지만 로컬 데이터가 이미 있는 사용자의 데이터 선택권이 약해져 위험합니다.
+        </p>
+      </section>
+
+      <h2>선택 설계</h2>
+      <section>
+        <p>
+          <strong>상태 중심 동기화 패널</strong>을 사용합니다. 핵심은 “지금 어디에 저장되고 있는가”와
+          “다음에 무엇을 누르면 되는가”를 명확히 보여주는 것입니다.
+        </p>
+        <pre><code>데이터 관리
+  계정 및 동기화
+    상태 카드: 서버 연결됨 / 연결 실패 / 로컬 전용
+    세션 카드: 사용자, 워크스페이스, 권한
+    동기화 카드: 마지막 동기화, 원격 데이터 상태, 다음 액션
+    충돌 선택: 서버 불러오기 / 이 브라우저 업로드 / 로컬 전용 유지
+  공유 관리
+    멤버 목록
+    초대 목록
+    소유자 전용 관리 액션</code></pre>
+      </section>
+
+      <h2>상태 모델</h2>
+      <section>
+        <p>프론트는 동기화 상태를 명시적인 상태값으로 계산합니다.</p>
+        <ul>
+          <li><code>local-only</code>: API URL이 없거나 사용자가 서버에 로그인하지 않았습니다.</li>
+          <li><code>server-available</code>: API URL이 있고 로그인 전입니다.</li>
+          <li><code>signed-in</code>: 서버 세션이 있고 워크스페이스가 선택됐습니다.</li>
+          <li><code>checking</code>: 서버 snapshot 또는 세션 복원 확인 중입니다.</li>
+          <li><code>needs-decision</code>: 로컬 데이터와 서버 데이터 중 무엇을 기준으로 할지 선택해야 합니다.</li>
+          <li><code>syncing</code>: 업로드 또는 다운로드 중입니다.</li>
+          <li><code>synced</code>: 마지막 동기화가 성공했습니다.</li>
+          <li><code>failed</code>: 서버 요청이 실패했습니다. 로컬 저장은 계속 유지됩니다.</li>
+          <li><code>auth-expired</code>: 토큰이 만료되었거나 권한이 거부되어 다시 로그인이 필요합니다.</li>
+        </ul>
+      </section>
+
+      <h2>사용자 흐름</h2>
+      <section>
+        <h3>1. 로컬 사용자</h3>
+        <ol>
+          <li>앱을 열면 기존 localStorage 데이터는 그대로 표시됩니다.</li>
+          <li>데이터 관리 영역에서 “서버 계정 연결 가능” 상태를 봅니다.</li>
+          <li>서버를 쓰지 않아도 기존 기능은 계속 사용할 수 있습니다.</li>
+        </ol>
+
+        <h3>2. 서버 가입 또는 로그인</h3>
+        <ol>
+          <li>이메일, 비밀번호, 이름으로 가입하거나 로그인합니다.</li>
+          <li>로그인 성공 후 워크스페이스를 자동 선택합니다.</li>
+          <li>서버 snapshot을 확인하고 로컬 데이터 상태와 비교합니다.</li>
+        </ol>
+
+        <h3>3. 로컬 데이터가 있고 서버가 비어 있음</h3>
+        <ol>
+          <li>“이 브라우저 데이터를 서버에 업로드”를 주 액션으로 보여줍니다.</li>
+          <li>사용자가 업로드하면 서버 snapshot을 저장하고 마지막 동기화 시각을 갱신합니다.</li>
+        </ol>
+
+        <h3>4. 서버 데이터가 있고 로컬 데이터도 있음</h3>
+        <ol>
+          <li>자동 덮어쓰기를 하지 않습니다.</li>
+          <li>서버 데이터 불러오기, 이 브라우저 데이터 업로드, 로컬 전용 유지 중 하나를 선택하게 합니다.</li>
+          <li>선택 전에는 서버/로컬의 월 수입, 항목 수, 총 월 환산액을 비교 표시합니다.</li>
+        </ol>
+
+        <h3>5. 서버 요청 실패</h3>
+        <ol>
+          <li>편집 내용은 localStorage에 유지합니다.</li>
+          <li>상태를 “서버 동기화 실패, 로컬 저장됨”으로 표시합니다.</li>
+          <li>사용자가 “다시 시도”를 누를 수 있게 합니다.</li>
+        </ol>
+      </section>
+
+      <h2>화면 변경</h2>
+      <section>
+        <ul>
+          <li>상단 요약 영역에는 서버 상태를 과하게 노출하지 않습니다. 주 화면은 생활비 관리에 집중합니다.</li>
+          <li>데이터 관리 모달 또는 패널 안에 “계정 및 동기화” 섹션을 둡니다.</li>
+          <li>상태 badge는 색상과 텍스트를 함께 사용합니다. 색상만으로 상태를 전달하지 않습니다.</li>
+          <li>버튼은 성격별로 분리합니다: 계정 액션, 동기화 액션, 공유 관리 액션.</li>
+          <li>위험한 액션은 보조 버튼으로 두고, 삭제처럼 되돌리기 어려운 액션만 confirm을 사용합니다.</li>
+        </ul>
+      </section>
+
+      <h2>데이터 표시</h2>
+      <section>
+        <p>동기화 결정 전에 서버와 로컬 데이터를 비교할 때 다음 정보를 표시합니다.</p>
+        <ul>
+          <li>월 수입</li>
+          <li>고정비 항목 수</li>
+          <li>월 환산 고정비 합계</li>
+          <li>카테고리 수</li>
+          <li>카드 수</li>
+          <li>서버 snapshot 생성 또는 갱신 시각이 있으면 표시</li>
+        </ul>
+      </section>
+
+      <h2>에러 처리</h2>
+      <section class="warn">
+        <ul>
+          <li>401 또는 403은 세션 만료/권한 문제로 분리해 “다시 로그인 필요”로 안내합니다.</li>
+          <li>네트워크 오류는 “서버 연결 실패”로 표시하고 로컬 저장이 유지된다는 문구를 함께 보여줍니다.</li>
+          <li>서버 validation 오류는 API message를 그대로 길게 노출하지 않고 짧은 안내문으로 정리합니다.</li>
+          <li>동기화 실패 시 사용자가 입력한 최신 로컬 데이터는 절대 삭제하지 않습니다.</li>
+        </ul>
+      </section>
+
+      <h2>테스트</h2>
+      <section>
+        <ul>
+          <li>API base URL이 없으면 local-only 상태가 계산되는지 테스트합니다.</li>
+          <li>로그인 성공 후 워크스페이스를 선택하고 snapshot 결정을 준비하는지 테스트합니다.</li>
+          <li>서버 snapshot이 비어 있고 로컬 데이터가 있으면 업로드 액션이 우선 표시되는지 테스트합니다.</li>
+          <li>서버와 로컬 데이터가 모두 있으면 비교 요약과 3가지 선택지가 표시되는지 테스트합니다.</li>
+          <li>401/403 오류가 auth-expired 상태로 분류되는지 테스트합니다.</li>
+          <li>네트워크 실패 시 localStorage 저장이 유지되는지 테스트합니다.</li>
+          <li>Pages build에서 API URL 주입이 유지되는지 확인합니다.</li>
+        </ul>
+      </section>
+
+      <h2>구현 범위</h2>
+      <section>
+        <ul>
+          <li>동기화 상태 계산 helper 추가</li>
+          <li>로컬/서버 snapshot 비교 summary helper 추가</li>
+          <li>데이터 관리 영역의 계정/동기화 UI 재구성</li>
+          <li>서버 요청 실패와 세션 만료 상태 문구 정리</li>
+          <li>공유 관리 섹션은 현재 기능을 유지하되 계정/동기화 섹션과 시각적으로 분리</li>
+        </ul>
+      </section>
+
+      <h2>Self Review</h2>
+      <section>
+        <ul>
+          <li>서비스화 직후 필요한 사용자 혼란 해소에 초점을 맞췄습니다.</li>
+          <li>분석/예측 기능은 다음 단계로 분리해 범위를 과하게 키우지 않았습니다.</li>
+          <li>데이터 손실 위험이 있는 자동 덮어쓰기를 명시적으로 피했습니다.</li>
+          <li>Cloudflare Pages 이전 호환성을 해치지 않도록 provider-specific UI나 runtime 기능을 넣지 않았습니다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
