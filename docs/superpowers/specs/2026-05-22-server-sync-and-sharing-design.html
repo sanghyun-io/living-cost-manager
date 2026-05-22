@@ -93,8 +93,9 @@
       <h2>목표</h2>
       <section>
         <p>
-          첫 번째 서버 기능은 계정 기반 동기화와 백업입니다. 그 다음 단계로 가족 또는 생활비 공동 관리용
-          워크스페이스 공유를 추가합니다. 일회성 실제 지출 기록과 완전한 가계부 기능은 이 설계 범위에서 제외합니다.
+          첫 번째 서버 기능은 계정 기반 동기화와 백업, 그리고 가족 또는 생활비 공동 관리용 워크스페이스 공유입니다.
+          초대/멤버 관리 UI와 API까지 같은 릴리스 범위에 포함합니다. 일회성 실제 지출 기록과 완전한 가계부 기능은
+          이 설계 범위에서 제외합니다.
         </p>
       </section>
 
@@ -157,6 +158,7 @@
           <li><code>User</code></li>
           <li><code>Workspace</code></li>
           <li><code>WorkspaceMember</code></li>
+          <li><code>WorkspaceInvitation</code></li>
           <li><code>Category</code></li>
           <li><code>PaymentCard</code></li>
           <li><code>FixedCost</code></li>
@@ -169,14 +171,17 @@
           <li>카테고리, 카드, 고정비 항목은 해당 워크스페이스 아래에 저장됩니다.</li>
           <li>앱은 서버와 현재 브라우저 사이에서 워크스페이스 예산 데이터를 동기화할 수 있습니다.</li>
         </ul>
-        <p><strong>이후 공유 기능 동작</strong></p>
+        <p><strong>1차 릴리스 공유 기능 동작</strong></p>
         <ul>
           <li>워크스페이스 owner는 멤버를 초대할 수 있습니다.</li>
+          <li>초대는 이메일과 역할로 생성하고 만료되는 단일 사용 토큰으로 수락합니다.</li>
+          <li>초대 대기 목록과 현재 멤버 목록을 UI에서 확인합니다.</li>
           <li>멤버는 같은 워크스페이스에 접근할 수 있습니다.</li>
           <li>역할은 <code>owner</code>, <code>editor</code>, <code>viewer</code>입니다.</li>
           <li><code>owner</code>는 멤버와 모든 예산 데이터를 관리할 수 있습니다.</li>
           <li><code>editor</code>는 예산 데이터를 수정할 수 있지만 멤버는 관리할 수 없습니다.</li>
           <li><code>viewer</code>는 예산 데이터를 조회만 할 수 있습니다.</li>
+          <li>마지막 owner는 제거하거나 viewer/editor로 낮출 수 없습니다.</li>
         </ul>
       </section>
 
@@ -189,9 +194,12 @@
           <li><code>UserDto</code></li>
           <li><code>WorkspaceDto</code></li>
           <li><code>WorkspaceMemberDto</code></li>
+          <li><code>WorkspaceInvitationDto</code></li>
           <li><code>CategoryDto</code></li>
           <li><code>PaymentCardDto</code></li>
           <li><code>FixedCostDto</code></li>
+          <li>초대 생성/수락 스키마</li>
+          <li>멤버 역할 변경 스키마</li>
           <li>카테고리, 카드, 고정비 생성/수정 스키마</li>
           <li>동기화 요청/응답 스키마</li>
         </ul>
@@ -255,16 +263,18 @@
           <li><code>GET /workspaces/:workspaceId/snapshot</code></li>
           <li><code>PUT /workspaces/:workspaceId/snapshot</code></li>
         </ul>
-        <p><strong>공유 기능: 개인 동기화 이후 구현</strong></p>
+        <p><strong>공유 기능</strong></p>
         <ul>
           <li><code>GET /workspaces/:workspaceId/members</code></li>
           <li><code>POST /workspaces/:workspaceId/invitations</code></li>
+          <li><code>GET /invitations</code></li>
+          <li><code>POST /invitations/:invitationId/accept</code></li>
           <li><code>PATCH /workspaces/:workspaceId/members/:memberId</code></li>
           <li><code>DELETE /workspaces/:workspaceId/members/:memberId</code></li>
         </ul>
         <p>
-          첫 구현은 세부 CRUD API를 많이 만들기보다 snapshot 동기화를 우선합니다. 이렇게 하면 현재 클라이언트 상태 구조와
-          잘 맞고 서버 마이그레이션 범위도 작아집니다.
+          예산 데이터는 snapshot 동기화를 우선하고, 협업에 필요한 멤버/초대 API는 별도 endpoint로 제공합니다.
+          이렇게 하면 현재 클라이언트 상태 구조를 유지하면서도 여러 유저가 같은 워크스페이스를 사용할 수 있습니다.
         </p>
       </section>
 
@@ -276,6 +286,9 @@
           <li>API CORS는 GitHub Pages origin만 허용합니다.</li>
           <li>모든 워크스페이스 route는 멤버십을 검증합니다.</li>
           <li>서버 mutation에는 역할 기반 권한 검사를 적용합니다.</li>
+          <li>초대 생성, 역할 변경, 멤버 제거는 owner만 수행할 수 있습니다.</li>
+          <li>초대 토큰은 단일 사용이며 만료 시간을 둡니다.</li>
+          <li>마지막 owner 제거 또는 강등은 거부합니다.</li>
           <li>백업과 snapshot은 워크스페이스 단위로 격리합니다.</li>
         </ul>
         <p>현재 프론트엔드에 허용할 CORS origin은 다음과 같습니다.</p>
@@ -320,7 +333,10 @@
           <li>회원가입/로그인</li>
           <li>워크스페이스 멤버십 검증</li>
           <li>snapshot 읽기/쓰기</li>
+          <li>초대 생성/조회/수락</li>
+          <li>멤버 역할 변경과 제거</li>
           <li>역할 기반 mutation 거부</li>
+          <li>마지막 owner 제거 또는 강등 거부</li>
           <li>잘못된 고정비 주기 값 validation 거부</li>
         </ul>
         <p><strong>shared package 테스트</strong></p>
@@ -334,6 +350,7 @@
           <li>로컬 데이터가 있을 때 로그인 동기화 안내가 뜨는지 확인</li>
           <li>서버 snapshot으로 대시보드를 hydrate할 수 있는지 확인</li>
           <li>동기화 실패 시 로컬 편집이 유지되고 경고가 표시되는지 확인</li>
+          <li>공유 관리 UI에서 초대 생성, 대기 초대, 멤버 역할, 멤버 제거 상태를 확인</li>
         </ul>
       </section>
 

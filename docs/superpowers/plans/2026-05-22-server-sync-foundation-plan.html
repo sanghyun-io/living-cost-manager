@@ -106,18 +106,18 @@
       </p>
 
       <section>
-        <p><strong>Goal:</strong> GitHub Pages 프론트는 유지하면서 Fastify + PostgreSQL 백엔드를 추가하고, 계정 기반 서버 동기화/백업을 1차 완성한다.</p>
-        <p><strong>Architecture:</strong> 현재 단일 Next 앱을 <code>apps/web</code>으로 옮기고, <code>apps/api</code>와 <code>packages/shared</code>를 추가한다. 공유 기능은 <code>WorkspaceMember</code>와 role 모델까지만 기반을 만들고, 초대/멤버 관리 UI는 다음 계획으로 분리한다.</p>
+        <p><strong>Goal:</strong> GitHub Pages 프론트는 유지하면서 Fastify + PostgreSQL 백엔드를 추가하고, 계정 기반 서버 동기화/백업과 초대/멤버 관리 UI/API를 1차 완성한다.</p>
+        <p><strong>Architecture:</strong> 현재 단일 Next 앱을 <code>apps/web</code>으로 옮기고, <code>apps/api</code>와 <code>packages/shared</code>를 추가한다. 공유 기능은 <code>WorkspaceMember</code>, <code>WorkspaceInvitation</code>, role 기반 권한, 프론트 공유 관리 UI까지 포함한다.</p>
         <p><strong>Tech Stack:</strong> Next static export, Fastify, TypeScript, Zod, Prisma, PostgreSQL, Docker Compose, Vitest.</p>
       </section>
 
       <h2>범위 결정</h2>
       <section>
-        <p>이번 계획은 설계의 1차 목표인 <strong>계정 기반 동기화/백업</strong>을 구현합니다.</p>
+        <p>이번 계획은 설계의 1차 목표인 <strong>계정 기반 동기화/백업</strong>과 <strong>워크스페이스 공유</strong>를 구현합니다.</p>
         <ul>
-          <li>포함: 모노레포 전환, shared DTO/Zod, PostgreSQL Prisma schema, auth, 개인 workspace, snapshot sync, 프론트 sync UI, Docker Compose.</li>
-          <li>기반만 포함: <code>WorkspaceMember</code>와 <code>owner/editor/viewer</code> role.</li>
-          <li>제외: 가족 초대 API/UI, 실제 지출 기록, 카드/은행 거래 import.</li>
+          <li>포함: 모노레포 전환, shared DTO/Zod, PostgreSQL Prisma schema, auth, 개인 workspace, snapshot sync, 프론트 sync UI, 초대/멤버 관리 API/UI, Docker Compose.</li>
+          <li>공유 포함: <code>WorkspaceMember</code>, <code>WorkspaceInvitation</code>, <code>owner/editor/viewer</code> role, pending 초대 목록, 멤버 역할 변경, 멤버 제거.</li>
+          <li>제외: 실제 지출 기록, 카드/은행 거래 import, OCR, 자동 알림.</li>
         </ul>
       </section>
 
@@ -142,9 +142,12 @@
         routes/auth.ts
         routes/workspaces.ts
         routes/snapshot.ts
+        routes/invitations.ts
+        routes/members.ts
       tests/
         auth.test.ts
         snapshot.test.ts
+        sharing.test.ts
       package.json
       tsconfig.json
       Dockerfile
@@ -393,7 +396,7 @@ export const paymentCardDtoSchema = z.object({
 });
 export type PaymentCardDto = z.infer&lt;typeof paymentCardDtoSchema&gt;;</code></pre>
         <ul class="checklist">
-          <li><strong>Step 5:</strong> auth/workspace/snapshot schemas를 추가한다.</li>
+          <li><strong>Step 5:</strong> auth/workspace/invitation/snapshot schemas를 추가한다.</li>
         </ul>
         <pre><code>// packages/shared/src/auth.ts
 import { z } from "zod";
@@ -422,6 +425,29 @@ export type WorkspaceRole = z.infer&lt;typeof workspaceRoleSchema&gt;;
 export const workspaceDtoSchema = z.object({
   id: z.string(),
   name: z.string(),
+  role: workspaceRoleSchema
+});
+export const workspaceMemberDtoSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  userId: z.string(),
+  email: z.email(),
+  name: z.string(),
+  role: workspaceRoleSchema
+});
+export const workspaceInvitationDtoSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  email: z.email(),
+  role: workspaceRoleSchema,
+  expiresAt: z.string(),
+  acceptedAt: z.string().nullable()
+});
+export const createInvitationRequestSchema = z.object({
+  email: z.email(),
+  role: workspaceRoleSchema.exclude(["owner"]).default("viewer")
+});
+export const updateMemberRoleRequestSchema = z.object({
   role: workspaceRoleSchema
 });
 
@@ -483,6 +509,7 @@ model Workspace {
   name          String
   monthlyIncome Int               @default(0)
   members       WorkspaceMember[]
+  invitations   WorkspaceInvitation[]
   categories    Category[]
   cards         PaymentCard[]
   fixedCosts    FixedCost[]
@@ -501,6 +528,21 @@ model WorkspaceMember {
   createdAt   DateTime      @default(now())
 
   @@unique([workspaceId, userId])
+}
+
+model WorkspaceInvitation {
+  id          String        @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole
+  tokenHash   String        @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+
+  @@index([email])
+  @@index([workspaceId])
 }
 
 enum WorkspaceRole {
@@ -850,12 +892,62 @@ git add apps/api
 git commit -m "feat: add workspace snapshot sync api"</code></pre>
       </section>
 
-      <h2>Task 7: web sync client와 UI</h2>
+      <h2>Task 7: workspace 초대/멤버 API</h2>
+      <section>
+        <span class="task">sharing api</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>apps/api/src/routes/invitations.ts</code>, <code>apps/api/src/routes/members.ts</code></li>
+          <li>Create: <code>apps/api/src/services/membership.ts</code>, <code>apps/api/src/services/invitations.ts</code></li>
+          <li>Create: <code>apps/api/tests/sharing.test.ts</code></li>
+          <li>Modify: <code>apps/api/src/app.ts</code>, <code>packages/shared/src/workspace.ts</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> owner만 초대 생성, 역할 변경, 멤버 제거를 할 수 있다는 failing test를 작성한다.</li>
+          <li><strong>Step 2:</strong> 초대 생성 테스트를 작성한다. 응답에는 토큰 원문을 한 번만 반환하고 DB에는 token hash만 저장한다.</li>
+          <li><strong>Step 3:</strong> 초대 수락 테스트를 작성한다. 초대 이메일과 로그인 사용자 이메일이 일치해야 하고, 만료/이미 수락된 초대는 거부한다.</li>
+          <li><strong>Step 4:</strong> 마지막 owner 제거 또는 viewer/editor 강등을 거부하는 테스트를 작성한다.</li>
+        </ul>
+        <pre><code>test("owner invites a user and the user accepts", async () =&gt; {
+  const owner = await registerTestUser(app, "owner@example.com");
+  const invited = await registerTestUser(app, "invitee@example.com");
+
+  const invitation = await app.inject({
+    method: "POST",
+    url: `/workspaces/${owner.workspace.id}/invitations`,
+    headers: { authorization: `Bearer ${owner.token}` },
+    payload: { email: invited.user.email, role: "editor" }
+  });
+
+  expect(invitation.statusCode).toBe(201);
+
+  const accept = await app.inject({
+    method: "POST",
+    url: `/invitations/${invitation.json().id}/accept`,
+    headers: { authorization: `Bearer ${invited.token}` },
+    payload: { token: invitation.json().token }
+  });
+
+  expect(accept.statusCode).toBe(200);
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 5:</strong> membership service에 <code>requireWorkspaceRole</code>, <code>requireOwner</code>, <code>assertCanChangeOwner</code>를 구현한다.</li>
+          <li><strong>Step 6:</strong> <code>GET /workspaces/:workspaceId/members</code>, <code>PATCH /workspaces/:workspaceId/members/:memberId</code>, <code>DELETE /workspaces/:workspaceId/members/:memberId</code>를 구현한다.</li>
+          <li><strong>Step 7:</strong> <code>POST /workspaces/:workspaceId/invitations</code>, <code>GET /invitations</code>, <code>POST /invitations/:invitationId/accept</code>를 구현한다.</li>
+          <li><strong>Step 8:</strong> API 테스트를 통과시킨 뒤 커밋한다.</li>
+        </ul>
+        <pre><code>pnpm --filter @living-cost-manager/api test
+git add apps/api packages/shared prisma
+git commit -m "feat: add workspace sharing api"</code></pre>
+      </section>
+
+      <h2>Task 8: web sync client와 공유 UI</h2>
       <section>
         <span class="task">web sync</span>
         <p><strong>Files:</strong></p>
         <ul>
           <li>Create: <code>apps/web/app/lib/serverApi.ts</code>, <code>apps/web/app/lib/snapshot.ts</code></li>
+          <li>Create: <code>apps/web/app/lib/sharing.ts</code></li>
           <li>Modify: <code>apps/web/app/page.tsx</code>, <code>apps/web/app/globals.css</code>, <code>apps/web/package.json</code></li>
           <li>Test: <code>apps/web/tests/smoke.test.ts</code></li>
         </ul>
@@ -900,15 +992,18 @@ export async function apiRequest&lt;T&gt;(path: string, options: RequestInit &am
           <li><strong>Step 4:</strong> page UI에 서버 로그인 영역과 sync 상태를 추가한다.</li>
           <li><strong>Step 5:</strong> local data가 있고 서버 snapshot이 비어 있을 때 "이 브라우저 데이터 업로드" 버튼을 표시한다.</li>
           <li><strong>Step 6:</strong> sync 실패 시 localStorage 저장은 유지하고 "서버 동기화 실패" 경고를 표시한다.</li>
-          <li><strong>Step 7:</strong> local-only mode가 기존처럼 동작하는지 테스트 후 커밋한다.</li>
+          <li><strong>Step 7:</strong> 데이터/설정 영역에 "공유 관리" entry를 추가한다. 상단 버튼 군에 다시 몰아넣지 않고 모달 또는 별도 panel로 분리한다.</li>
+          <li><strong>Step 8:</strong> 공유 관리 UI에서 멤버 목록, 역할 선택, 멤버 제거, pending 초대 목록, 이메일 초대 폼을 제공한다.</li>
+          <li><strong>Step 9:</strong> viewer/editor에게는 초대/역할 변경/삭제 control을 비활성화하고 owner에게만 활성화한다.</li>
+          <li><strong>Step 10:</strong> local-only mode가 기존처럼 동작하고 공유 UI는 로그인 후에만 보이는지 테스트 후 커밋한다.</li>
         </ul>
         <pre><code>pnpm --filter @living-cost-manager/web test
 $env:GITHUB_PAGES='true'; pnpm --filter @living-cost-manager/web build
 git add apps/web package.json pnpm-lock.yaml
-git commit -m "feat: add web server sync client"</code></pre>
+git commit -m "feat: add web server sync and sharing ui"</code></pre>
       </section>
 
-      <h2>Task 8: Docker와 OCI 배포 준비</h2>
+      <h2>Task 9: Docker와 OCI 배포 준비</h2>
       <section>
         <span class="task">deploy</span>
         <p><strong>Files:</strong></p>
@@ -973,7 +1068,7 @@ git add apps/api/Dockerfile docker-compose.prod.yml README.md
 git commit -m "chore: add api docker deployment"</code></pre>
       </section>
 
-      <h2>Task 9: 최종 검증과 GitHub Pages 유지</h2>
+      <h2>Task 10: 최종 검증과 GitHub Pages 유지</h2>
       <section>
         <span class="task">verification</span>
         <ul class="checklist">
@@ -1012,8 +1107,8 @@ Invoke-WebRequest https://sanghyun-io.github.io/living-cost-manager/ -UseBasicPa
       <h2>Self Review</h2>
       <section>
         <ul>
-          <li>스펙의 1차 목표인 계정 기반 동기화/백업은 Task 1-9에 포함되어 있습니다.</li>
-          <li>가족 공유는 DB와 role 기반 권한의 기반만 포함했고, 초대/멤버 관리 구현은 별도 계획으로 분리했습니다.</li>
+          <li>스펙의 1차 목표인 계정 기반 동기화/백업은 Task 1-10에 포함되어 있습니다.</li>
+          <li>가족 공유는 DB, role 기반 권한, 초대 API, 멤버 관리 API, 프론트 공유 관리 UI까지 같은 계획에 포함했습니다.</li>
           <li>실제 지출 기록, 거래 import, OCR, 알림은 계획에 포함하지 않았습니다.</li>
           <li>프론트는 GitHub Pages 유지가 전제이며, API만 OCI VM 배포 대상으로 둡니다.</li>
           <li>Prisma 모델을 프론트에 직접 공유하지 않고 <code>packages/shared</code> DTO/Zod schema를 공유합니다.</li>
