@@ -174,6 +174,7 @@ export default function Home() {
   const [isServerBusy, setIsServerBusy] = useState(false);
   const [serverErrorKind, setServerErrorKind] = useState<"auth" | "request" | null>(null);
   const [lastServerSyncedAt, setLastServerSyncedAt] = useState<Date | null>(null);
+  const [lastSyncedSnapshotKey, setLastSyncedSnapshotKey] = useState("");
   const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
   const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
@@ -330,6 +331,8 @@ export default function Home() {
   const hasRemoteDecision =
     !!serverSnapshot &&
     (!isWorkspaceSnapshotEmpty(serverSnapshot) || hasLocalBudgetData(currentBudgetSnapshot));
+  const currentSnapshotKey = useMemo(() => buildSnapshotKey(currentBudgetSnapshot), [currentBudgetSnapshot]);
+  const isServerSyncCurrent = !!lastSyncedSnapshotKey && currentSnapshotKey === lastSyncedSnapshotKey;
   const accountSyncState = getAccountSyncState({
     hasServerApi: !!serverApi,
     hasSession: !!serverSession,
@@ -341,7 +344,7 @@ export default function Home() {
     hasError: serverErrorKind !== null
   });
   const displayedSyncState: AccountSyncState =
-    accountSyncState === "signed-in" && lastServerSyncedAt ? "synced" : accountSyncState;
+    accountSyncState === "signed-in" && lastServerSyncedAt && isServerSyncCurrent ? "synced" : accountSyncState;
   const syncStateView = getSyncStateView(displayedSyncState);
 
   function handleIncomeChange(value: string) {
@@ -539,6 +542,7 @@ export default function Home() {
     setInvitations([]);
     setServerErrorKind(null);
     setLastServerSyncedAt(null);
+    setLastSyncedSnapshotKey("");
     clearWorkspaceScopedSharingDrafts();
     setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
   }
@@ -691,6 +695,7 @@ export default function Home() {
       const savedSnapshot = await serverApi.putWorkspaceSnapshot(serverSession.workspace.id, nextSnapshot, serverSession.token);
       setServerSnapshot(savedSnapshot);
       setLastServerSyncedAt(new Date());
+      setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(savedSnapshot)));
       setServerErrorKind(null);
       setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
     } catch (error) {
@@ -713,6 +718,7 @@ export default function Home() {
       applyBudgetSnapshot(hydrateWorkspaceSnapshot(nextSnapshot));
       setServerSnapshot(nextSnapshot);
       setLastServerSyncedAt(new Date());
+      setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(nextSnapshot)));
       setServerErrorKind(null);
       setServerStatus("서버 데이터를 이 브라우저에 불러왔습니다.");
     } catch (error) {
@@ -1451,7 +1457,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                {displayedSyncState === "local-only" ? (
+                {displayedSyncState === "local-only" || displayedSyncState === "server-available" ? (
                   <div className="local-mode-warning" role="status">
                     <strong>로컬 모드: 이 브라우저에만 저장됩니다.</strong>
                     <p>브라우저 데이터를 삭제하거나 기기를 바꾸면 복구할 수 없습니다. 계속 로컬 모드를 쓸 경우 정기적으로 전체 Export 백업을 보관하세요.</p>
@@ -2045,6 +2051,31 @@ function getCurrentBudgetSnapshotFromState(snapshot: BudgetSnapshot): LocalBudge
     cards: snapshot.cards,
     fixedCosts: snapshot.fixedCosts
   };
+}
+
+function buildSnapshotKey(snapshot: LocalBudgetSnapshot) {
+  return JSON.stringify({
+    monthlyIncome: Math.max(0, Math.round(snapshot.monthlyIncome)),
+    categories: snapshot.categories.map((category) => ({
+      id: category.id,
+      label: category.label
+    })),
+    cards: snapshot.cards.map((card) => ({
+      id: card.id,
+      label: card.label,
+      billingDay: card.billingDay
+    })),
+    fixedCosts: snapshot.fixedCosts.map((item) => ({
+      id: item.id,
+      name: item.name,
+      categoryId: item.categoryId,
+      paymentMethodId: item.paymentMethodId,
+      paymentOptionId: item.paymentOptionId,
+      amount: item.amount,
+      periodMonths: item.periodMonths,
+      billingDay: item.billingDay
+    }))
+  });
 }
 
 function isServerSession(value: ServerSession | null): value is ServerSession {

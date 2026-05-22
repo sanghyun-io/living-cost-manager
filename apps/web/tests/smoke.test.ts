@@ -643,6 +643,19 @@ describe("account sync UX", () => {
     expect(
       getAccountSyncState({
         hasServerApi: true,
+        hasSession: false,
+        hasWorkspace: false,
+        isBusy: false,
+        isSnapshotChecked: false,
+        hasServerSnapshot: false,
+        hasAuthFailure: true,
+        hasError: true
+      })
+    ).toBe("server-available");
+
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
         hasSession: true,
         hasWorkspace: true,
         isBusy: false,
@@ -655,19 +668,6 @@ describe("account sync UX", () => {
   });
 
   test("prioritizes busy, auth expired, failed, and decision states", () => {
-    expect(
-      getAccountSyncState({
-        hasServerApi: true,
-        hasSession: false,
-        hasWorkspace: false,
-        isBusy: false,
-        isSnapshotChecked: false,
-        hasServerSnapshot: false,
-        hasAuthFailure: true,
-        hasError: true
-      })
-    ).toBe("auth-expired");
-
     expect(
       getAccountSyncState({
         hasServerApi: true,
