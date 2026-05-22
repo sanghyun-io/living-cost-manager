@@ -53,7 +53,14 @@ pnpm db:migrate
 pnpm --filter @living-cost-manager/api dev
 ```
 
-API 테스트와 전체 테스트에서 DB 연동 테스트를 실행하려면 `API_TEST_DATABASE_URL`이 필요합니다. 테스트 전용 Postgres 데이터베이스 URL을 지정하고, 운영/개발 DB와 같은 데이터베이스를 공유하지 마세요.
+API 테스트와 전체 테스트에서 DB 연동 테스트를 실행하려면 `API_TEST_DATABASE_URL`이 필요합니다. 같은 Postgres 데이터베이스를 쓰더라도 Prisma schema는 분리하세요.
+
+```bash
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/living_cost_manager?schema=lcm
+API_TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/living_cost_manager?schema=lcm_test
+```
+
+`API_TEST_DATABASE_URL`은 테스트 시작 시 `prisma migrate reset --force`를 실행합니다. 따라서 앱이 쓰는 `lcm` schema가 아니라 반드시 `lcm_test`처럼 `test`가 포함된 테스트 전용 schema를 지정해야 합니다.
 
 ## OCI/백엔드 배포 개요
 
@@ -67,7 +74,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 컨테이너 시작 명령은 migration을 자동 실행하지 않습니다. 새 버전을 올리기 전에 `prisma migrate deploy`를 먼저 실행하는 전략을 사용하세요.
 
-운영 환경에서는 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`를 배포 환경의 비밀 관리 방식으로 주입합니다. `JWT_SECRET`, DB 비밀번호, credentials가 포함된 API URL을 README, Compose 파일, Git 커밋, 로그에 남기지 마세요.
+운영 환경에서는 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`를 배포 환경의 비밀 관리 방식으로 주입합니다. Prisma schema는 서비스용 `lcm`, 테스트용 `lcm_test`처럼 분리해서 운영하세요. `JWT_SECRET`, DB 비밀번호, credentials가 포함된 API URL을 README, Compose 파일, Git 커밋, 로그에 남기지 마세요.
 
 OCI나 VM에서는 Docker Compose로 API와 Postgres를 실행하고, 외부 공개는 Nginx, Caddy, OCI Load Balancer 같은 HTTPS reverse proxy 뒤에 두는 구성을 권장합니다. Reverse proxy에서 TLS를 종료하고 API origin을 고정한 뒤, API의 `CORS_ORIGIN`을 GitHub Pages 프론트엔드 URL 또는 허용할 정확한 웹 origin으로 설정하세요.
 

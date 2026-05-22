@@ -25,7 +25,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: ${DATABASE_URL:-postgresql://living_cost:change-me-postgres-password@db:5432/living_cost_manager?schema=public}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://living_cost:change-me-postgres-password@db:5432/living_cost_manager?schema=lcm}
       JWT_SECRET: ${JWT_SECRET:-change-me-jwt-secret-at-least-32-chars}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://sanghyun-io.github.io}
     ports:
