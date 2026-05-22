@@ -7,6 +7,7 @@ import { type Env, loadEnv } from "./env.js";
 import { authPlugin } from "./plugins/auth.js";
 import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
 import { authRoutes } from "./routes/auth.js";
+import { snapshotRoutes } from "./routes/snapshot.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -42,6 +43,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     secret: env.JWT_SECRET
   });
   await app.register(authRoutes);
+  await app.register(snapshotRoutes);
 
   app.get("/health", async () => ({ ok: true }));
 
