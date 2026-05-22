@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "verify:package": "pnpm run build && node -e \"import('./dist/index.js').then(m=>console.log(Object.keys(m).includes('fixedCostDtoSchema')))\"",
     "test": "vitest run"
   },
   "dependencies": {

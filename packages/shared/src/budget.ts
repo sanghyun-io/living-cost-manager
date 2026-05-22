@@ -6,9 +6,6 @@ const billingDaySchema = z.number().int().min(1).max(31);
 export const roundPeriodMonths = (value: number) =>
   Math.round((value + Number.EPSILON) * 10) / 10;
 
-const isRoundedToFirstDecimal = (value: number) =>
-  Object.is(value, roundPeriodMonths(value));
-
 export const paymentMethodIdSchema = z.enum([
   "cash",
   "bank-transfer",
@@ -42,7 +39,7 @@ export const fixedCostDtoSchema = z.object({
     .number()
     .min(1)
     .max(120)
-    .refine(isRoundedToFirstDecimal, "Expected number rounded to one decimal"),
+    .multipleOf(0.1),
   billingDay: billingDaySchema,
 });
 

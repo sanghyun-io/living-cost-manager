@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @living-cost-manager/web dev",
-    "build": "pnpm --filter @living-cost-manager/web build",
+    "build": "pnpm -r --if-present build",
     "start": "pnpm --filter @living-cost-manager/web start",
     "test": "pnpm -r test",
     "test:web": "pnpm --filter @living-cost-manager/web test",

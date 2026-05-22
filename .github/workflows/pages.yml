@@ -37,12 +37,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run tests
-        run: pnpm --filter @living-cost-manager/web test
+        run: pnpm --filter @living-cost-manager/web... test
 
       - name: Build static site
         env:
           GITHUB_PAGES: "true"
-        run: pnpm --filter @living-cost-manager/web build
+        run: pnpm --filter @living-cost-manager/web... build
 
       - name: Disable Jekyll
         run: touch apps/web/out/.nojekyll

@@ -93,6 +93,24 @@ describe("shared api contracts", () => {
     expect(() => z.toJSONSchema(workspaceSnapshotSchema)).not.toThrow();
   });
 
+  test("fixedCostDtoSchema represents the period month precision in JSON schema", () => {
+    const jsonSchema = z.toJSONSchema(fixedCostDtoSchema) as {
+      properties?: {
+        periodMonths?: {
+          minimum?: number;
+          maximum?: number;
+          multipleOf?: number;
+        };
+      };
+    };
+
+    expect(jsonSchema.properties?.periodMonths).toMatchObject({
+      minimum: 1,
+      maximum: 120,
+      multipleOf: 0.1,
+    });
+  });
+
   test("createInvitationRequestSchema rejects owner and defaults missing role to viewer", () => {
     expect(
       createInvitationRequestSchema.parse({
