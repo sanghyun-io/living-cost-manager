@@ -1117,6 +1117,13 @@ export default function Home() {
         <span className={saveError ? "save-status save-status-error" : "save-status"}>
           {saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기")}
         </span>
+        <button
+          className={serverSession ? "account-status-pill account-status-connected" : "primary-button"}
+          type="button"
+          onClick={() => setIsDataModalOpen(true)}
+        >
+          {serverSession ? "서버 연결됨 · 동기화 관리" : "서버 로그인/가입"}
+        </button>
         <strong>{currentUser.name}</strong>
         <button className="secondary-button" type="button" onClick={handleLogout}>
           로그아웃
@@ -1129,7 +1136,11 @@ export default function Home() {
           <p className="hero-copy">
             매월 또는 몇 개월마다 반복되는 지출을 항목, 납부일, 결제수단별로 모아 보고 월 환산 예산 압박을 바로 확인합니다.
           </p>
-          <p className="local-note inline-note">데이터는 이 브라우저에만 저장됩니다. 정기적으로 데이터 관리에서 전체 백업을 내보내세요.</p>
+          <p className="local-note inline-note">
+            {serverSession?.workspace
+              ? "서버 계정이 연결되어 있습니다. 변경 후 데이터 관리에서 서버 동기화를 실행하세요."
+              : "현재 로컬 모드입니다. 서버 로그인/가입 전에는 이 브라우저에만 저장되며, 정기적으로 데이터 관리에서 전체 백업을 내보내세요."}
+          </p>
         </div>
         <div className="summary-panel" aria-label="이번 달 고정비 요약">
           <label htmlFor="monthly-income">월 수입</label>

@@ -77,6 +77,23 @@ body {
   box-shadow: var(--shadow);
 }
 
+.account-status-pill {
+  border: 1px solid #ccfbf1;
+  border-radius: 999px;
+  background: #f0fdfa;
+  color: var(--accent-strong);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.account-status-pill:hover {
+  border-color: #99f6e4;
+  background: #ccfbf1;
+}
+
 .login-card {
   width: min(620px, 100%);
   border: 1px solid var(--line);
@@ -1216,6 +1233,7 @@ select:disabled {
 
   .action-group button,
   .app-header button,
+  .app-header .primary-button,
   .modal-header button,
   .server-panel-header button,
   .data-action-buttons button,
