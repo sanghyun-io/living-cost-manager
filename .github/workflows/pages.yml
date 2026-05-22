@@ -42,6 +42,15 @@ jobs:
       - name: Run tests
         run: pnpm --filter @living-cost-manager/web... test
 
+      - name: Verify API base URL
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_API_BASE_URL" ]; then
+            echo "NEXT_PUBLIC_API_BASE_URL repository variable is required for API-backed Pages deploy." >&2
+            exit 1
+          fi
+
       - name: Build static site
         env:
           GITHUB_PAGES: "true"
