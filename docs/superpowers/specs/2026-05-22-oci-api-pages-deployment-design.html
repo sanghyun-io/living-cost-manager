@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OCI API 배포 및 GitHub Pages 연결 설계</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(980px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.25;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e4e4e7;
+        padding-top: 28px;
+      }
+
+      section {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+
+      code {
+        padding: 2px 5px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .meta {
+        color: #52525b;
+      }
+
+      .badge {
+        display: inline-block;
+        margin-right: 8px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #134e4a;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .warn {
+        border-color: #fde68a;
+        background: #fffbeb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OCI API 배포 및 GitHub Pages 연결 설계</h1>
+      <p class="meta">
+        목표는 현재 로컬/정적 앱을 유지하면서, 실제 OCI API와 PostgreSQL schema를 연결해 로그인과 서버 동기화를 공개 환경에서 동작시키는 것입니다.
+      </p>
+
+      <h2>현재 상태</h2>
+      <section>
+        <ul>
+          <li>프론트엔드는 <code>apps/web</code> Next static export이며 GitHub Pages에 배포됩니다.</li>
+          <li>백엔드는 <code>apps/api</code> Fastify API이며 Dockerfile과 production Compose 파일이 있습니다.</li>
+          <li>DB는 OCI PostgreSQL 인스턴스의 <code>gamja_apps_dev</code> 안에 서비스 schema <code>lcm</code>, 테스트 schema <code>lcm_test</code>가 준비되어 있습니다.</li>
+          <li>DB role과 실제 접속 정보는 중앙 credentials sheet에 저장되어 있으며, repo에는 커밋하지 않습니다.</li>
+          <li>GitHub Pages 프론트는 <code>NEXT_PUBLIC_API_BASE_URL</code>이 설정되면 서버 기능을 사용하고, 없으면 localStorage 모드로 남습니다.</li>
+        </ul>
+      </section>
+
+      <h2>접근안</h2>
+      <section>
+        <p><strong><span class="badge">추천</span>OCI VM API + 기존 Pages 유지</strong></p>
+        <ul>
+          <li>API만 OCI VM에 Docker Compose로 올립니다.</li>
+          <li>프론트는 GitHub Pages를 유지하고 빌드 시 API base URL만 주입합니다.</li>
+          <li>가장 적은 변경으로 로그인, 동기화, 공유 기능을 실제 서비스처럼 검증할 수 있습니다.</li>
+        </ul>
+
+        <p><strong>프론트와 API를 모두 OCI로 이전</strong></p>
+        <ul>
+          <li>origin과 CORS가 단순해지지만, Pages로 이미 잘 동작하는 정적 배포 장점을 잃습니다.</li>
+          <li>현재 단계에서는 운영 복잡도만 늘어납니다.</li>
+        </ul>
+
+        <p><strong>서버리스 또는 외부 플랫폼 이전</strong></p>
+        <ul>
+          <li>장기적으로는 운영 부담을 줄일 수 있지만, 이미 OCI DB와 VM 접근 경로를 준비한 현재 흐름과 맞지 않습니다.</li>
+          <li>지금은 실제 서비스 검증보다 플랫폼 이전 작업이 커집니다.</li>
+        </ul>
+      </section>
+
+      <h2>선택 설계</h2>
+      <section>
+        <p>
+          1차 서비스화는 <strong>OCI VM에 API 컨테이너를 배포하고 GitHub Pages가 해당 API를 바라보는 구조</strong>로 진행합니다.
+          프론트의 정적 배포 모델은 유지하고, 서버 기능은 API base URL이 있을 때만 활성화합니다.
+        </p>
+        <pre><code>Browser
+  -> https://sanghyun-io.github.io/living-cost-manager/
+  -> https://API_PUBLIC_ORIGIN
+       -> OCI reverse proxy
+       -> living-cost-manager API container
+       -> OCI PostgreSQL gamja_apps_dev, schema=lcm</code></pre>
+      </section>
+
+      <h2>배포 구성</h2>
+      <section>
+        <ul>
+          <li>API 서버는 OCI VM에서 Docker Compose로 실행합니다.</li>
+          <li>Compose의 <code>db</code> 서비스는 운영 연결에서는 사용하지 않고, API가 기존 OCI PostgreSQL 인스턴스의 <code>lcm</code> schema를 사용합니다.</li>
+          <li>컨테이너 시작 전 <code>prisma migrate deploy</code>를 실행합니다.</li>
+          <li>API 공개는 직접 포트 노출이 아니라 reverse proxy 뒤에 둡니다.</li>
+          <li>HTTPS가 준비되기 전에는 로그인/동기화 기능을 공개 Pages에 연결하지 않습니다.</li>
+        </ul>
+      </section>
+
+      <h2>환경 변수와 비밀값</h2>
+      <section class="warn">
+        <p>비밀값은 Git, README, GitHub Actions 로그, 채팅 출력에 남기지 않습니다.</p>
+        <ul>
+          <li><code>DATABASE_URL</code>: 중앙 credentials sheet의 값을 OCI VM 환경 파일에만 저장합니다.</li>
+          <li><code>JWT_SECRET</code>: 새로 생성해 OCI VM 환경 파일에만 저장합니다.</li>
+          <li><code>CORS_ORIGIN</code>: <code>https://sanghyun-io.github.io</code></li>
+          <li><code>NEXT_PUBLIC_API_BASE_URL</code>: GitHub Pages workflow variable 또는 secret으로 설정합니다. 이 값은 public URL이므로 credential은 아니지만, 배포 환경 설정으로 관리합니다.</li>
+        </ul>
+      </section>
+
+      <h2>DB 마이그레이션</h2>
+      <section>
+        <ol>
+          <li>OCI VM에서 API 이미지 또는 repo 작업 디렉터리를 준비합니다.</li>
+          <li><code>DATABASE_URL</code>이 <code>schema=lcm</code>을 가리키는지 확인합니다.</li>
+          <li><code>prisma migrate deploy</code>를 실행합니다.</li>
+          <li>API health check와 실제 auth/register smoke test를 실행합니다.</li>
+        </ol>
+        <p>
+          테스트 schema <code>lcm_test</code>는 API 테스트 전용입니다. 운영 배포 migration이나 수동 smoke test에는 사용하지 않습니다.
+        </p>
+      </section>
+
+      <h2>Pages 연결</h2>
+      <section>
+        <ul>
+          <li>GitHub Pages workflow에 <code>NEXT_PUBLIC_API_BASE_URL</code>을 추가합니다.</li>
+          <li>배포된 정적 앱에서 회원가입, 로그인, 워크스페이스 조회, snapshot 업로드/다운로드를 확인합니다.</li>
+          <li>API URL이 없거나 API 호출이 실패하면 기존 localStorage 모드를 계속 사용할 수 있어야 합니다.</li>
+        </ul>
+      </section>
+
+      <h2>검증</h2>
+      <section>
+        <ul>
+          <li><code>pnpm -r --if-present build</code></li>
+          <li><code>pnpm test</code> 또는 DB URL이 필요한 API 테스트를 포함한 equivalent command</li>
+          <li>API 컨테이너 <code>/health</code> 응답 확인</li>
+          <li>OCI PostgreSQL <code>lcm</code> schema에 migration table과 앱 테이블이 생성되는지 확인</li>
+          <li>GitHub Pages 배포 완료 후 실제 URL에서 앱 로딩 확인</li>
+          <li>브라우저에서 회원가입/로그인 후 snapshot sync 수동 확인</li>
+        </ul>
+      </section>
+
+      <h2>롤백</h2>
+      <section>
+        <ul>
+          <li>프론트 롤백: Pages workflow의 <code>NEXT_PUBLIC_API_BASE_URL</code>을 제거하거나 이전 커밋으로 되돌리면 localStorage 모드로 돌아갑니다.</li>
+          <li>API 롤백: OCI Compose에서 이전 이미지 또는 이전 git commit으로 재배포합니다.</li>
+          <li>DB 롤백: Prisma migration은 되돌리기보다, 현재 단계에서는 새 schema이므로 필요한 경우 <code>lcm</code> schema를 백업 후 재생성하는 방식을 사용합니다.</li>
+        </ul>
+      </section>
+
+      <h2>명시적 제외 범위</h2>
+      <section>
+        <ul>
+          <li>생활비 기능 추가 개발</li>
+          <li>초대/멤버 관리 UI 개선</li>
+          <li>분석 리포트</li>
+          <li>카드/은행 거래 연동</li>
+          <li>OCI 인프라 전체 IaC 전환</li>
+        </ul>
+      </section>
+
+      <h2>Self Review</h2>
+      <section>
+        <ul>
+          <li>실제 서비스화 목표와 직접 관련 없는 기능 고도화는 제외했습니다.</li>
+          <li>비밀값 저장 위치와 출력 금지 원칙을 명확히 했습니다.</li>
+          <li>기존 Pages 정적 배포와 localStorage fallback을 유지합니다.</li>
+          <li>운영 schema <code>lcm</code>과 테스트 schema <code>lcm_test</code>를 혼동하지 않도록 명시했습니다.</li>
+          <li>HTTPS 전 공개 연결 금지와 롤백 경로를 포함했습니다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
