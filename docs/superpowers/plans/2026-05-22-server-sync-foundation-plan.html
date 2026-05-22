@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>서버 동기화 기반 구현 계획</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(1080px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e4e4e7;
+        padding-top: 28px;
+      }
+
+      h3 {
+        margin-top: 28px;
+      }
+
+      section {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+
+      code {
+        padding: 2px 5px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      ul {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .meta {
+        color: #52525b;
+      }
+
+      .task {
+        display: inline-block;
+        margin-bottom: 8px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #134e4a;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .checklist li {
+        list-style: none;
+      }
+
+      .checklist li::before {
+        content: "☐";
+        color: #0f766e;
+        margin-right: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>서버 동기화 기반 구현 계획</h1>
+      <p class="meta">
+        For agentic workers: REQUIRED SUB-SKILL: Use <code>superpowers:subagent-driven-development</code>
+        or <code>superpowers:executing-plans</code> to implement this plan task-by-task.
+      </p>
+
+      <section>
+        <p><strong>Goal:</strong> GitHub Pages 프론트는 유지하면서 Fastify + PostgreSQL 백엔드를 추가하고, 계정 기반 서버 동기화/백업을 1차 완성한다.</p>
+        <p><strong>Architecture:</strong> 현재 단일 Next 앱을 <code>apps/web</code>으로 옮기고, <code>apps/api</code>와 <code>packages/shared</code>를 추가한다. 공유 기능은 <code>WorkspaceMember</code>와 role 모델까지만 기반을 만들고, 초대/멤버 관리 UI는 다음 계획으로 분리한다.</p>
+        <p><strong>Tech Stack:</strong> Next static export, Fastify, TypeScript, Zod, Prisma, PostgreSQL, Docker Compose, Vitest.</p>
+      </section>
+
+      <h2>범위 결정</h2>
+      <section>
+        <p>이번 계획은 설계의 1차 목표인 <strong>계정 기반 동기화/백업</strong>을 구현합니다.</p>
+        <ul>
+          <li>포함: 모노레포 전환, shared DTO/Zod, PostgreSQL Prisma schema, auth, 개인 workspace, snapshot sync, 프론트 sync UI, Docker Compose.</li>
+          <li>기반만 포함: <code>WorkspaceMember</code>와 <code>owner/editor/viewer</code> role.</li>
+          <li>제외: 가족 초대 API/UI, 실제 지출 기록, 카드/은행 거래 import.</li>
+        </ul>
+      </section>
+
+      <h2>파일 구조</h2>
+      <section>
+        <pre><code>living-cost-manager/
+  apps/
+    web/
+      app/
+      public/
+      tests/
+      package.json
+      next.config.mjs
+      tsconfig.json
+    api/
+      src/
+        app.ts
+        server.ts
+        env.ts
+        prisma.ts
+        plugins/auth.ts
+        routes/auth.ts
+        routes/workspaces.ts
+        routes/snapshot.ts
+      tests/
+        auth.test.ts
+        snapshot.test.ts
+      package.json
+      tsconfig.json
+      Dockerfile
+  packages/
+    shared/
+      src/
+        index.ts
+        budget.ts
+        auth.ts
+        workspace.ts
+        snapshot.ts
+      package.json
+      tsconfig.json
+  prisma/
+    schema.prisma
+  docker-compose.dev.yml
+  docker-compose.prod.yml
+  package.json
+  pnpm-workspace.yaml</code></pre>
+      </section>
+
+      <h2>Task 1: 모노레포 전환</h2>
+      <section>
+        <span class="task">structure</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Move: <code>app/</code>, <code>public/</code>, <code>tests/</code>, <code>next.config.mjs</code>, <code>next-env.d.ts</code>, <code>tsconfig.json</code> to <code>apps/web/</code></li>
+          <li>Modify: <code>package.json</code>, <code>pnpm-workspace.yaml</code>, <code>.github/workflows/pages.yml</code></li>
+          <li>Create: <code>apps/web/package.json</code>, <code>apps/web/tsconfig.json</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> 현재 테스트를 기준점으로 실행한다.</li>
+        </ul>
+        <pre><code>pnpm test
+# Expected: 18 passed</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> 파일을 이동한다.</li>
+        </ul>
+        <pre><code>New-Item -ItemType Directory -Force -Path apps/web | Out-Null
+git mv app apps/web/app
+git mv public apps/web/public
+git mv tests apps/web/tests
+git mv next.config.mjs apps/web/next.config.mjs
+git mv next-env.d.ts apps/web/next-env.d.ts
+git mv tsconfig.json apps/web/tsconfig.json</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> root <code>package.json</code>을 workspace orchestrator로 바꾼다.</li>
+        </ul>
+        <pre><code>{
+  "name": "living-cost-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @living-cost-manager/web dev",
+    "build": "pnpm --filter @living-cost-manager/web build",
+    "start": "pnpm --filter @living-cost-manager/web start",
+    "test": "pnpm -r test",
+    "test:web": "pnpm --filter @living-cost-manager/web test",
+    "test:api": "pnpm --filter @living-cost-manager/api test",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db": "prisma studio"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "prisma": "^6.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  },
+  "packageManager": "pnpm@11.1.3"
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> <code>apps/web/package.json</code>을 만든다.</li>
+        </ul>
+        <pre><code>{
+  "name": "@living-cost-manager/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "next": "^16.0.7",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.7",
+    "vitest": "^4.0.14"
+  }
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 5:</strong> <code>pnpm-workspace.yaml</code>에 workspace 범위를 명시한다.</li>
+        </ul>
+        <pre><code>packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
+  sharp: true
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+  - sharp</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 6:</strong> GitHub Pages workflow의 working directory를 <code>apps/web</code>로 조정한다.</li>
+        </ul>
+        <pre><code>- name: Run tests
+  run: pnpm --filter @living-cost-manager/web test
+
+- name: Build static site
+  env:
+    GITHUB_PAGES: "true"
+  run: pnpm --filter @living-cost-manager/web build
+
+- name: Disable Jekyll
+  run: touch apps/web/out/.nojekyll
+
+- name: Upload artifact
+  uses: actions/upload-pages-artifact@v3
+  with:
+    path: apps/web/out</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 7:</strong> 검증 후 커밋한다.</li>
+        </ul>
+        <pre><code>pnpm install
+pnpm test:web
+$env:GITHUB_PAGES='true'; pnpm --filter @living-cost-manager/web build
+git add .
+git commit -m "chore: move web app into monorepo"</code></pre>
+      </section>
+
+      <h2>Task 2: shared DTO와 Zod 계약 추가</h2>
+      <section>
+        <span class="task">shared</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>packages/shared/package.json</code>, <code>packages/shared/tsconfig.json</code></li>
+          <li>Create: <code>packages/shared/src/budget.ts</code>, <code>packages/shared/src/auth.ts</code>, <code>packages/shared/src/workspace.ts</code>, <code>packages/shared/src/snapshot.ts</code>, <code>packages/shared/src/index.ts</code></li>
+          <li>Create: <code>packages/shared/src/shared.test.ts</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> failing test를 작성한다.</li>
+        </ul>
+        <pre><code>import { describe, expect, test } from "vitest";
+import { fixedCostDtoSchema, workspaceSnapshotSchema } from "./index";
+
+describe("shared contracts", () =&gt; {
+  test("accepts decimal period fixed costs", () =&gt; {
+    const parsed = fixedCostDtoSchema.parse({
+      id: "cost_1",
+      workspaceId: "ws_1",
+      name: "고양이 모래",
+      categoryId: "other",
+      paymentMethodId: "debit-card",
+      paymentOptionId: "",
+      amount: 45000,
+      periodMonths: 2.5,
+      billingDay: 1
+    });
+
+    expect(parsed.periodMonths).toBe(2.5);
+  });
+
+  test("accepts a complete workspace snapshot", () =&gt; {
+    const parsed = workspaceSnapshotSchema.parse({
+      workspaceId: "ws_1",
+      monthlyIncome: 3000000,
+      categories: [{ id: "other", workspaceId: "ws_1", label: "기타" }],
+      cards: [],
+      fixedCosts: []
+    });
+
+    expect(parsed.workspaceId).toBe("ws_1");
+  });
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> 실행해서 package가 없어 실패하는 것을 확인한다.</li>
+        </ul>
+        <pre><code>pnpm --filter @living-cost-manager/shared test
+# Expected: fails before package/scripts exist</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> <code>packages/shared/package.json</code>을 만든다.</li>
+        </ul>
+        <pre><code>{
+  "name": "@living-cost-manager/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.14",
+    "typescript": "^5.9.3"
+  }
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> <code>packages/shared/src/budget.ts</code>를 만든다.</li>
+        </ul>
+        <pre><code>import { z } from "zod";
+
+export const paymentMethodIdSchema = z.enum(["cash", "bank-transfer", "debit-card", "credit-card", "other"]);
+export type PaymentMethodId = z.infer&lt;typeof paymentMethodIdSchema&gt;;
+
+export const fixedCostDtoSchema = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  name: z.string().min(1),
+  categoryId: z.string().min(1),
+  paymentMethodId: paymentMethodIdSchema,
+  paymentOptionId: z.string(),
+  amount: z.number().int().min(0),
+  periodMonths: z.number().min(1).max(120).transform((value) =&gt; Math.round(value * 10) / 10),
+  billingDay: z.number().int().min(1).max(31)
+});
+export type FixedCostDto = z.infer&lt;typeof fixedCostDtoSchema&gt;;
+
+export const categoryDtoSchema = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  label: z.string().min(1)
+});
+export type CategoryDto = z.infer&lt;typeof categoryDtoSchema&gt;;
+
+export const paymentCardDtoSchema = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  label: z.string().min(1),
+  billingDay: z.number().int().min(1).max(31)
+});
+export type PaymentCardDto = z.infer&lt;typeof paymentCardDtoSchema&gt;;</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 5:</strong> auth/workspace/snapshot schemas를 추가한다.</li>
+        </ul>
+        <pre><code>// packages/shared/src/auth.ts
+import { z } from "zod";
+
+export const registerRequestSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+  name: z.string().min(1).max(80)
+});
+export const loginRequestSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8)
+});
+export const userDtoSchema = z.object({
+  id: z.string(),
+  email: z.email(),
+  name: z.string()
+});
+export type UserDto = z.infer&lt;typeof userDtoSchema&gt;;
+
+// packages/shared/src/workspace.ts
+import { z } from "zod";
+
+export const workspaceRoleSchema = z.enum(["owner", "editor", "viewer"]);
+export type WorkspaceRole = z.infer&lt;typeof workspaceRoleSchema&gt;;
+export const workspaceDtoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  role: workspaceRoleSchema
+});
+
+// packages/shared/src/snapshot.ts
+import { z } from "zod";
+import { categoryDtoSchema, fixedCostDtoSchema, paymentCardDtoSchema } from "./budget";
+
+export const workspaceSnapshotSchema = z.object({
+  workspaceId: z.string(),
+  monthlyIncome: z.number().int().min(0),
+  categories: z.array(categoryDtoSchema),
+  cards: z.array(paymentCardDtoSchema),
+  fixedCosts: z.array(fixedCostDtoSchema)
+});
+export type WorkspaceSnapshot = z.infer&lt;typeof workspaceSnapshotSchema&gt;;</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 6:</strong> barrel export를 추가하고 검증 후 커밋한다.</li>
+        </ul>
+        <pre><code>// packages/shared/src/index.ts
+export * from "./auth";
+export * from "./budget";
+export * from "./workspace";
+export * from "./snapshot";
+
+pnpm --filter @living-cost-manager/shared test
+pnpm test
+git add packages/shared package.json pnpm-lock.yaml
+git commit -m "feat: add shared api contracts"</code></pre>
+      </section>
+
+      <h2>Task 3: PostgreSQL Prisma schema</h2>
+      <section>
+        <span class="task">database</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Modify: <code>prisma/schema.prisma</code></li>
+          <li>Create: <code>docker-compose.dev.yml</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> schema를 PostgreSQL과 workspace 모델로 교체한다.</li>
+        </ul>
+        <pre><code>datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String
+  passwordHash String
+  memberships  WorkspaceMember[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model Workspace {
+  id            String            @id @default(cuid())
+  name          String
+  monthlyIncome Int               @default(0)
+  members       WorkspaceMember[]
+  categories    Category[]
+  cards         PaymentCard[]
+  fixedCosts    FixedCost[]
+  backups       BackupSnapshot[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+
+  @@unique([workspaceId, userId])
+}
+
+enum WorkspaceRole {
+  owner
+  editor
+  viewer
+}
+
+model Category {
+  id          String    @id
+  workspaceId String
+  label       String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, label])
+}
+
+model PaymentCard {
+  id          String    @id
+  workspaceId String
+  label       String
+  billingDay  Int
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model FixedCost {
+  id              String    @id
+  workspaceId     String
+  name            String
+  categoryId      String
+  paymentMethodId String
+  paymentOptionId String
+  amount          Int
+  periodMonths    Float     @default(1)
+  billingDay      Int
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model BackupSnapshot {
+  id          String    @id @default(cuid())
+  workspaceId String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> dev Postgres compose 파일을 만든다.</li>
+        </ul>
+        <pre><code>services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: living_cost
+      POSTGRES_PASSWORD: living_cost_dev
+      POSTGRES_DB: living_cost_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - living_cost_pgdata:/var/lib/postgresql/data
+
+volumes:
+  living_cost_pgdata:</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> DB와 Prisma generate를 검증한다.</li>
+        </ul>
+        <pre><code>docker compose -f docker-compose.dev.yml up -d db
+$env:DATABASE_URL='postgresql://living_cost:living_cost_dev@localhost:5432/living_cost_manager'
+pnpm prisma migrate dev --name init_server_sync
+pnpm prisma generate
+git add prisma docker-compose.dev.yml package.json pnpm-lock.yaml
+git commit -m "feat: add postgres workspace schema"</code></pre>
+      </section>
+
+      <h2>Task 4: Fastify API scaffold</h2>
+      <section>
+        <span class="task">api</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>apps/api/package.json</code>, <code>apps/api/tsconfig.json</code>, <code>apps/api/src/app.ts</code>, <code>apps/api/src/server.ts</code>, <code>apps/api/src/env.ts</code>, <code>apps/api/src/prisma.ts</code></li>
+          <li>Create: <code>apps/api/tests/health.test.ts</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> health test를 먼저 작성한다.</li>
+        </ul>
+        <pre><code>import { describe, expect, test } from "vitest";
+import { buildApp } from "../src/app";
+
+describe("health", () =&gt; {
+  test("returns ok", async () =&gt; {
+    const app = await buildApp();
+    const response = await app.inject({ method: "GET", url: "/health" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+  });
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> API package와 dependencies를 추가한다.</li>
+        </ul>
+        <pre><code>pnpm add --filter @living-cost-manager/api fastify @fastify/cors @fastify/jwt @fastify/sensible argon2 zod @prisma/client @living-cost-manager/shared
+pnpm add -D --filter @living-cost-manager/api tsx vitest typescript @types/node</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> <code>apps/api/src/app.ts</code>를 만든다.</li>
+        </ul>
+        <pre><code>import cors from "@fastify/cors";
+import sensible from "@fastify/sensible";
+import Fastify from "fastify";
+import { env } from "./env";
+
+export async function buildApp() {
+  const app = Fastify({ logger: env.NODE_ENV !== "test" });
+
+  await app.register(sensible);
+  await app.register(cors, {
+    origin: env.CORS_ORIGIN,
+    credentials: true
+  });
+
+  app.get("/health", async () =&gt; ({ ok: true }));
+
+  return app;
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> env와 server entrypoint를 만든다.</li>
+        </ul>
+        <pre><code>// apps/api/src/env.ts
+import { z } from "zod";
+
+const envSchema = z.object({
+  NODE_ENV: z.string().default("development"),
+  PORT: z.coerce.number().default(4000),
+  DATABASE_URL: z.string().min(1),
+  JWT_SECRET: z.string().min(32),
+  CORS_ORIGIN: z.string().url().default("https://sanghyun-io.github.io")
+});
+
+export const env = envSchema.parse(process.env);
+
+// apps/api/src/server.ts
+import { buildApp } from "./app";
+import { env } from "./env";
+
+const app = await buildApp();
+await app.listen({ host: "0.0.0.0", port: env.PORT });</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 5:</strong> 테스트를 통과시킨 뒤 커밋한다.</li>
+        </ul>
+        <pre><code>$env:NODE_ENV='test'
+$env:DATABASE_URL='postgresql://living_cost:living_cost_dev@localhost:5432/living_cost_manager'
+$env:JWT_SECRET='test-secret-with-at-least-thirty-two-chars'
+pnpm --filter @living-cost-manager/api test
+git add apps/api package.json pnpm-lock.yaml
+git commit -m "feat: scaffold fastify api"</code></pre>
+      </section>
+
+      <h2>Task 5: Auth와 개인 workspace</h2>
+      <section>
+        <span class="task">auth</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>apps/api/src/routes/auth.ts</code>, <code>apps/api/src/plugins/auth.ts</code></li>
+          <li>Modify: <code>apps/api/src/app.ts</code></li>
+          <li>Test: <code>apps/api/tests/auth.test.ts</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> register/login/me behavior test를 작성한다.</li>
+        </ul>
+        <pre><code>test("registers a user and creates a personal workspace", async () =&gt; {
+  const app = await buildApp();
+  const register = await app.inject({
+    method: "POST",
+    url: "/auth/register",
+    payload: { email: "mina@example.com", password: "password123", name: "미나" }
+  });
+
+  expect(register.statusCode).toBe(201);
+  const body = register.json();
+  expect(body.user.email).toBe("mina@example.com");
+  expect(body.workspace.name).toBe("미나의 생활비");
+  expect(body.token).toEqual(expect.any(String));
+
+  const me = await app.inject({
+    method: "GET",
+    url: "/me",
+    headers: { authorization: `Bearer ${body.token}` }
+  });
+  expect(me.statusCode).toBe(200);
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> JWT plugin을 만든다.</li>
+        </ul>
+        <pre><code>import fp from "fastify-plugin";
+import jwt from "@fastify/jwt";
+import { env } from "../env";
+
+export const authPlugin = fp(async (app) =&gt; {
+  await app.register(jwt, { secret: env.JWT_SECRET });
+
+  app.decorate("authenticate", async (request) =&gt; {
+    await request.jwtVerify();
+  });
+});
+
+declare module "fastify" {
+  interface FastifyInstance {
+    authenticate: (request: import("fastify").FastifyRequest) =&gt; Promise&lt;void&gt;;
+  }
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> auth routes를 구현한다.</li>
+        </ul>
+        <pre><code>import argon2 from "argon2";
+import type { FastifyInstance } from "fastify";
+import { loginRequestSchema, registerRequestSchema } from "@living-cost-manager/shared";
+import { prisma } from "../prisma";
+
+export async function authRoutes(app: FastifyInstance) {
+  app.post("/auth/register", async (request, reply) =&gt; {
+    const body = registerRequestSchema.parse(request.body);
+    const passwordHash = await argon2.hash(body.password);
+    const result = await prisma.$transaction(async (tx) =&gt; {
+      const user = await tx.user.create({ data: { email: body.email, name: body.name, passwordHash } });
+      const workspace = await tx.workspace.create({ data: { name: `${body.name}의 생활비`, monthlyIncome: 0 } });
+      await tx.workspaceMember.create({ data: { userId: user.id, workspaceId: workspace.id, role: "owner" } });
+      return { user, workspace };
+    });
+    const token = app.jwt.sign({ sub: result.user.id });
+    return reply.code(201).send({
+      token,
+      user: { id: result.user.id, email: result.user.email, name: result.user.name },
+      workspace: { id: result.workspace.id, name: result.workspace.name, role: "owner" }
+    });
+  });
+
+  app.post("/auth/login", async (request, reply) =&gt; {
+    const body = loginRequestSchema.parse(request.body);
+    const user = await prisma.user.findUnique({ where: { email: body.email } });
+    if (!user || !(await argon2.verify(user.passwordHash, body.password))) {
+      throw app.httpErrors.unauthorized("Invalid credentials");
+    }
+    return { token: app.jwt.sign({ sub: user.id }), user: { id: user.id, email: user.email, name: user.name } };
+  });
+
+  app.get("/me", { preHandler: app.authenticate }, async (request) =&gt; {
+    const userId = (request.user as { sub: string }).sub;
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return { user: { id: user.id, email: user.email, name: user.name } };
+  });
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> app에 plugin/routes를 등록하고 테스트 후 커밋한다.</li>
+        </ul>
+        <pre><code>await app.register(authPlugin);
+await app.register(authRoutes);
+
+pnpm --filter @living-cost-manager/api test
+git add apps/api
+git commit -m "feat: add account auth"</code></pre>
+      </section>
+
+      <h2>Task 6: workspace snapshot sync API</h2>
+      <section>
+        <span class="task">sync api</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>apps/api/src/routes/snapshot.ts</code>, <code>apps/api/src/services/snapshot.ts</code></li>
+          <li>Create: <code>apps/api/tests/snapshot.test.ts</code></li>
+          <li>Modify: <code>apps/api/src/app.ts</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> snapshot PUT/GET test를 작성한다.</li>
+        </ul>
+        <pre><code>test("stores and reads a workspace snapshot for a member", async () =&gt; {
+  const app = await buildApp();
+  const auth = await registerTestUser(app, "sync@example.com");
+  const snapshot = {
+    workspaceId: auth.workspace.id,
+    monthlyIncome: 3000000,
+    categories: [{ id: "other", workspaceId: auth.workspace.id, label: "기타" }],
+    cards: [],
+    fixedCosts: [{
+      id: "cost_1",
+      workspaceId: auth.workspace.id,
+      name: "고양이 모래",
+      categoryId: "other",
+      paymentMethodId: "debit-card",
+      paymentOptionId: "",
+      amount: 45000,
+      periodMonths: 2.5,
+      billingDay: 1
+    }]
+  };
+
+  const put = await app.inject({
+    method: "PUT",
+    url: `/workspaces/${auth.workspace.id}/snapshot`,
+    headers: { authorization: `Bearer ${auth.token}` },
+    payload: snapshot
+  });
+  expect(put.statusCode).toBe(200);
+
+  const get = await app.inject({
+    method: "GET",
+    url: `/workspaces/${auth.workspace.id}/snapshot`,
+    headers: { authorization: `Bearer ${auth.token}` }
+  });
+  expect(get.json().fixedCosts[0].periodMonths).toBe(2.5);
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> 멤버십 검증 helper를 구현한다.</li>
+        </ul>
+        <pre><code>export async function requireWorkspaceRole(userId: string, workspaceId: string, allowed: Array&lt;"owner" | "editor" | "viewer"&gt;) {
+  const member = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId } }
+  });
+  if (!member || !allowed.includes(member.role)) {
+    throw new Error("FORBIDDEN");
+  }
+  return member;
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> snapshot replace service를 구현한다.</li>
+        </ul>
+        <pre><code>export async function replaceWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
+  await prisma.$transaction(async (tx) =&gt; {
+    await tx.workspace.update({
+      where: { id: snapshot.workspaceId },
+      data: { monthlyIncome: snapshot.monthlyIncome }
+    });
+    await tx.fixedCost.deleteMany({ where: { workspaceId: snapshot.workspaceId } });
+    await tx.paymentCard.deleteMany({ where: { workspaceId: snapshot.workspaceId } });
+    await tx.category.deleteMany({ where: { workspaceId: snapshot.workspaceId } });
+    await tx.category.createMany({ data: snapshot.categories });
+    await tx.paymentCard.createMany({ data: snapshot.cards });
+    await tx.fixedCost.createMany({ data: snapshot.fixedCosts });
+    await tx.backupSnapshot.create({ data: { workspaceId: snapshot.workspaceId, payload: snapshot } });
+  });
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> routes에서 owner/editor는 PUT, owner/editor/viewer는 GET 가능하게 한다.</li>
+          <li><strong>Step 5:</strong> 테스트 후 커밋한다.</li>
+        </ul>
+        <pre><code>pnpm --filter @living-cost-manager/api test
+git add apps/api
+git commit -m "feat: add workspace snapshot sync api"</code></pre>
+      </section>
+
+      <h2>Task 7: web sync client와 UI</h2>
+      <section>
+        <span class="task">web sync</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>apps/web/app/lib/serverApi.ts</code>, <code>apps/web/app/lib/snapshot.ts</code></li>
+          <li>Modify: <code>apps/web/app/page.tsx</code>, <code>apps/web/app/globals.css</code>, <code>apps/web/package.json</code></li>
+          <li>Test: <code>apps/web/tests/smoke.test.ts</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> snapshot mapper tests를 작성한다.</li>
+        </ul>
+        <pre><code>test("maps local budget data to a server snapshot", () =&gt; {
+  const snapshot = buildWorkspaceSnapshot({
+    workspaceId: "ws_1",
+    monthlyIncome: 3000000,
+    categories: DEFAULT_CATEGORIES,
+    cards: [],
+    fixedCosts: [createFixedCost({ id: "cost_1", name: "모래", categoryId: "other", amount: 45000, periodMonths: 2.5, billingDay: 1 })]
+  });
+
+  expect(snapshot.fixedCosts[0]).toMatchObject({ workspaceId: "ws_1", periodMonths: 2.5 });
+});</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> web package가 shared package를 의존하도록 추가한다.</li>
+        </ul>
+        <pre><code>pnpm add --filter @living-cost-manager/web @living-cost-manager/shared zod</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> API client를 만든다.</li>
+        </ul>
+        <pre><code>const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
+export async function apiRequest&lt;T&gt;(path: string, options: RequestInit &amp; { token?: string } = {}): Promise&lt;T&gt; {
+  const response = await fetch(apiBaseUrl + path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      ...options.headers
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`API ${response.status}`);
+  }
+  return response.json() as Promise&lt;T&gt;;
+}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> page UI에 서버 로그인 영역과 sync 상태를 추가한다.</li>
+          <li><strong>Step 5:</strong> local data가 있고 서버 snapshot이 비어 있을 때 "이 브라우저 데이터 업로드" 버튼을 표시한다.</li>
+          <li><strong>Step 6:</strong> sync 실패 시 localStorage 저장은 유지하고 "서버 동기화 실패" 경고를 표시한다.</li>
+          <li><strong>Step 7:</strong> local-only mode가 기존처럼 동작하는지 테스트 후 커밋한다.</li>
+        </ul>
+        <pre><code>pnpm --filter @living-cost-manager/web test
+$env:GITHUB_PAGES='true'; pnpm --filter @living-cost-manager/web build
+git add apps/web package.json pnpm-lock.yaml
+git commit -m "feat: add web server sync client"</code></pre>
+      </section>
+
+      <h2>Task 8: Docker와 OCI 배포 준비</h2>
+      <section>
+        <span class="task">deploy</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>apps/api/Dockerfile</code>, <code>docker-compose.prod.yml</code>, <code>apps/api/.env.example</code></li>
+          <li>Modify: <code>README.md</code></li>
+        </ul>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> API Dockerfile을 만든다.</li>
+        </ul>
+        <pre><code>FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN corepack enable pnpm &amp;&amp; pnpm install --frozen-lockfile
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN corepack enable pnpm &amp;&amp; pnpm --filter @living-cost-manager/api build
+CMD ["pnpm", "--filter", "@living-cost-manager/api", "start"]</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> production compose를 만든다.</li>
+        </ul>
+        <pre><code>services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: https://sanghyun-io.github.io
+    ports:
+      - "4000:4000"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> README에 local dev와 OCI 배포 절차를 추가한다.</li>
+          <li><strong>Step 4:</strong> 빌드 검증 후 커밋한다.</li>
+        </ul>
+        <pre><code>docker compose -f docker-compose.dev.yml up -d db
+pnpm test
+docker compose -f docker-compose.prod.yml config
+git add apps/api/Dockerfile docker-compose.prod.yml README.md
+git commit -m "chore: add api docker deployment"</code></pre>
+      </section>
+
+      <h2>Task 9: 최종 검증과 GitHub Pages 유지</h2>
+      <section>
+        <span class="task">verification</span>
+        <ul class="checklist">
+          <li><strong>Step 1:</strong> 전체 테스트를 실행한다.</li>
+        </ul>
+        <pre><code>pnpm test
+# Expected: web, shared, api tests all pass</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 2:</strong> Pages build를 실행한다.</li>
+        </ul>
+        <pre><code>$env:GITHUB_PAGES='true'; pnpm --filter @living-cost-manager/web build
+# Expected: static export succeeds and apps/web/out exists</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 3:</strong> API health를 로컬에서 확인한다.</li>
+        </ul>
+        <pre><code>docker compose -f docker-compose.dev.yml up -d db
+$env:DATABASE_URL='postgresql://living_cost:living_cost_dev@localhost:5432/living_cost_manager'
+$env:JWT_SECRET='local-secret-with-at-least-thirty-two-chars'
+pnpm --filter @living-cost-manager/api dev
+Invoke-WebRequest http://localhost:4000/health -UseBasicParsing
+# Expected: 200 with {"ok":true}</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 4:</strong> 공개 전 secret scan을 실행한다.</li>
+        </ul>
+        <pre><code>rg -n --hidden -i "(api[_-]?key|secret|password|token|private[_-]?key|gh[pousr]_|github_pat_|sk-|-----BEGIN .*PRIVATE KEY-----)" -g "!node_modules/**" -g "!.git/**" -g "!.next/**" -g "!out/**"
+# Expected: only .env.example labels or GitHub Actions permission names, no real secret values</code></pre>
+        <ul class="checklist">
+          <li><strong>Step 5:</strong> push 후 GitHub Pages 배포를 확인한다.</li>
+        </ul>
+        <pre><code>git push origin main
+gh run watch --repo sanghyun-io/living-cost-manager --exit-status
+Invoke-WebRequest https://sanghyun-io.github.io/living-cost-manager/ -UseBasicParsing
+# Expected: 200 and title "생활비 고정비 관리자"</code></pre>
+      </section>
+
+      <h2>Self Review</h2>
+      <section>
+        <ul>
+          <li>스펙의 1차 목표인 계정 기반 동기화/백업은 Task 1-9에 포함되어 있습니다.</li>
+          <li>가족 공유는 DB와 role 기반 권한의 기반만 포함했고, 초대/멤버 관리 구현은 별도 계획으로 분리했습니다.</li>
+          <li>실제 지출 기록, 거래 import, OCR, 알림은 계획에 포함하지 않았습니다.</li>
+          <li>프론트는 GitHub Pages 유지가 전제이며, API만 OCI VM 배포 대상으로 둡니다.</li>
+          <li>Prisma 모델을 프론트에 직접 공유하지 않고 <code>packages/shared</code> DTO/Zod schema를 공유합니다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
