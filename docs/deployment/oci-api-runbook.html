@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Living Cost Manager OCI API 배포 Runbook</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(980px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.25;
+      }
+
+      section {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+
+      code {
+        padding: 2px 5px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .warn {
+        border-color: #fde68a;
+        background: #fffbeb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Living Cost Manager OCI API 배포 Runbook</h1>
+
+      <section class="warn">
+        <p>
+          이 문서는 절차만 기록합니다. 실제 <code>DATABASE_URL</code>, <code>JWT_SECRET</code>,
+          DB 비밀번호, 토큰, SSH key 값은 문서, Git commit, 터미널 출력, CI 로그에 남기지 않습니다.
+        </p>
+      </section>
+
+      <h2>대상</h2>
+      <section>
+        <ul>
+          <li>API VM: <code>sh-oracle-cloud-dev-1</code></li>
+          <li>API 작업 디렉터리: <code>/home/ubuntu/living-cost-manager</code></li>
+          <li>내부 API 포트: <code>127.0.0.1:4104</code></li>
+          <li>공개 API base URL: <code>https://api.gamja.top/living-cost-manager/v1</code></li>
+          <li>DB: OCI PostgreSQL <code>gamja_apps_dev</code>, Prisma schema <code>lcm</code></li>
+        </ul>
+      </section>
+
+      <h2>1. Repo 준비</h2>
+      <section>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "mkdir -p /home/ubuntu/living-cost-manager"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && git init"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && git remote remove origin 2>/dev/null || true"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && git remote add origin https://github.com/sanghyun-io/living-cost-manager.git"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && git fetch origin main && git checkout -B main origin/main"</code></pre>
+      </section>
+
+      <h2>2. 환경 파일 생성</h2>
+      <section>
+        <p>
+          중앙 credentials sheet에서 <code>living-cost-manager</code>의 <code>DATABASE_URL</code> 값을 가져옵니다.
+          값은 로컬 셸 변수 또는 무시된 임시 파일 안에서만 다룹니다.
+        </p>
+        <p>VM의 <code>.env.oci</code>에는 아래 key만 저장합니다.</p>
+        <pre><code>DATABASE_URL=&lt;central credentials sheet value&gt;
+JWT_SECRET=&lt;generated secret&gt;</code></pre>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "chmod 600 /home/ubuntu/living-cost-manager/.env.oci"</code></pre>
+      </section>
+
+      <h2>3. Build, migration, start</h2>
+      <section>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && docker compose -f docker-compose.oci.yml build api"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && docker compose -f docker-compose.oci.yml run --rm api ./node_modules/.bin/prisma migrate deploy"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager && docker compose -f docker-compose.oci.yml up -d api"</code></pre>
+      </section>
+
+      <h2>4. 내부 health 확인</h2>
+      <section>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "curl -fsS http://127.0.0.1:4104/living-cost-manager/v1/health"</code></pre>
+        <p>기대 결과:</p>
+        <pre><code>{"ok":true}</code></pre>
+      </section>
+
+      <h2>5. nginx gateway 설정</h2>
+      <section>
+        <p><code>/etc/nginx/sites-enabled/api-gateway</code>의 HTTPS server block에 location을 추가합니다.</p>
+        <pre><code># Living Cost Manager API (port 4104)
+location ^~ /living-cost-manager/v1/ {
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:4104;
+}</code></pre>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "sudo nginx -t"
+ssh sh-oracle-cloud-dev-1 "sudo systemctl reload nginx"</code></pre>
+      </section>
+
+      <h2>6. 공개 health 확인</h2>
+      <section>
+        <pre><code>Invoke-WebRequest https://api.gamja.top/living-cost-manager/v1/health -UseBasicParsing</code></pre>
+        <p>기대 결과: HTTP 200과 <code>{"ok":true}</code></p>
+      </section>
+
+      <h2>7. Pages 연결 확인</h2>
+      <section>
+        <ol>
+          <li>GitHub repository variable <code>NEXT_PUBLIC_API_BASE_URL</code>이 공개 API base URL인지 확인합니다.</li>
+          <li>Pages workflow가 성공했는지 확인합니다.</li>
+          <li><code>https://sanghyun-io.github.io/living-cost-manager/</code>에서 회원가입 또는 로그인을 수행합니다.</li>
+          <li>서버 session 생성, workspace 조회, snapshot 업로드/다운로드가 되는지 확인합니다.</li>
+        </ol>
+      </section>
+
+      <h2>Rollback</h2>
+      <section>
+        <ul>
+          <li>프론트 롤백: GitHub variable <code>NEXT_PUBLIC_API_BASE_URL</code> 제거 후 Pages를 재배포합니다.</li>
+          <li>API 롤백: VM에서 이전 git commit으로 checkout 후 Compose를 다시 실행합니다.</li>
+          <li>nginx 롤백: <code>/living-cost-manager/v1/</code> location을 제거하고 reload합니다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
