@@ -4,7 +4,9 @@ import type { PrismaClient } from "@prisma/client";
 import Fastify from "fastify";
 
 import { type Env, loadEnv } from "./env.js";
+import { authPlugin } from "./plugins/auth.js";
 import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
+import { authRoutes } from "./routes/auth.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -36,6 +38,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(cors, {
     origin: env.CORS_ORIGIN
   });
+  await app.register(authPlugin, {
+    secret: env.JWT_SECRET
+  });
+  await app.register(authRoutes);
 
   app.get("/health", async () => ({ ok: true }));
 
