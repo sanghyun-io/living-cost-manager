@@ -36,6 +36,11 @@ import {
   isWorkspaceSnapshotEmpty
 } from "../app/lib/snapshot";
 import {
+  getAccountSyncState,
+  getSyncStateView,
+  summarizeBudgetSnapshot
+} from "../app/lib/syncStatus";
+import {
   createPaymentCard,
   DEFAULT_CARDS,
   deletePaymentCard,
@@ -617,5 +622,130 @@ describe("server api client", () => {
     expect(isServerAuthFailure(new ServerApiError("Forbidden", 403))).toBe(true);
     expect(isServerAuthFailure(new ServerApiError("Server unavailable", 503))).toBe(false);
     expect(isServerAuthFailure(new TypeError("Failed to fetch"))).toBe(false);
+  });
+});
+
+describe("account sync UX", () => {
+  test("classifies local-only and signed-in sync states", () => {
+    expect(
+      getAccountSyncState({
+        hasServerApi: false,
+        hasSession: false,
+        hasWorkspace: false,
+        isBusy: false,
+        isSnapshotChecked: false,
+        hasServerSnapshot: false,
+        hasAuthFailure: false,
+        hasError: false
+      })
+    ).toBe("local-only");
+
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
+        hasSession: true,
+        hasWorkspace: true,
+        isBusy: false,
+        isSnapshotChecked: true,
+        hasServerSnapshot: false,
+        hasAuthFailure: false,
+        hasError: false
+      })
+    ).toBe("signed-in");
+  });
+
+  test("prioritizes busy, auth expired, failed, and decision states", () => {
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
+        hasSession: true,
+        hasWorkspace: true,
+        isBusy: true,
+        isSnapshotChecked: true,
+        hasServerSnapshot: true,
+        hasAuthFailure: false,
+        hasError: false
+      })
+    ).toBe("syncing");
+
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
+        hasSession: true,
+        hasWorkspace: true,
+        isBusy: false,
+        isSnapshotChecked: true,
+        hasServerSnapshot: true,
+        hasAuthFailure: true,
+        hasError: true
+      })
+    ).toBe("auth-expired");
+
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
+        hasSession: true,
+        hasWorkspace: true,
+        isBusy: false,
+        isSnapshotChecked: true,
+        hasServerSnapshot: true,
+        hasAuthFailure: false,
+        hasError: true
+      })
+    ).toBe("failed");
+
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
+        hasSession: true,
+        hasWorkspace: true,
+        isBusy: false,
+        isSnapshotChecked: true,
+        hasServerSnapshot: true,
+        hasAuthFailure: false,
+        hasError: false
+      })
+    ).toBe("needs-decision");
+  });
+
+  test("provides Korean labels and local-only warning copy", () => {
+    expect(getSyncStateView("local-only")).toMatchObject({
+      label: "로컬 전용",
+      tone: "warning"
+    });
+    expect(getSyncStateView("auth-expired").description).toContain("다시 로그인");
+  });
+
+  test("summarizes local and server budget snapshots for comparison", () => {
+    const local = summarizeBudgetSnapshot({
+      monthlyIncome: 3_000_000,
+      categories: DEFAULT_CATEGORIES,
+      cards: [createPaymentCard("생활비 카드", 15)],
+      fixedCosts: [
+        createFixedCost({
+          id: "rent",
+          name: "월세",
+          categoryId: "housing",
+          amount: 600_000,
+          billingDay: 25
+        }),
+        createFixedCost({
+          id: "litter",
+          name: "모래",
+          categoryId: "other",
+          amount: 45_000,
+          periodMonths: 2.5,
+          billingDay: 1
+        })
+      ]
+    });
+
+    expect(local).toEqual({
+      monthlyIncome: 3_000_000,
+      fixedCostCount: 2,
+      monthlyExpense: 618_000,
+      categoryCount: DEFAULT_CATEGORIES.length,
+      cardCount: 1
+    });
   });
 });
