@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Server Sync and Sharing Design</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(980px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.25;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e4e4e7;
+        padding-top: 28px;
+      }
+
+      section {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+
+      code {
+        padding: 2px 5px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .meta {
+        color: #52525b;
+      }
+
+      .priority {
+        display: inline-block;
+        margin-right: 8px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #134e4a;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Server Sync and Sharing Design</h1>
+      <p class="meta">
+        Add a backend to the living cost manager while keeping the current GitHub Pages frontend.
+      </p>
+
+      <h2>Goal</h2>
+      <section>
+        <p>
+          The first server-backed feature is account-based sync and backup. Family/workspace sharing comes next.
+          Actual one-off spending and full household accounting are explicitly out of scope for this design.
+        </p>
+      </section>
+
+      <h2>Priorities</h2>
+      <section>
+        <ol>
+          <li><span class="priority">1</span>Account-based sync and backup.</li>
+          <li><span class="priority">2</span>Workspace sharing for family or household management.</li>
+          <li><span class="priority">3</span>Actual spend tracking is deferred.</li>
+        </ol>
+      </section>
+
+      <h2>Architecture</h2>
+      <section>
+        <p>Use a monorepo:</p>
+        <pre><code>living-cost-manager/
+  apps/
+    web/
+    api/
+  packages/
+    shared/
+  prisma/
+    schema.prisma</code></pre>
+        <ul>
+          <li><code>apps/web</code>: existing Next static frontend deployed to GitHub Pages.</li>
+          <li><code>apps/api</code>: Fastify API server deployed to an OCI VM.</li>
+          <li><code>packages/shared</code>: shared Zod schemas, DTO types, enums, and API contracts.</li>
+          <li><code>prisma/schema.prisma</code>: PostgreSQL database model.</li>
+        </ul>
+        <p>
+          The frontend must not import Prisma models directly. It should only import DTOs and schemas from
+          <code>packages/shared</code>.
+        </p>
+      </section>
+
+      <h2>Technology Choices</h2>
+      <section>
+        <p><strong>Backend</strong></p>
+        <ul>
+          <li>Fastify</li>
+          <li>TypeScript</li>
+          <li>Zod for request and response validation</li>
+          <li>JWT authentication</li>
+          <li>Prisma ORM</li>
+          <li>PostgreSQL</li>
+          <li>Docker Compose on OCI VM</li>
+        </ul>
+        <p><strong>Frontend</strong></p>
+        <ul>
+          <li>Existing Next static export</li>
+          <li>GitHub Pages hosting</li>
+          <li>Existing localStorage data remains available as offline cache and migration source</li>
+        </ul>
+      </section>
+
+      <h2>Data Model</h2>
+      <section>
+        <p><strong>Core tables</strong></p>
+        <ul>
+          <li><code>User</code></li>
+          <li><code>Workspace</code></li>
+          <li><code>WorkspaceMember</code></li>
+          <li><code>Category</code></li>
+          <li><code>PaymentCard</code></li>
+          <li><code>FixedCost</code></li>
+          <li><code>BackupSnapshot</code></li>
+        </ul>
+        <p><strong>First release behavior</strong></p>
+        <ul>
+          <li>A user signs up or logs in.</li>
+          <li>A personal workspace is created automatically for that user.</li>
+          <li>Categories, cards, and fixed costs are saved under that workspace.</li>
+          <li>The app can sync all workspace budget data between the server and the current browser.</li>
+        </ul>
+        <p><strong>Later sharing behavior</strong></p>
+        <ul>
+          <li>A workspace owner can invite members.</li>
+          <li>Members can access the same workspace.</li>
+          <li>Roles are <code>owner</code>, <code>editor</code>, and <code>viewer</code>.</li>
+          <li><code>owner</code> can manage members and all budget data.</li>
+          <li><code>editor</code> can edit budget data but cannot manage members.</li>
+          <li><code>viewer</code> can read budget data only.</li>
+        </ul>
+      </section>
+
+      <h2>Shared API Contracts</h2>
+      <section>
+        <p><code>packages/shared</code> should define:</p>
+        <ul>
+          <li><code>PaymentMethodId</code></li>
+          <li><code>WorkspaceRole</code></li>
+          <li><code>UserDto</code></li>
+          <li><code>WorkspaceDto</code></li>
+          <li><code>WorkspaceMemberDto</code></li>
+          <li><code>CategoryDto</code></li>
+          <li><code>PaymentCardDto</code></li>
+          <li><code>FixedCostDto</code></li>
+          <li>create/update schemas for categories, cards, and fixed costs</li>
+          <li>sync request and response schemas</li>
+        </ul>
+        <p><code>FixedCostDto</code> should preserve the current client model:</p>
+        <ul>
+          <li><code>id</code></li>
+          <li><code>workspaceId</code></li>
+          <li><code>name</code></li>
+          <li><code>categoryId</code></li>
+          <li><code>paymentMethodId</code></li>
+          <li><code>paymentOptionId</code></li>
+          <li><code>amount</code></li>
+          <li><code>periodMonths</code></li>
+          <li><code>billingDay</code></li>
+        </ul>
+        <p><code>periodMonths</code> remains a number rounded to one decimal place.</p>
+      </section>
+
+      <h2>Sync Model</h2>
+      <section>
+        <p>Keep localStorage as a cache and fallback.</p>
+        <p><strong>On login</strong></p>
+        <ol>
+          <li>Load local browser data.</li>
+          <li>Load server workspace data.</li>
+          <li>If the server workspace is empty, offer to upload local data.</li>
+          <li>
+            If both local and server data exist and differ, let the user choose:
+            <ul>
+              <li>use server data</li>
+              <li>upload this browser data</li>
+              <li>keep local-only for now</li>
+            </ul>
+          </li>
+        </ol>
+        <p><strong>After sync is enabled</strong></p>
+        <ul>
+          <li>Normal edits update local state immediately.</li>
+          <li>The app sends changes to the API.</li>
+          <li>If the API call fails, localStorage keeps the latest browser state and the UI shows a sync warning.</li>
+          <li>A manual "sync now" action retries pending changes.</li>
+        </ul>
+      </section>
+
+      <h2>API Surface</h2>
+      <section>
+        <p><strong>Authentication</strong></p>
+        <ul>
+          <li><code>POST /auth/register</code></li>
+          <li><code>POST /auth/login</code></li>
+          <li><code>GET /me</code></li>
+        </ul>
+        <p><strong>Workspace</strong></p>
+        <ul>
+          <li><code>GET /workspaces</code></li>
+          <li><code>POST /workspaces</code></li>
+          <li><code>GET /workspaces/:workspaceId</code></li>
+        </ul>
+        <p><strong>Sync</strong></p>
+        <ul>
+          <li><code>GET /workspaces/:workspaceId/snapshot</code></li>
+          <li><code>PUT /workspaces/:workspaceId/snapshot</code></li>
+        </ul>
+        <p><strong>Sharing, implemented after personal sync</strong></p>
+        <ul>
+          <li><code>GET /workspaces/:workspaceId/members</code></li>
+          <li><code>POST /workspaces/:workspaceId/invitations</code></li>
+          <li><code>PATCH /workspaces/:workspaceId/members/:memberId</code></li>
+          <li><code>DELETE /workspaces/:workspaceId/members/:memberId</code></li>
+        </ul>
+        <p>
+          The first implementation should prefer snapshot sync over many fine-grained CRUD endpoints. This keeps the
+          server migration smaller and matches the current client state shape.
+        </p>
+      </section>
+
+      <h2>Security</h2>
+      <section>
+        <ul>
+          <li>Passwords are hashed with a modern password hashing function.</li>
+          <li>JWT secrets are never committed.</li>
+          <li>API CORS allows the GitHub Pages origin.</li>
+          <li>Every workspace route verifies membership.</li>
+          <li>Role checks are enforced on server mutations.</li>
+          <li>Backups and snapshots are scoped to a workspace.</li>
+        </ul>
+        <p>The allowed CORS origin for the current frontend is:</p>
+        <pre><code>https://sanghyun-io.github.io</code></pre>
+        <p>The path <code>/living-cost-manager</code> is not part of the CORS origin.</p>
+      </section>
+
+      <h2>Deployment</h2>
+      <section>
+        <p><strong>Frontend</strong></p>
+        <ul>
+          <li>Keep GitHub Pages.</li>
+          <li>Keep the current <code>/living-cost-manager</code> base path.</li>
+          <li>Add an API base URL configuration for production builds.</li>
+        </ul>
+        <p><strong>Backend</strong></p>
+        <ul>
+          <li>Deploy <code>apps/api</code> to an OCI VM using Docker Compose.</li>
+          <li>Run PostgreSQL in Docker for the first server release.</li>
+          <li>Store environment variables on the VM, not in the repo.</li>
+          <li>Use HTTPS through a reverse proxy before exposing auth endpoints publicly.</li>
+        </ul>
+      </section>
+
+      <h2>Migration From Current App</h2>
+      <section>
+        <p>The current app is localStorage-first. Server adoption should not destroy local data.</p>
+        <ol>
+          <li>User opens the existing Pages app.</li>
+          <li>User logs into the new server account.</li>
+          <li>App detects local browser data.</li>
+          <li>App asks whether to upload that local data to the personal workspace.</li>
+          <li>After upload, the server snapshot becomes the source of truth.</li>
+        </ol>
+        <p>The <code>.lcm</code> full backup export/import remains available regardless of server sync.</p>
+      </section>
+
+      <h2>Testing</h2>
+      <section>
+        <p><strong>Backend tests</strong></p>
+        <ul>
+          <li>auth register/login</li>
+          <li>workspace membership enforcement</li>
+          <li>snapshot read/write</li>
+          <li>role-based mutation rejection</li>
+          <li>validation rejection for invalid fixed-cost period</li>
+        </ul>
+        <p><strong>Shared package tests</strong></p>
+        <ul>
+          <li>DTO schemas accept current fixed-cost/category/card shapes</li>
+          <li>decimal <code>periodMonths</code> is preserved to one decimal place</li>
+        </ul>
+        <p><strong>Frontend tests</strong></p>
+        <ul>
+          <li>local-only mode still works</li>
+          <li>login sync prompt appears when local data exists</li>
+          <li>server snapshot can hydrate the dashboard</li>
+          <li>failed sync leaves local edits intact and shows a warning</li>
+        </ul>
+      </section>
+
+      <h2>Explicitly Out Of Scope</h2>
+      <section>
+        <ul>
+          <li>One-off actual spend tracking</li>
+          <li>Bank/card transaction import</li>
+          <li>OCR receipts</li>
+          <li>automated payment reminders</li>
+          <li>native mobile app</li>
+          <li>moving the frontend away from GitHub Pages</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
