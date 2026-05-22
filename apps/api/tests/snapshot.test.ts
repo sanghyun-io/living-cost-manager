@@ -133,12 +133,28 @@ async function putSnapshot(token: string, snapshot: WorkspaceSnapshot) {
   });
 }
 
+async function putRawSnapshot(token: string, workspaceId: string, payload: unknown) {
+  return app.inject({
+    method: "PUT",
+    url: `/workspaces/${workspaceId}/snapshot`,
+    headers: authHeaders(token),
+    payload
+  });
+}
+
 async function getSnapshot(token: string, workspaceId: string) {
   return app.inject({
     method: "GET",
     url: `/workspaces/${workspaceId}/snapshot`,
     headers: authHeaders(token)
   });
+}
+
+function expectSanitizedBadRequest(response: Awaited<ReturnType<typeof app.inject>>) {
+  expect(response.statusCode).toBe(400);
+
+  const rawBody = response.body;
+  expect(rawBody).not.toMatch(/Zod|Prisma|P200\d|foreign key|constraint/i);
 }
 
 beforeAll(async () => {
@@ -255,18 +271,103 @@ describe("workspace snapshot routes", () => {
     expect(putResponse.statusCode).toBe(403);
   });
 
+  test.each([
+    [
+      "malformed body",
+      (snapshot: WorkspaceSnapshot) => ({
+        ...snapshot,
+        fixedCosts: "not-an-array"
+      })
+    ],
+    [
+      "mismatched body",
+      (snapshot: WorkspaceSnapshot) => ({
+        ...snapshot,
+        workspaceId: "different-workspace"
+      })
+    ],
+    [
+      "FK-invalid body",
+      (snapshot: WorkspaceSnapshot) => ({
+        ...snapshot,
+        fixedCosts: [
+          {
+            ...snapshot.fixedCosts[0],
+            paymentOptionId: "missing-card"
+          }
+        ]
+      })
+    ]
+  ])("non-member PUT with %s returns forbidden before body validation", async (_label, makePayload) => {
+    const owner = await registerTestUser("Non Member Precedence Owner");
+    const nonMember = await registerTestUser("Non Member Precedence User");
+    const snapshot = buildSnapshot(owner.workspace.id);
+
+    const response = await putRawSnapshot(
+      nonMember.token,
+      owner.workspace.id,
+      makePayload(snapshot)
+    );
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  test.each([
+    [
+      "malformed body",
+      (snapshot: WorkspaceSnapshot) => ({
+        ...snapshot,
+        categories: "not-an-array"
+      })
+    ],
+    [
+      "mismatched body",
+      (snapshot: WorkspaceSnapshot) => ({
+        ...snapshot,
+        workspaceId: "different-workspace"
+      })
+    ],
+    [
+      "FK-invalid body",
+      (snapshot: WorkspaceSnapshot) => ({
+        ...snapshot,
+        fixedCosts: [
+          {
+            ...snapshot.fixedCosts[0],
+            paymentOptionId: "missing-card"
+          }
+        ]
+      })
+    ]
+  ])("viewer PUT with %s returns forbidden before body validation", async (_label, makePayload) => {
+    const owner = await registerTestUser("Viewer Precedence Owner");
+    const viewer = await addWorkspaceMember(owner.workspace.id, "viewer");
+    const snapshot = buildSnapshot(owner.workspace.id);
+
+    const response = await putRawSnapshot(
+      viewer.token,
+      owner.workspace.id,
+      makePayload(snapshot)
+    );
+
+    expect(response.statusCode).toBe(403);
+  });
+
   test("URL and payload workspace mismatch returns bad request", async () => {
     const owner = await registerTestUser("Mismatch Owner");
     const snapshot = buildSnapshot(owner.workspace.id);
 
     const response = await app.inject({
       method: "PUT",
-      url: "/workspaces/different-workspace/snapshot",
+      url: `/workspaces/${owner.workspace.id}/snapshot`,
       headers: authHeaders(owner.token),
-      payload: snapshot
+      payload: {
+        ...snapshot,
+        workspaceId: "different-workspace"
+      }
     });
 
-    expect(response.statusCode).toBe(400);
+    expectSanitizedBadRequest(response);
   });
 
   test("nested workspace mismatch returns bad request without writing child rows", async () => {
@@ -290,7 +391,7 @@ describe("workspace snapshot routes", () => {
       }
     });
 
-    expect(response.statusCode).toBe(400);
+    expectSanitizedBadRequest(response);
 
     const otherCards = await prisma.paymentCard.findMany({
       where: {
@@ -320,6 +421,34 @@ describe("workspace snapshot routes", () => {
       }
     });
 
-    expect(response.statusCode).toBe(400);
+    expectSanitizedBadRequest(response);
+  });
+
+  test("FK-invalid replacement returns sanitized bad request and rolls back previous snapshot", async () => {
+    const owner = await registerTestUser("Rollback Owner");
+    const snapshot = buildSnapshot(owner.workspace.id);
+
+    expect((await putSnapshot(owner.token, snapshot)).statusCode).toBe(200);
+
+    const invalidReplacement: WorkspaceSnapshot = {
+      ...snapshot,
+      monthlyIncome: 9900000,
+      fixedCosts: [
+        {
+          ...snapshot.fixedCosts[0],
+          paymentOptionId: "missing-card"
+        }
+      ]
+    };
+
+    const response = await putSnapshot(owner.token, invalidReplacement);
+    expectSanitizedBadRequest(response);
+    expect(response.json()).toMatchObject({
+      message: "Invalid snapshot"
+    });
+
+    const afterRollback = await getSnapshot(owner.token, owner.workspace.id);
+    expect(afterRollback.statusCode).toBe(200);
+    expect(afterRollback.json()).toEqual(snapshot);
   });
 });

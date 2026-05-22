@@ -54,7 +54,7 @@ export function isSnapshotWriteValidationError(error: unknown): boolean {
 }
 
 export async function getWorkspaceSnapshot(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   workspaceId: string
 ): Promise<WorkspaceSnapshot> {
   const workspace = await prisma.workspace.findUniqueOrThrow({
@@ -118,7 +118,7 @@ export async function replaceWorkspaceSnapshot(
   prisma: PrismaClient,
   snapshot: WorkspaceSnapshot
 ): Promise<WorkspaceSnapshot> {
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     await tx.workspace.update({
       where: {
         id: snapshot.workspaceId
@@ -168,7 +168,7 @@ export async function replaceWorkspaceSnapshot(
         payload: snapshot as Prisma.InputJsonValue
       }
     });
-  });
 
-  return getWorkspaceSnapshot(prisma, snapshot.workspaceId);
+    return getWorkspaceSnapshot(tx, snapshot.workspaceId);
+  });
 }

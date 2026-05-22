@@ -52,6 +52,12 @@ export async function snapshotRoutes(app: FastifyInstance) {
     { preHandler: app.authenticate },
     async (request) => {
       const workspaceId = parseWorkspaceId(request.params);
+
+      await requireWorkspaceRole(app, request.user.sub, workspaceId, [
+        "owner",
+        "editor"
+      ]);
+
       const parsedBody = workspaceSnapshotSchema.safeParse(request.body);
 
       if (!parsedBody.success) {
@@ -65,11 +71,6 @@ export async function snapshotRoutes(app: FastifyInstance) {
       if (!hasConsistentWorkspaceIds(parsedBody.data)) {
         throw app.httpErrors.badRequest("Workspace ID mismatch");
       }
-
-      await requireWorkspaceRole(app, request.user.sub, workspaceId, [
-        "owner",
-        "editor"
-      ]);
 
       try {
         return await replaceWorkspaceSnapshot(app.prisma, parsedBody.data);
