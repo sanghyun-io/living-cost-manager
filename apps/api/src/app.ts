@@ -10,6 +10,7 @@ import { authRoutes } from "./routes/auth.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { memberRoutes } from "./routes/members.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
+import { workspaceRoutes } from "./routes/workspaces.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -45,6 +46,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     secret: env.JWT_SECRET
   });
   await app.register(authRoutes);
+  await app.register(workspaceRoutes);
   await app.register(invitationRoutes);
   await app.register(memberRoutes);
   await app.register(snapshotRoutes);

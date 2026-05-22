@@ -5,7 +5,7 @@ import {
   type WorkspaceRole
 } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
-import type { WorkspaceMemberDto } from "@living-cost-manager/shared";
+import type { WorkspaceDto, WorkspaceMemberDto } from "@living-cost-manager/shared";
 
 type WorkspaceMemberWithUser = WorkspaceMember & {
   user: {
@@ -100,6 +100,34 @@ export async function listWorkspaceMembers(
   });
 
   return members.map(toWorkspaceMemberDto);
+}
+
+export async function listUserWorkspaces(
+  prisma: PrismaClient,
+  userId: string
+): Promise<WorkspaceDto[]> {
+  const memberships = await prisma.workspaceMember.findMany({
+    where: {
+      userId
+    },
+    include: {
+      workspace: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  return memberships.map((membership) => ({
+    id: membership.workspace.id,
+    name: membership.workspace.name,
+    role: membership.role
+  }));
 }
 
 export async function findWorkspaceMemberDto(

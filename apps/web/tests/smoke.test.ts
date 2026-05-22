@@ -25,6 +25,7 @@ import {
   createServerApiClient,
   getServerApiBaseUrl,
   isServerApiAvailable,
+  resolveServerSessionWorkspace,
   ServerApiError
 } from "../app/lib/serverApi";
 import {
@@ -529,6 +530,66 @@ describe("server api client", () => {
         headers: expect.objectContaining({
           Authorization: "Bearer token-1",
           "Content-Type": "application/json"
+        })
+      })
+    );
+  });
+
+  test("lists workspaces with bearer token", async () => {
+    const workspace = { id: "workspace-1", name: "Mina의 생활비", role: "owner" as const };
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify([workspace]), {
+        headers: { "content-type": "application/json" },
+        status: 200
+      })
+    ) as unknown as typeof fetch;
+    const client = createServerApiClient({ baseUrl: "https://api.example.com", fetchImpl });
+
+    await expect(client?.listWorkspaces("token-1")).resolves.toEqual([workspace]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.example.com/workspaces",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1"
+        })
+      })
+    );
+  });
+
+  test("selects the first listed workspace after login returns no workspace", async () => {
+    const workspace = { id: "workspace-1", name: "Mina의 생활비", role: "owner" as const };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            token: "token-1",
+            user: { id: "user-1", email: "mina@example.com", name: "Mina" }
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([workspace]), {
+          headers: { "content-type": "application/json" },
+          status: 200
+        })
+      ) as unknown as typeof fetch;
+    const client = createServerApiClient({ baseUrl: "https://api.example.com", fetchImpl });
+    const loginSession = await client?.login({ email: "mina@example.com", password: "password123" });
+
+    await expect(loginSession ? resolveServerSessionWorkspace(client!, loginSession) : null).resolves.toMatchObject({
+      workspace
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://api.example.com/workspaces",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1"
         })
       })
     );

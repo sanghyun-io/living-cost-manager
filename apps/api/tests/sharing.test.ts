@@ -170,6 +170,61 @@ afterAll(async () => {
 });
 
 describe("workspace sharing routes", () => {
+  test("registered user can list their personal workspace", async () => {
+    const owner = await registerTestUser("Workspace List Owner");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/workspaces",
+      headers: authHeaders(owner.token)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      {
+        id: owner.workspace.id,
+        name: owner.workspace.name,
+        role: "owner"
+      }
+    ]);
+  });
+
+  test("user who accepted an invite sees the shared workspace in their workspace list", async () => {
+    const owner = await registerTestUser("Workspace Invite Owner");
+    const accepted = await createAcceptedMember(owner, "editor");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/workspaces",
+      headers: authHeaders(accepted.invitee.token)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(
+      expect.arrayContaining([
+        {
+          id: accepted.invitee.workspace.id,
+          name: accepted.invitee.workspace.name,
+          role: "owner"
+        },
+        {
+          id: owner.workspace.id,
+          name: owner.workspace.name,
+          role: "editor"
+        }
+      ])
+    );
+  });
+
+  test("workspace list requires authentication", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/workspaces"
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
   test("owner can invite a registered user and the user can accept with the assigned role", async () => {
     const owner = await registerTestUser("Sharing Owner");
     const invitee = await registerTestUser("Invitee", `${runId}-Invitee@example.com`);

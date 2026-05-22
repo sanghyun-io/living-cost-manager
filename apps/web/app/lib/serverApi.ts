@@ -34,6 +34,7 @@ export type ServerApiClient = {
   register(input: RegisterRequest): Promise<ServerSession>;
   login(input: LoginRequest): Promise<ServerSession>;
   me(token: string): Promise<{ user: UserDto }>;
+  listWorkspaces(token: string): Promise<WorkspaceDto[]>;
   getWorkspaceSnapshot(workspaceId: string, token: string): Promise<WorkspaceSnapshot>;
   putWorkspaceSnapshot(workspaceId: string, snapshot: WorkspaceSnapshot, token: string): Promise<WorkspaceSnapshot>;
   listMembers(workspaceId: string, token: string): Promise<WorkspaceMemberDto[]>;
@@ -117,6 +118,9 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
     me(token) {
       return request<{ user: UserDto }>("/me", { token });
     },
+    listWorkspaces(token) {
+      return request<WorkspaceDto[]>("/workspaces", { token });
+    },
     getWorkspaceSnapshot(workspaceId, token) {
       return request<WorkspaceSnapshot>("/workspaces/" + encodeURIComponent(workspaceId) + "/snapshot", { token });
     },
@@ -163,6 +167,20 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
         token
       });
     }
+  };
+}
+
+export async function resolveServerSessionWorkspace(
+  client: ServerApiClient,
+  session: ServerSession
+): Promise<ServerSession> {
+  const workspaces = await client.listWorkspaces(session.token);
+  const selectedWorkspace =
+    workspaces.find((workspace) => workspace.id === session.workspace?.id) ?? workspaces[0] ?? null;
+
+  return {
+    ...session,
+    workspace: selectedWorkspace
   };
 }
 

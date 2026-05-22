@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { InvitationRole, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
+import type { InvitationRole, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
 import {
   BANK_TRANSFER_OPTIONS,
   buildBudgetSummary,
@@ -36,6 +36,7 @@ import {
 import { createUser, getUserDataKey, mergeUsers, type AppUser } from "./lib/users";
 import {
   createServerApiClient,
+  resolveServerSessionWorkspace,
   SERVER_SESSION_STORAGE_KEY,
   type CreatedInvitation,
   type ServerSession
@@ -162,6 +163,7 @@ export default function Home() {
   const [serverStatus, setServerStatus] = useState("");
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [isServerBusy, setIsServerBusy] = useState(false);
+  const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
   const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -170,6 +172,7 @@ export default function Home() {
   const [createdInvitation, setCreatedInvitation] = useState<CreatedInvitation | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
+  const serverRestoreCheckedRef = useRef(false);
   const serverApi = useMemo(() => createServerApiClient(), []);
 
   useEffect(() => {
@@ -272,6 +275,15 @@ export default function Home() {
 
     void refreshSharing(serverSession);
   }, [isDataModalOpen, serverApi, serverSession]);
+
+  useEffect(() => {
+    if (!isBootLoaded || !serverSession || !serverApi || serverRestoreCheckedRef.current) {
+      return;
+    }
+
+    serverRestoreCheckedRef.current = true;
+    void refreshRestoredServerSession(serverSession);
+  }, [isBootLoaded, serverApi, serverSession]);
 
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
   const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
@@ -461,13 +473,12 @@ export default function Home() {
         serverAuthMode === "register"
           ? await serverApi.register({ email: serverEmail, password: serverPassword, name: serverName || serverEmail })
           : await serverApi.login({ email: serverEmail, password: serverPassword });
-      const nextSession = {
+      const nextSession = await resolveAndStoreServerSession({
         ...authResult,
         workspace: authResult.workspace ?? serverSession?.workspace ?? null
-      };
+      });
 
-      saveServerSession(nextSession);
-      setServerSession(nextSession);
+      serverRestoreCheckedRef.current = true;
       setServerPassword("");
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
@@ -482,6 +493,7 @@ export default function Home() {
     window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
     setServerSession(null);
     setServerSnapshot(null);
+    setServerWorkspaces([]);
     setMembers([]);
     setInvitations([]);
     setCreatedInvitation(null);
@@ -514,6 +526,83 @@ export default function Home() {
     }
 
     setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
+  }
+
+  async function refreshRestoredServerSession(session: ServerSession) {
+    if (!serverApi) {
+      return;
+    }
+
+    try {
+      const [{ user }, nextSession] = await Promise.all([
+        serverApi.me(session.token),
+        resolveServerSessionWorkspace(serverApi, session)
+      ]);
+      const restoredSession = {
+        ...nextSession,
+        user
+      };
+
+      saveServerSession(restoredSession);
+      setServerSession(restoredSession);
+      await loadServerWorkspaces(restoredSession);
+      if (!restoredSession.workspace) {
+        setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
+      }
+    } catch (error) {
+      window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
+      setServerSession(null);
+      setServerWorkspaces([]);
+      setServerStatus(getErrorMessage(error));
+    }
+  }
+
+  async function resolveAndStoreServerSession(session: ServerSession) {
+    if (!serverApi) {
+      saveServerSession(session);
+      setServerSession(session);
+      return session;
+    }
+
+    const nextSession = await resolveServerSessionWorkspace(serverApi, session);
+    saveServerSession(nextSession);
+    setServerSession(nextSession);
+    await loadServerWorkspaces(nextSession);
+    return nextSession;
+  }
+
+  async function loadServerWorkspaces(session = serverSession) {
+    if (!serverApi || !session) {
+      setServerWorkspaces([]);
+      return [];
+    }
+
+    const workspaces = await serverApi.listWorkspaces(session.token);
+    setServerWorkspaces(workspaces);
+    return workspaces;
+  }
+
+  async function handleSelectServerWorkspace(workspaceId: string) {
+    if (!serverSession) {
+      return;
+    }
+
+    const workspace = serverWorkspaces.find((item) => item.id === workspaceId) ?? null;
+    const nextSession = {
+      ...serverSession,
+      workspace
+    };
+
+    saveServerSession(nextSession);
+    setServerSession(nextSession);
+    setMembers([]);
+    setServerSnapshot(null);
+    if (workspace) {
+      await prepareServerSyncDecision(nextSession);
+      await refreshSharing(nextSession);
+    } else {
+      setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
+    }
   }
 
   async function handleSyncNow() {
@@ -613,9 +702,7 @@ export default function Home() {
     setIsServerBusy(true);
     try {
       const accepted = await serverApi.acceptInvitation(invitationId, tokenValue, serverSession.token);
-      const nextSession = { ...serverSession, workspace: accepted.workspace };
-      saveServerSession(nextSession);
-      setServerSession(nextSession);
+      const nextSession = await resolveAndStoreServerSession({ ...serverSession, workspace: accepted.workspace });
       setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: "" }));
       setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
       await prepareServerSyncDecision(nextSession);
@@ -1270,6 +1357,19 @@ export default function Home() {
                       <span>워크스페이스</span>
                       <strong>{serverSession.workspace?.name ?? "선택 안 됨"}</strong>
                       <small>{currentWorkspaceRole ? workspaceRoleLabels[currentWorkspaceRole] : "초대 수락 후 선택"}</small>
+                      {serverWorkspaces.length > 1 ? (
+                        <select
+                          aria-label="서버 워크스페이스 선택"
+                          value={serverSession.workspace?.id ?? ""}
+                          onChange={(event) => void handleSelectServerWorkspace(event.target.value)}
+                        >
+                          {serverWorkspaces.map((workspace) => (
+                            <option key={workspace.id} value={workspace.id}>
+                              {workspace.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -1310,6 +1410,9 @@ export default function Home() {
                 )}
 
                 {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+                {serverSession && serverWorkspaces.length === 0 ? (
+                  <p className="local-note">사용 가능한 서버 워크스페이스가 없습니다. 새 계정을 만들거나 초대를 수락한 뒤 동기화를 사용할 수 있습니다.</p>
+                ) : null}
 
                 {serverSession?.workspace ? (
                   <div className="sync-actions">
