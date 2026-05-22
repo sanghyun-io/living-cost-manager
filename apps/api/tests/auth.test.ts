@@ -94,6 +94,32 @@ describe("auth routes", () => {
     });
   });
 
+  test("register stores and returns normalized email", async () => {
+    const email = `${runId}-Normalize@example.com`;
+    const response = await registerTestUser({
+      email: `  ${email.toUpperCase()}  `,
+      name: "Normalize User"
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json<{
+      user: { id: string; email: string; name: string };
+    }>();
+
+    expect(body.user.email).toBe(email.toLowerCase());
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: body.user.id
+      },
+      select: {
+        email: true
+      }
+    });
+
+    expect(user?.email).toBe(email.toLowerCase());
+  });
+
   test("register token includes expiry, issuer, and audience claims", async () => {
     const response = await registerTestUser({
       email: `${runId}-jwt-claims@example.com`,
@@ -146,6 +172,28 @@ describe("auth routes", () => {
     expect(body.user).not.toHaveProperty("passwordHash");
   });
 
+  test("login accepts case-insensitive email input", async () => {
+    const email = `${runId}-CaseLogin@example.com`;
+    await registerTestUser({ email, name: "Case Login User" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: {
+        email: `  ${email.toUpperCase()}  `,
+        password: "password123"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      user: {
+        email: email.toLowerCase(),
+        name: "Case Login User"
+      }
+    });
+  });
+
   test("/me succeeds with a bearer token", async () => {
     const email = `${runId}-me@example.com`;
     const register = await registerTestUser({ email, name: "Me User" });
@@ -181,6 +229,69 @@ describe("auth routes", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      message: "Invalid token"
+    });
+    expect(JSON.stringify(response.json())).not.toContain("claim");
+  });
+
+  test("/me rejects malformed tokens with a sanitized unauthorized response", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/me",
+      headers: {
+        authorization: "Bearer not-a-jwt"
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      message: "Invalid token"
+    });
+    expect(JSON.stringify(response.json())).not.toContain("jwt");
+  });
+
+  test("/me rejects expired tokens with a sanitized unauthorized response", async () => {
+    const token = app.jwt.sign(
+      {
+        sub: "expired-user-id"
+      },
+      {
+        expiresIn: "-1s"
+      }
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/me",
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      message: "Invalid token"
+    });
+    expect(JSON.stringify(response.json()).toLowerCase()).not.toContain("expired");
+  });
+
+  test("/me rejects bad-claim tokens with a sanitized unauthorized response", async () => {
+    const token = app.jwt.sign({ sub: "missing-user-id" });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/me",
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      message: "Invalid token"
+    });
+    expect(JSON.stringify(response.json())).not.toContain("subject");
   });
 
   test("duplicate register returns a non-500 conflict", async () => {
@@ -192,6 +303,26 @@ describe("auth routes", () => {
       url: "/auth/register",
       payload: {
         email,
+        password: "password123",
+        name: "Second User"
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      message: "Email already registered"
+    });
+  });
+
+  test("register rejects duplicate email with different casing", async () => {
+    const email = `${runId}-case-duplicate@example.com`;
+    await registerTestUser({ email: email.toUpperCase(), name: "First User" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: email.toLowerCase(),
         password: "password123",
         name: "Second User"
       }
@@ -261,5 +392,8 @@ describe("auth routes", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      message: "Invalid token"
+    });
   });
 });

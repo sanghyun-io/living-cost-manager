@@ -51,7 +51,12 @@ export const authPlugin = fp<AuthPluginOptions>(async (app, options) => {
   });
 
   app.decorate("authenticate", async (request: FastifyRequest) => {
-    await request.jwtVerify();
+    try {
+      await request.jwtVerify();
+    } catch {
+      throw app.httpErrors.unauthorized("Invalid token");
+    }
+
     const parsedPayload = jwtPayloadSchema.safeParse(request.user);
 
     if (!parsedPayload.success) {

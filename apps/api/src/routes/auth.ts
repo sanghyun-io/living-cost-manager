@@ -23,12 +23,33 @@ function signUserToken(app: FastifyInstance, userId: string): string {
   });
 }
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function normalizeAuthBody(body: unknown): unknown {
+  if (!body || typeof body !== "object" || !("email" in body)) {
+    return body;
+  }
+
+  const candidate = body as Record<string, unknown>;
+
+  if (typeof candidate.email !== "string") {
+    return body;
+  }
+
+  return {
+    ...candidate,
+    email: normalizeEmail(candidate.email)
+  };
+}
+
 function parseAuthBody<TSchema extends z.ZodType>(
   app: FastifyInstance,
   schema: TSchema,
   body: unknown
 ): z.infer<TSchema> {
-  const result = schema.safeParse(body);
+  const result = schema.safeParse(normalizeAuthBody(body));
 
   if (!result.success) {
     throw app.httpErrors.badRequest("Invalid request body");
@@ -132,7 +153,7 @@ export async function authRoutes(app: FastifyInstance) {
     });
 
     if (!user) {
-      throw app.httpErrors.unauthorized("Invalid token subject");
+      throw app.httpErrors.unauthorized("Invalid token");
     }
 
     return {
