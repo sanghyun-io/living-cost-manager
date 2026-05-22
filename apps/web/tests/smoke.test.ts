@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   buildBudgetSummary,
   BANK_TRANSFER_OPTIONS,
@@ -21,6 +21,18 @@ import {
   buildLivingCostBackup,
   parseLivingCostBackup
 } from "../app/lib/backup";
+import {
+  createServerApiClient,
+  getServerApiBaseUrl,
+  isServerApiAvailable,
+  ServerApiError
+} from "../app/lib/serverApi";
+import {
+  buildWorkspaceSnapshot,
+  hasLocalBudgetData,
+  hydrateWorkspaceSnapshot,
+  isWorkspaceSnapshotEmpty
+} from "../app/lib/snapshot";
 import {
   createPaymentCard,
   DEFAULT_CARDS,
@@ -367,5 +379,174 @@ describe("fixed cost dashboard", () => {
       periodMonths: 1,
       billingDay: 25
     });
+  });
+});
+
+describe("server snapshot mapping", () => {
+  test("maps local budget state to a workspace snapshot with workspace ids", () => {
+    const card = createPaymentCard("생활비 카드", 10);
+    const category = createCategory("운동");
+    const fixedCost = createFixedCost({
+      id: "gym",
+      name: "헬스장",
+      categoryId: category.id,
+      paymentMethodId: "credit-card",
+      paymentOptionId: card.id,
+      amount: 99000,
+      periodMonths: 2.5,
+      billingDay: 10
+    });
+
+    const snapshot = buildWorkspaceSnapshot("workspace-1", {
+      monthlyIncome: 4_200_000,
+      categories: [category],
+      cards: [card],
+      fixedCosts: [fixedCost]
+    });
+
+    expect(snapshot.workspaceId).toBe("workspace-1");
+    expect(snapshot.categories[0]).toEqual({ ...category, workspaceId: "workspace-1" });
+    expect(snapshot.cards[0]).toEqual({ ...card, workspaceId: "workspace-1" });
+    expect(snapshot.fixedCosts[0]).toMatchObject({
+      workspaceId: "workspace-1",
+      periodMonths: 2.5,
+      paymentOptionId: card.id
+    });
+  });
+
+  test("hydrates server snapshots back to local app state", () => {
+    const hydrated = hydrateWorkspaceSnapshot({
+      workspaceId: "workspace-1",
+      monthlyIncome: 3_500_000,
+      categories: [{ id: "fitness", workspaceId: "workspace-1", label: "운동" }],
+      cards: [{ id: "card-living", workspaceId: "workspace-1", label: "생활비 카드", billingDay: 21 }],
+      fixedCosts: [
+        {
+          id: "gym",
+          workspaceId: "workspace-1",
+          name: "헬스장",
+          categoryId: "fitness",
+          paymentMethodId: "credit-card",
+          paymentOptionId: "card-living",
+          amount: 99000,
+          periodMonths: 12.5,
+          billingDay: 21
+        }
+      ]
+    });
+
+    expect(hydrated.monthlyIncome).toBe(3_500_000);
+    expect(hydrated.categories).toEqual([{ id: "fitness", label: "운동" }]);
+    expect(hydrated.cards).toEqual([{ id: "card-living", label: "생활비 카드", billingDay: 21 }]);
+    expect(hydrated.fixedCosts[0]).toMatchObject({
+      id: "gym",
+      periodMonths: 12.5,
+      paymentOptionId: "card-living"
+    });
+  });
+
+  test("detects empty server snapshots and local-only data", () => {
+    expect(
+      isWorkspaceSnapshotEmpty({
+        workspaceId: "workspace-1",
+        monthlyIncome: 0,
+        categories: [],
+        cards: [],
+        fixedCosts: []
+      })
+    ).toBe(true);
+
+    expect(
+      hasLocalBudgetData({
+        monthlyIncome: 0,
+        categories: DEFAULT_CATEGORIES,
+        cards: [],
+        fixedCosts: []
+      })
+    ).toBe(false);
+
+    expect(
+      hasLocalBudgetData({
+        monthlyIncome: 1,
+        categories: DEFAULT_CATEGORIES,
+        cards: [],
+        fixedCosts: []
+      })
+    ).toBe(true);
+  });
+});
+
+describe("server api client", () => {
+  test("represents missing API base URL as unavailable without throwing", () => {
+    expect(getServerApiBaseUrl("   ")).toBeNull();
+    expect(isServerApiAvailable("")).toBe(false);
+    expect(createServerApiClient({ baseUrl: "" })).toBeNull();
+  });
+
+  test("normalizes URLs and sends bearer tokens", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ user: { id: "user-1", email: "mina@example.com", name: "Mina" } }), {
+        headers: { "content-type": "application/json" },
+        status: 200
+      })
+    ) as unknown as typeof fetch;
+    const client = createServerApiClient({ baseUrl: "https://api.example.com/", fetchImpl });
+
+    await client?.me("token-1");
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.example.com/me",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1"
+        })
+      })
+    );
+  });
+
+  test("puts snapshots to the workspace endpoint with JSON body", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+        status: 200
+      })
+    ) as unknown as typeof fetch;
+    const client = createServerApiClient({ baseUrl: "https://api.example.com", fetchImpl });
+    const snapshot = buildWorkspaceSnapshot("workspace-1", {
+      monthlyIncome: 0,
+      categories: [],
+      cards: [],
+      fixedCosts: []
+    });
+
+    await client?.putWorkspaceSnapshot("workspace-1", snapshot, "token-1");
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.example.com/workspaces/workspace-1/snapshot",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify(snapshot),
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1",
+          "Content-Type": "application/json"
+        })
+      })
+    );
+  });
+
+  test("surfaces sanitized API errors", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ message: "Email already registered" }), {
+        headers: { "content-type": "application/json" },
+        status: 409
+      })
+    ) as unknown as typeof fetch;
+    const client = createServerApiClient({ baseUrl: "https://api.example.com", fetchImpl });
+
+    await expect(client?.login({ email: "mina@example.com", password: "password123" })).rejects.toMatchObject({
+      message: "Email already registered",
+      status: 409
+    });
+    await expect(client?.login({ email: "mina@example.com", password: "password123" })).rejects.toBeInstanceOf(ServerApiError);
   });
 });

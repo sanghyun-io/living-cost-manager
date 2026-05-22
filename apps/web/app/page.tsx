@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { InvitationRole, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
 import {
   BANK_TRANSFER_OPTIONS,
   buildBudgetSummary,
@@ -33,6 +34,20 @@ import {
   type PaymentCard
 } from "./lib/cards";
 import { createUser, getUserDataKey, mergeUsers, type AppUser } from "./lib/users";
+import {
+  createServerApiClient,
+  SERVER_SESSION_STORAGE_KEY,
+  type CreatedInvitation,
+  type ServerSession
+} from "./lib/serverApi";
+import {
+  buildWorkspaceSnapshot,
+  hasLocalBudgetData,
+  hydrateWorkspaceSnapshot,
+  isWorkspaceSnapshotEmpty,
+  type LocalBudgetSnapshot
+} from "./lib/snapshot";
+import { canManageSharing, canSyncWorkspace, findCurrentMember, invitationRoleLabels, workspaceRoleLabels } from "./lib/sharing";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -139,16 +154,37 @@ export default function Home() {
   const [saveError, setSaveError] = useState("");
   const [isBootLoaded, setIsBootLoaded] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [serverSession, setServerSession] = useState<ServerSession | null>(null);
+  const [serverAuthMode, setServerAuthMode] = useState<"login" | "register">("login");
+  const [serverEmail, setServerEmail] = useState("");
+  const [serverPassword, setServerPassword] = useState("");
+  const [serverName, setServerName] = useState("");
+  const [serverStatus, setServerStatus] = useState("");
+  const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [isServerBusy, setIsServerBusy] = useState(false);
+  const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
+  const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<InvitationRole>("viewer");
+  const [acceptTokens, setAcceptTokens] = useState<Record<string, string>>({});
+  const [createdInvitation, setCreatedInvitation] = useState<CreatedInvitation | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
+  const serverApi = useMemo(() => createServerApiClient(), []);
 
   useEffect(() => {
     const users = readJson<AppUser[]>(USERS_KEY, []);
     const activeUserId = window.localStorage.getItem(ACTIVE_USER_KEY);
     const activeUser = users.find((user) => user.id === activeUserId) ?? null;
+    const storedServerSession = readJson<ServerSession | null>(SERVER_SESSION_STORAGE_KEY, null);
 
     setKnownUsers(users);
     setCurrentUser(activeUser);
+    if (isServerSession(storedServerSession)) {
+      setServerSession(storedServerSession);
+      setServerEmail(storedServerSession.user.email);
+      setServerName(storedServerSession.user.name);
+    }
     setIsBootLoaded(true);
   }, []);
 
@@ -229,6 +265,14 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isCardModalOpen, isCategoryModalOpen, isDataModalOpen]);
 
+  useEffect(() => {
+    if (!isDataModalOpen || !serverSession || !serverApi) {
+      return;
+    }
+
+    void refreshSharing(serverSession);
+  }, [isDataModalOpen, serverApi, serverSession]);
+
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
   const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
   const pieSegments = useMemo(() => getCategoryPieSegments(buckets), [buckets]);
@@ -242,6 +286,13 @@ export default function Home() {
   );
   const progressWidth = String(Math.min(summary.expenseRate, 100)) + "%";
   const pieBackground = buildPieBackground(pieSegments);
+  const currentServerMember = useMemo(
+    () => findCurrentMember(members, serverSession?.user.id),
+    [members, serverSession?.user.id]
+  );
+  const currentWorkspaceRole = currentServerMember?.role ?? serverSession?.workspace?.role ?? null;
+  const canManageCurrentWorkspace = canManageSharing(currentWorkspaceRole);
+  const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole);
 
   function handleIncomeChange(value: string) {
     setMonthlyIncome(parseCurrencyInput(value));
@@ -396,6 +447,224 @@ export default function Home() {
     setSelectedDeleteIds([]);
   }
 
+  async function handleServerAuthSubmit() {
+    if (!serverApi) {
+      setServerStatus("서버 API URL이 없어 로컬 전용으로 동작합니다.");
+      return;
+    }
+
+    setIsServerBusy(true);
+    setServerStatus("");
+
+    try {
+      const authResult =
+        serverAuthMode === "register"
+          ? await serverApi.register({ email: serverEmail, password: serverPassword, name: serverName || serverEmail })
+          : await serverApi.login({ email: serverEmail, password: serverPassword });
+      const nextSession = {
+        ...authResult,
+        workspace: authResult.workspace ?? serverSession?.workspace ?? null
+      };
+
+      saveServerSession(nextSession);
+      setServerSession(nextSession);
+      setServerPassword("");
+      await prepareServerSyncDecision(nextSession);
+      await refreshSharing(nextSession);
+    } catch (error) {
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  function handleServerLogout() {
+    window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
+    setServerSession(null);
+    setServerSnapshot(null);
+    setMembers([]);
+    setInvitations([]);
+    setCreatedInvitation(null);
+    setAcceptTokens({});
+    setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
+  }
+
+  async function prepareServerSyncDecision(session: ServerSession) {
+    if (!serverApi) {
+      return;
+    }
+
+    if (!session.workspace) {
+      setServerSnapshot(null);
+      setServerStatus("서버 계정은 연결됐지만 선택된 워크스페이스가 없습니다. 초대 수락 후 동기화를 사용할 수 있습니다.");
+      return;
+    }
+
+    const remoteSnapshot = await serverApi.getWorkspaceSnapshot(session.workspace.id, session.token);
+    setServerSnapshot(remoteSnapshot);
+
+    if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())) {
+      setServerStatus("서버 워크스페이스가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
+      return;
+    }
+
+    if (!isWorkspaceSnapshotEmpty(remoteSnapshot)) {
+      setServerStatus("서버 데이터가 있습니다. 불러오거나 현재 브라우저 데이터로 동기화할 수 있습니다.");
+      return;
+    }
+
+    setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
+  }
+
+  async function handleSyncNow() {
+    if (!serverApi || !serverSession?.workspace) {
+      setServerStatus("동기화할 서버 워크스페이스가 없습니다.");
+      return;
+    }
+
+    if (!canUploadServerSnapshot) {
+      setServerStatus("보기 전용 권한은 서버에 업로드할 수 없습니다.");
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      const nextSnapshot = buildWorkspaceSnapshot(serverSession.workspace.id, getCurrentBudgetSnapshot());
+      const savedSnapshot = await serverApi.putWorkspaceSnapshot(serverSession.workspace.id, nextSnapshot, serverSession.token);
+      setServerSnapshot(savedSnapshot);
+      setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
+    } catch (error) {
+      setServerStatus(getErrorMessage(error) + " 로컬 저장은 계속 유지됩니다.");
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleLoadServerSnapshot() {
+    if (!serverApi || !serverSession?.workspace) {
+      setServerStatus("불러올 서버 워크스페이스가 없습니다.");
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      const nextSnapshot = serverSnapshot ?? (await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token));
+      applyBudgetSnapshot(hydrateWorkspaceSnapshot(nextSnapshot));
+      setServerSnapshot(nextSnapshot);
+      setServerStatus("서버 데이터를 이 브라우저에 불러왔습니다.");
+    } catch (error) {
+      setServerStatus(getErrorMessage(error) + " 로컬 데이터는 변경하지 않았습니다.");
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  function handleStayLocalOnly() {
+    setServerStatus("로컬 전용으로 계속합니다. 서버 연결은 유지되지만 데이터를 덮어쓰지 않습니다.");
+  }
+
+  async function refreshSharing(session = serverSession) {
+    if (!serverApi || !session) {
+      return;
+    }
+
+    try {
+      const [nextMembers, nextInvitations] = await Promise.all([
+        session.workspace ? serverApi.listMembers(session.workspace.id, session.token) : Promise.resolve([]),
+        serverApi.listInvitations(session.token)
+      ]);
+      setMembers(nextMembers);
+      setInvitations(nextInvitations);
+    } catch (error) {
+      setServerStatus(getErrorMessage(error));
+    }
+  }
+
+  async function handleCreateInvitation() {
+    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      const invitation = await serverApi.createInvitation(serverSession.workspace.id, { email: inviteEmail, role: inviteRole }, serverSession.token);
+      setCreatedInvitation(invitation);
+      setInviteEmail("");
+      setServerStatus("초대를 만들었습니다. 아래 토큰을 초대받은 사용자에게 전달하세요.");
+      await refreshSharing(serverSession);
+    } catch (error) {
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleAcceptInvitation(invitationId: string) {
+    if (!serverApi || !serverSession) {
+      return;
+    }
+
+    const tokenValue = acceptTokens[invitationId]?.trim() ?? "";
+    if (!tokenValue) {
+      setServerStatus("초대 토큰을 입력하세요.");
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      const accepted = await serverApi.acceptInvitation(invitationId, tokenValue, serverSession.token);
+      const nextSession = { ...serverSession, workspace: accepted.workspace };
+      saveServerSession(nextSession);
+      setServerSession(nextSession);
+      setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: "" }));
+      setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
+      await prepareServerSyncDecision(nextSession);
+      await refreshSharing(nextSession);
+    } catch (error) {
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleUpdateMemberRole(memberId: string, role: WorkspaceMemberDto["role"]) {
+    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      await serverApi.updateMemberRole(serverSession.workspace.id, memberId, role, serverSession.token);
+      setServerStatus("멤버 권한을 변경했습니다.");
+      await refreshSharing(serverSession);
+    } catch (error) {
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleDeleteMember(memberId: string) {
+    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
+      return;
+    }
+
+    if (!window.confirm("이 멤버를 워크스페이스에서 제거할까요?")) {
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      await serverApi.deleteMember(serverSession.workspace.id, memberId, serverSession.token);
+      setServerStatus("멤버를 제거했습니다.");
+      await refreshSharing(serverSession);
+    } catch (error) {
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
   function handleExportTemplate() {
     const csv = buildFixedCostCsvTemplate({ fixedCosts, categories, cards });
     const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
@@ -474,6 +743,29 @@ export default function Home() {
         backupFileRef.current.value = "";
       }
     }
+  }
+
+  function getCurrentBudgetSnapshot(): LocalBudgetSnapshot {
+    return {
+      monthlyIncome,
+      categories,
+      cards,
+      fixedCosts
+    };
+  }
+
+  function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
+    setMonthlyIncome(snapshot.monthlyIncome);
+    setCategories(snapshot.categories);
+    setCards(snapshot.cards);
+    setFixedCosts(snapshot.fixedCosts);
+    setCategoryFilterId("all");
+    setIsDeleteMode(false);
+    setSelectedDeleteIds([]);
+  }
+
+  function saveServerSession(session: ServerSession) {
+    window.localStorage.setItem(SERVER_SESSION_STORAGE_KEY, JSON.stringify(session));
   }
 
   function handlePieMove(event: MouseEvent<HTMLDivElement>) {
@@ -953,7 +1245,215 @@ export default function Home() {
                 </div>
               </section>
             </div>
-            <p className="local-note">GitHub Pages 버전은 서버 저장이 없습니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
+            {serverApi ? (
+              <section className="server-panel" aria-label="서버 동기화">
+                <div className="server-panel-header">
+                  <div>
+                    <p className="section-label">서버 동기화</p>
+                    <h3>계정 및 공유</h3>
+                  </div>
+                  {serverSession ? (
+                    <button className="secondary-button" type="button" onClick={handleServerLogout}>
+                      서버 로그아웃
+                    </button>
+                  ) : null}
+                </div>
+
+                {serverSession ? (
+                  <div className="server-session-summary">
+                    <div>
+                      <span>계정</span>
+                      <strong>{serverSession.user.name}</strong>
+                      <small>{serverSession.user.email}</small>
+                    </div>
+                    <div>
+                      <span>워크스페이스</span>
+                      <strong>{serverSession.workspace?.name ?? "선택 안 됨"}</strong>
+                      <small>{currentWorkspaceRole ? workspaceRoleLabels[currentWorkspaceRole] : "초대 수락 후 선택"}</small>
+                    </div>
+                  </div>
+                ) : (
+                  <form
+                    className="server-auth-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleServerAuthSubmit();
+                    }}
+                  >
+                    <div className="chart-toggle" aria-label="서버 계정 모드">
+                      <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("login")}>
+                        로그인
+                      </button>
+                      <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("register")}>
+                        가입
+                      </button>
+                    </div>
+                    <label htmlFor="server-email">이메일</label>
+                    <input id="server-email" type="email" value={serverEmail} onChange={(event) => setServerEmail(event.target.value)} />
+                    {serverAuthMode === "register" ? (
+                      <>
+                        <label htmlFor="server-name">이름</label>
+                        <input id="server-name" type="text" value={serverName} onChange={(event) => setServerName(event.target.value)} />
+                      </>
+                    ) : null}
+                    <label htmlFor="server-password">비밀번호</label>
+                    <input
+                      id="server-password"
+                      type="password"
+                      value={serverPassword}
+                      onChange={(event) => setServerPassword(event.target.value)}
+                    />
+                    <button className="primary-button" disabled={isServerBusy} type="submit">
+                      {serverAuthMode === "register" ? "서버 가입" : "서버 로그인"}
+                    </button>
+                  </form>
+                )}
+
+                {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+
+                {serverSession?.workspace ? (
+                  <div className="sync-actions">
+                    <button
+                      className="secondary-button"
+                      disabled={isServerBusy || !canUploadServerSnapshot}
+                      type="button"
+                      onClick={() => void handleSyncNow()}
+                    >
+                      지금 동기화
+                    </button>
+                    {serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot()) ? (
+                      <button
+                        className="secondary-button"
+                        disabled={isServerBusy || !canUploadServerSnapshot}
+                        type="button"
+                        onClick={() => void handleSyncNow()}
+                      >
+                        이 브라우저 데이터 업로드
+                      </button>
+                    ) : null}
+                    {serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot) ? (
+                      <button className="secondary-button" disabled={isServerBusy} type="button" onClick={() => void handleLoadServerSnapshot()}>
+                        서버 데이터 불러오기
+                      </button>
+                    ) : null}
+                    <button className="secondary-button" disabled={isServerBusy} type="button" onClick={handleStayLocalOnly}>
+                      로컬 전용 유지
+                    </button>
+                  </div>
+                ) : null}
+
+                {serverSession && invitations.length > 0 ? (
+                  <section className="sharing-block">
+                    <div>
+                      <p className="section-label">받은 초대</p>
+                      <h4>대기 중인 초대</h4>
+                    </div>
+                    <div className="sharing-list">
+                      {invitations.map((invitation) => (
+                        <div className="invitation-row" key={invitation.id}>
+                          <div>
+                            <strong>{invitation.email}</strong>
+                            <small>{invitationRoleLabels[invitation.role]} · {invitation.id}</small>
+                          </div>
+                          <input
+                            aria-label="초대 토큰"
+                            placeholder="초대 토큰"
+                            type="text"
+                            value={acceptTokens[invitation.id] ?? ""}
+                            onChange={(event) => setAcceptTokens((tokens) => ({ ...tokens, [invitation.id]: event.target.value }))}
+                          />
+                          <button className="secondary-button" disabled={isServerBusy} type="button" onClick={() => void handleAcceptInvitation(invitation.id)}>
+                            수락
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
+                {serverSession?.workspace ? (
+                  <section className="sharing-block" aria-label="공유 관리">
+                    <div className="server-panel-header">
+                      <div>
+                        <p className="section-label">공유 관리</p>
+                        <h4>멤버와 초대</h4>
+                      </div>
+                      <button className="secondary-button" disabled={isServerBusy} type="button" onClick={() => void refreshSharing()}>
+                        새로고침
+                      </button>
+                    </div>
+
+                    <div className="sharing-list">
+                      {members.map((member) => (
+                        <div className="member-row" key={member.id}>
+                          <div>
+                            <strong>{member.name}</strong>
+                            <small>{member.email}</small>
+                          </div>
+                          {canManageCurrentWorkspace ? (
+                            <select
+                              aria-label="멤버 권한"
+                              value={member.role}
+                              onChange={(event) => void handleUpdateMemberRole(member.id, event.target.value as WorkspaceMemberDto["role"])}
+                            >
+                              {(["owner", "editor", "viewer"] as const).map((role) => (
+                                <option key={role} value={role}>
+                                  {workspaceRoleLabels[role]}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="role-pill">{workspaceRoleLabels[member.role]}</span>
+                          )}
+                          {canManageCurrentWorkspace ? (
+                            <button className="ghost-button" disabled={isServerBusy} type="button" onClick={() => void handleDeleteMember(member.id)}>
+                              제거
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+
+                    {canManageCurrentWorkspace ? (
+                      <div className="invite-panel">
+                        <label htmlFor="invite-email">초대 이메일</label>
+                        <input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} />
+                        <label htmlFor="invite-role">권한</label>
+                        <select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as InvitationRole)}>
+                          {(["viewer", "editor"] as const).map((role) => (
+                            <option key={role} value={role}>
+                              {invitationRoleLabels[role]}
+                            </option>
+                          ))}
+                        </select>
+                        <button className="secondary-button" disabled={isServerBusy} type="button" onClick={() => void handleCreateInvitation()}>
+                          초대 생성
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="local-note">공유 변경은 소유자만 할 수 있습니다.</p>
+                    )}
+
+                    {createdInvitation?.token ? (
+                      <div className="created-token">
+                        <label htmlFor="created-invitation-token">방금 만든 초대 토큰</label>
+                        <input id="created-invitation-token" readOnly type="text" value={createdInvitation.token} />
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => void navigator.clipboard?.writeText(createdInvitation.token ?? "")}
+                        >
+                          토큰 복사
+                        </button>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+              </section>
+            ) : (
+              <p className="local-note">서버 API URL이 없어 로컬 전용으로 동작합니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
+            )}
+            <p className="local-note">GitHub Pages 버전은 서버 저장이 없어도 그대로 사용할 수 있습니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
             <input
               ref={importFileRef}
               className="sr-only"
@@ -1269,4 +1769,19 @@ function readJson<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function isServerSession(value: ServerSession | null): value is ServerSession {
+  return (
+    !!value &&
+    typeof value.token === "string" &&
+    value.token.length > 0 &&
+    typeof value.user?.id === "string" &&
+    typeof value.user?.email === "string" &&
+    typeof value.user?.name === "string"
+  );
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "서버 요청에 실패했습니다.";
 }
