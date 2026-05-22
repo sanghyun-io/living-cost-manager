@@ -1,11 +1,11 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
-import type {
+import {
   Prisma,
-  PrismaClient,
-  User,
-  WorkspaceInvitation,
-  WorkspaceInvitationRole
+  type PrismaClient,
+  type User,
+  type WorkspaceInvitation,
+  type WorkspaceInvitationRole
 } from "@prisma/client";
 import type {
   WorkspaceDto,
@@ -14,19 +14,13 @@ import type {
 } from "@living-cost-manager/shared";
 
 import { toWorkspaceMemberDto } from "./membership.js";
+import { normalizeEmail } from "./email.js";
 
 const invitationTokenBytes = 32;
 const invitationTtlMs = 7 * 24 * 60 * 60 * 1000;
 
 export type CreatedInvitation = WorkspaceInvitationDto & {
   token: string;
-};
-
-type WorkspaceInvitationWithWorkspace = WorkspaceInvitation & {
-  workspace: {
-    id: string;
-    name: string;
-  };
 };
 
 export class InvitationConflictError extends Error {
@@ -36,8 +30,11 @@ export class InvitationConflictError extends Error {
   }
 }
 
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
+export class InvalidInvitationError extends Error {
+  constructor(message = "Invitation not found") {
+    super(message);
+    this.name = "InvalidInvitationError";
+  }
 }
 
 export function createInvitationToken(): string {
@@ -46,14 +43,6 @@ export function createInvitationToken(): string {
 
 export function hashInvitationToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
-}
-
-export function verifyInvitationToken(token: string, tokenHash: string): boolean {
-  const candidateHash = hashInvitationToken(token);
-  const candidate = Buffer.from(candidateHash, "hex");
-  const expected = Buffer.from(tokenHash, "hex");
-
-  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
 export function toWorkspaceInvitationDto(
@@ -87,21 +76,43 @@ export async function createWorkspaceInvitation(
   role: WorkspaceInvitationRole
 ): Promise<CreatedInvitation> {
   const normalizedEmail = normalizeEmail(email);
-  const invitee = await prisma.user.findUnique({
-    where: {
-      email: normalizedEmail
-    },
-    select: {
-      id: true
-    }
-  });
+  const now = new Date();
 
-  if (invitee) {
-    const existingMember = await prisma.workspaceMember.findUnique({
+  return prisma.$transaction(async (tx) => {
+    const invitee = await tx.user.findUnique({
       where: {
-        workspaceId_userId: {
-          workspaceId,
-          userId: invitee.id
+        email: normalizedEmail
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (invitee) {
+      const existingMember = await tx.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: {
+            workspaceId,
+            userId: invitee.id
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (existingMember) {
+        throw new InvitationConflictError("User is already a workspace member");
+      }
+    }
+
+    const expiredPendingInvitation = await tx.workspaceInvitation.findFirst({
+      where: {
+        workspaceId,
+        email: normalizedEmail,
+        status: "pending",
+        expiresAt: {
+          lte: now
         }
       },
       select: {
@@ -109,44 +120,46 @@ export async function createWorkspaceInvitation(
       }
     });
 
-    if (existingMember) {
-      throw new InvitationConflictError("User is already a workspace member");
+    if (expiredPendingInvitation) {
+      await tx.workspaceInvitation.deleteMany({
+        where: {
+          workspaceId,
+          email: normalizedEmail,
+          status: "expired"
+        }
+      });
+      await tx.workspaceInvitation.updateMany({
+        where: {
+          workspaceId,
+          email: normalizedEmail,
+          status: "pending",
+          expiresAt: {
+            lte: now
+          }
+        },
+        data: {
+          status: "expired"
+        }
+      });
     }
-  }
 
-  const existingInvitation = await prisma.workspaceInvitation.findFirst({
-    where: {
-      workspaceId,
-      email: normalizedEmail,
-      acceptedAt: null,
-      expiresAt: {
-        gt: new Date()
+    const token = createInvitationToken();
+    const invitation = await tx.workspaceInvitation.create({
+      data: {
+        workspaceId,
+        email: normalizedEmail,
+        role,
+        status: "pending",
+        tokenHash: hashInvitationToken(token),
+        expiresAt: new Date(Date.now() + invitationTtlMs)
       }
-    },
-    select: {
-      id: true
-    }
+    });
+
+    return {
+      ...toWorkspaceInvitationDto(invitation),
+      token
+    };
   });
-
-  if (existingInvitation) {
-    throw new InvitationConflictError("Invitation already exists");
-  }
-
-  const token = createInvitationToken();
-  const invitation = await prisma.workspaceInvitation.create({
-    data: {
-      workspaceId,
-      email: normalizedEmail,
-      role,
-      tokenHash: hashInvitationToken(token),
-      expiresAt: new Date(Date.now() + invitationTtlMs)
-    }
-  });
-
-  return {
-    ...toWorkspaceInvitationDto(invitation),
-    token
-  };
 }
 
 export async function listPendingInvitationsForEmail(
@@ -157,6 +170,7 @@ export async function listPendingInvitationsForEmail(
     where: {
       email: normalizeEmail(email),
       acceptedAt: null,
+      status: "pending",
       expiresAt: {
         gt: new Date()
       }
@@ -171,24 +185,49 @@ export async function listPendingInvitationsForEmail(
 
 export async function acceptWorkspaceInvitation(
   prisma: PrismaClient,
-  invitation: WorkspaceInvitationWithWorkspace,
+  invitationId: string,
+  token: string,
   user: User
 ): Promise<{ workspace: WorkspaceDto; member: WorkspaceMemberDto }> {
   return prisma.$transaction(async (tx) => {
-    const existingMember = await tx.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: invitation.workspaceId,
-          userId: user.id
-        }
+    const now = new Date();
+    const tokenHash = hashInvitationToken(token);
+    const invitationWhere = {
+      id: invitationId,
+      email: normalizeEmail(user.email),
+      status: "pending" as const,
+      acceptedAt: null,
+      expiresAt: {
+        gt: now
       },
-      select: {
-        id: true
+      tokenHash
+    };
+    const invitation = await tx.workspaceInvitation.findFirst({
+      where: invitationWhere,
+      include: {
+        workspace: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
       }
     });
 
-    if (existingMember) {
-      throw new InvitationConflictError("User is already a workspace member");
+    if (!invitation) {
+      throw new InvalidInvitationError();
+    }
+
+    const claim = await tx.workspaceInvitation.updateMany({
+      where: invitationWhere,
+      data: {
+        acceptedAt: now,
+        status: "accepted"
+      }
+    });
+
+    if (claim.count !== 1) {
+      throw new InvalidInvitationError();
     }
 
     const member = await tx.workspaceMember.create({
@@ -207,15 +246,6 @@ export async function acceptWorkspaceInvitation(
       }
     });
 
-    await tx.workspaceInvitation.update({
-      where: {
-        id: invitation.id
-      },
-      data: {
-        acceptedAt: new Date()
-      }
-    });
-
     return {
       workspace: {
         id: invitation.workspace.id,
@@ -229,9 +259,12 @@ export async function acceptWorkspaceInvitation(
 
 export function isUniqueConstraintError(error: unknown): boolean {
   return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as Prisma.PrismaClientKnownRequestError).code === "P2002"
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+  );
+}
+
+export function isTransactionConflictError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034"
   );
 }

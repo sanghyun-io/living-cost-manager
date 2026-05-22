@@ -49,6 +49,7 @@ model WorkspaceInvitation {
   workspaceId String
   email       String
   role        WorkspaceInvitationRole
+  status      WorkspaceInvitationStatus @default(pending)
   tokenHash   String        @unique
   expiresAt   DateTime
   acceptedAt  DateTime?
@@ -57,6 +58,7 @@ model WorkspaceInvitation {
 
   @@index([email])
   @@index([workspaceId])
+  @@unique([workspaceId, email, status])
 }
 
 enum WorkspaceRole {
@@ -68,6 +70,13 @@ enum WorkspaceRole {
 enum WorkspaceInvitationRole {
   editor
   viewer
+}
+
+enum WorkspaceInvitationStatus {
+  pending
+  accepted
+  revoked
+  expired
 }
 
 model Category {

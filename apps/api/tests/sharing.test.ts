@@ -1,4 +1,5 @@
 import { PrismaClient, type WorkspaceInvitationRole, type WorkspaceRole } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import { buildApp } from "../src/app.js";
@@ -45,6 +46,10 @@ type InvitationCreateResponse = {
   acceptedAt: string | null;
   token: string;
 };
+
+function hashTestToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 async function registerTestUser(name: string, email?: string): Promise<RegisteredUser> {
   const response = await app.inject({
@@ -187,6 +192,7 @@ describe("workspace sharing routes", () => {
     expect(storedInvitation).toMatchObject({
       email: invitee.user.email,
       role: "editor",
+      status: "pending",
       acceptedAt: null
     });
     expect(storedInvitation?.tokenHash).toEqual(expect.any(String));
@@ -228,6 +234,16 @@ describe("workspace sharing routes", () => {
       }
     });
     expect(membership?.role).toBe("editor");
+
+    const acceptedInvitation = await prisma.workspaceInvitation.findUnique({
+      where: {
+        id: invitation.id
+      }
+    });
+    expect(acceptedInvitation).toMatchObject({
+      acceptedAt: expect.any(Date),
+      status: "accepted"
+    });
   });
 
   test("owner, editor, and viewer can list members", async () => {
@@ -389,7 +405,8 @@ describe("workspace sharing routes", () => {
         id: acceptedInvitation.id
       },
       data: {
-        acceptedAt: new Date()
+        acceptedAt: new Date(),
+        status: "accepted"
       }
     });
 
@@ -471,44 +488,30 @@ describe("workspace sharing routes", () => {
       }
     });
 
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: `/invitations/${wrongEmailInvitation.id}/accept`,
-          headers: authHeaders(wrongUser.token),
-          payload: {
-            token: wrongEmailInvitation.token
-          }
-        })
-      ).statusCode
-    ).toBe(403);
-
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: `/invitations/${wrongTokenInvitation.id}/accept`,
-          headers: authHeaders(wrongTokenInvitee.token),
-          payload: {
-            token: "wrong-token"
-          }
-        })
-      ).statusCode
-    ).toBe(404);
-
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: `/invitations/${expiredInvitation.id}/accept`,
-          headers: authHeaders(expiredInvitee.token),
-          payload: {
-            token: expiredInvitation.token
-          }
-        })
-      ).statusCode
-    ).toBe(404);
+    const wrongEmailAccept = await app.inject({
+      method: "POST",
+      url: `/invitations/${wrongEmailInvitation.id}/accept`,
+      headers: authHeaders(wrongUser.token),
+      payload: {
+        token: wrongEmailInvitation.token
+      }
+    });
+    const wrongTokenAccept = await app.inject({
+      method: "POST",
+      url: `/invitations/${wrongTokenInvitation.id}/accept`,
+      headers: authHeaders(wrongTokenInvitee.token),
+      payload: {
+        token: "wrong-token"
+      }
+    });
+    const expiredAccept = await app.inject({
+      method: "POST",
+      url: `/invitations/${expiredInvitation.id}/accept`,
+      headers: authHeaders(expiredInvitee.token),
+      payload: {
+        token: expiredInvitation.token
+      }
+    });
 
     const firstAccept = await app.inject({
       method: "POST",
@@ -528,7 +531,19 @@ describe("workspace sharing routes", () => {
         token: acceptedInvitation.token
       }
     });
-    expect(secondAccept.statusCode).toBe(409);
+
+    for (const response of [
+      wrongEmailAccept,
+      wrongTokenAccept,
+      expiredAccept,
+      secondAccept
+    ]) {
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        message: "Invitation not found"
+      });
+      expect(response.body).not.toMatch(/tokenHash|acceptedAt|expiresAt|workspaceId/i);
+    }
 
     const rawBody = [
       wrongEmailInvitation,
@@ -539,6 +554,32 @@ describe("workspace sharing routes", () => {
       .map((invitation) => invitation.token)
       .join(" ");
     expect(firstAccept.body + secondAccept.body).not.toContain(rawBody);
+  });
+
+  test("database prevents duplicate pending invitations for the same workspace and email", async () => {
+    const owner = await registerTestUser("DB Invariant Owner");
+    const invitee = await registerTestUser("DB Invariant Invitee");
+    const firstInvitation = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      invitee.user.email
+    );
+    expect(firstInvitation.statusCode).toBe(201);
+
+    await expect(
+      prisma.workspaceInvitation.create({
+        data: {
+          workspaceId: owner.workspace.id,
+          email: invitee.user.email,
+          role: "viewer",
+          tokenHash: hashTestToken(crypto.randomUUID()),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          status: "pending"
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "P2002"
+    });
   });
 
   test("owner can change member role", async () => {
@@ -597,6 +638,53 @@ describe("workspace sharing routes", () => {
       }
     });
     expect(storedOwner?.role).toBe("owner");
+  });
+
+  test("concurrent owner demote and remove cannot leave a workspace without owners", async () => {
+    const owner = await registerTestUser("Concurrent Owner");
+    const secondOwner = await addWorkspaceMember(owner.workspace.id, "owner");
+    const ownerMembership = await prisma.workspaceMember.findUniqueOrThrow({
+      where: {
+        workspaceId_userId: {
+          workspaceId: owner.workspace.id,
+          userId: owner.user.id
+        }
+      }
+    });
+    const secondOwnerMembership = await prisma.workspaceMember.findUniqueOrThrow({
+      where: {
+        workspaceId_userId: {
+          workspaceId: owner.workspace.id,
+          userId: secondOwner.user.id
+        }
+      }
+    });
+
+    const [demoteResponse, deleteResponse] = await Promise.all([
+      app.inject({
+        method: "PATCH",
+        url: `/workspaces/${owner.workspace.id}/members/${ownerMembership.id}`,
+        headers: authHeaders(owner.token),
+        payload: {
+          role: "viewer"
+        }
+      }),
+      app.inject({
+        method: "DELETE",
+        url: `/workspaces/${owner.workspace.id}/members/${secondOwnerMembership.id}`,
+        headers: authHeaders(owner.token)
+      })
+    ]);
+
+    const ownerCount = await prisma.workspaceMember.count({
+      where: {
+        workspaceId: owner.workspace.id,
+        role: "owner"
+      }
+    });
+
+    expect(ownerCount).toBeGreaterThan(0);
+    expect([demoteResponse.statusCode, deleteResponse.statusCode]).toContain(409);
   });
 
   test("duplicate invitation and existing member return conflict", async () => {

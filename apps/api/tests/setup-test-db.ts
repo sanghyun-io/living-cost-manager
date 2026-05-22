@@ -10,7 +10,7 @@ const rootDir = path.resolve(
   "../../.."
 );
 
-execFileSync("pnpm", ["prisma", "db", "push", "--skip-generate"], {
+execFileSync("pnpm", ["prisma", "db", "push", "--skip-generate", "--accept-data-loss"], {
   cwd: rootDir,
   env: {
     ...process.env,

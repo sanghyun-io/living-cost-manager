@@ -1,4 +1,9 @@
-import type { PrismaClient, WorkspaceMember, WorkspaceRole } from "@prisma/client";
+import {
+  Prisma,
+  type PrismaClient,
+  type WorkspaceMember,
+  type WorkspaceRole
+} from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import type { WorkspaceMemberDto } from "@living-cost-manager/shared";
 
@@ -8,6 +13,20 @@ type WorkspaceMemberWithUser = WorkspaceMember & {
     name: string;
   };
 };
+
+export class LastOwnerConflictError extends Error {
+  constructor(message = "Cannot remove the last owner") {
+    super(message);
+    this.name = "LastOwnerConflictError";
+  }
+}
+
+export class WorkspaceMemberNotFoundError extends Error {
+  constructor(message = "Workspace member not found") {
+    super(message);
+    this.name = "WorkspaceMemberNotFoundError";
+  }
+}
 
 export function toWorkspaceMemberDto(
   member: WorkspaceMemberWithUser
@@ -126,4 +145,121 @@ export async function isLastWorkspaceOwner(
   });
 
   return ownerCount <= 1;
+}
+
+export async function updateWorkspaceMemberRole(
+  prisma: PrismaClient,
+  workspaceId: string,
+  memberId: string,
+  role: WorkspaceRole
+): Promise<WorkspaceMemberDto> {
+  return prisma.$transaction(
+    async (tx) => {
+      const member = await tx.workspaceMember.findFirst({
+        where: {
+          id: memberId,
+          workspaceId
+        },
+        include: {
+          user: {
+            select: {
+              email: true,
+              name: true
+            }
+          }
+        }
+      });
+
+      if (!member) {
+        throw new WorkspaceMemberNotFoundError();
+      }
+
+      if (member.role === "owner" && role !== "owner") {
+        const ownerCount = await tx.workspaceMember.count({
+          where: {
+            workspaceId,
+            role: "owner"
+          }
+        });
+
+        if (ownerCount <= 1) {
+          throw new LastOwnerConflictError("Cannot change the last owner");
+        }
+      }
+
+      const updatedMember = await tx.workspaceMember.update({
+        where: {
+          id: memberId
+        },
+        data: {
+          role
+        },
+        include: {
+          user: {
+            select: {
+              email: true,
+              name: true
+            }
+          }
+        }
+      });
+
+      return toWorkspaceMemberDto(updatedMember);
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+    }
+  );
+}
+
+export async function deleteWorkspaceMember(
+  prisma: PrismaClient,
+  workspaceId: string,
+  memberId: string
+): Promise<void> {
+  await prisma.$transaction(
+    async (tx) => {
+      const member = await tx.workspaceMember.findFirst({
+        where: {
+          id: memberId,
+          workspaceId
+        },
+        select: {
+          role: true
+        }
+      });
+
+      if (!member) {
+        throw new WorkspaceMemberNotFoundError();
+      }
+
+      if (member.role === "owner") {
+        const ownerCount = await tx.workspaceMember.count({
+          where: {
+            workspaceId,
+            role: "owner"
+          }
+        });
+
+        if (ownerCount <= 1) {
+          throw new LastOwnerConflictError();
+        }
+      }
+
+      await tx.workspaceMember.delete({
+        where: {
+          id: memberId
+        }
+      });
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+    }
+  );
+}
+
+export function isMembershipTransactionConflictError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034"
+  );
 }

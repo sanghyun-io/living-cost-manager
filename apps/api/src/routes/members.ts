@@ -3,11 +3,14 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import {
-  findWorkspaceMemberDto,
-  isLastWorkspaceOwner,
+  deleteWorkspaceMember,
+  isMembershipTransactionConflictError,
+  LastOwnerConflictError,
   listWorkspaceMembers,
   requireWorkspaceOwner,
-  requireWorkspaceRole
+  requireWorkspaceRole,
+  updateWorkspaceMemberRole,
+  WorkspaceMemberNotFoundError
 } from "../services/membership.js";
 
 const workspaceParamsSchema = z.object({
@@ -58,49 +61,27 @@ export async function memberRoutes(app: FastifyInstance) {
         throw app.httpErrors.badRequest("Invalid request body");
       }
 
-      const existingMember = await findWorkspaceMemberDto(
-        app.prisma,
-        workspaceId,
-        memberId
-      );
-
-      if (!existingMember) {
-        throw app.httpErrors.notFound("Workspace member not found");
-      }
-
-      if (
-        existingMember.role === "owner" &&
-        parsedBody.data.role !== "owner" &&
-        (await isLastWorkspaceOwner(app.prisma, workspaceId, memberId))
-      ) {
-        throw app.httpErrors.conflict("Cannot change the last owner");
-      }
-
-      const updatedMember = await app.prisma.workspaceMember.update({
-        where: {
-          id: memberId
-        },
-        data: {
-          role: parsedBody.data.role
-        },
-        include: {
-          user: {
-            select: {
-              email: true,
-              name: true
-            }
-          }
+      try {
+        return await updateWorkspaceMemberRole(
+          app.prisma,
+          workspaceId,
+          memberId,
+          parsedBody.data.role
+        );
+      } catch (error) {
+        if (error instanceof WorkspaceMemberNotFoundError) {
+          throw app.httpErrors.notFound("Workspace member not found");
         }
-      });
 
-      return {
-        id: updatedMember.id,
-        workspaceId: updatedMember.workspaceId,
-        userId: updatedMember.userId,
-        email: updatedMember.user.email,
-        name: updatedMember.user.name,
-        role: updatedMember.role
-      };
+        if (
+          error instanceof LastOwnerConflictError ||
+          isMembershipTransactionConflictError(error)
+        ) {
+          throw app.httpErrors.conflict("Cannot change the last owner");
+        }
+
+        throw error;
+      }
     }
   );
 
@@ -112,25 +93,22 @@ export async function memberRoutes(app: FastifyInstance) {
 
       await requireWorkspaceOwner(app, request.user.sub, workspaceId);
 
-      const existingMember = await findWorkspaceMemberDto(
-        app.prisma,
-        workspaceId,
-        memberId
-      );
-
-      if (!existingMember) {
-        throw app.httpErrors.notFound("Workspace member not found");
-      }
-
-      if (await isLastWorkspaceOwner(app.prisma, workspaceId, memberId)) {
-        throw app.httpErrors.conflict("Cannot remove the last owner");
-      }
-
-      await app.prisma.workspaceMember.delete({
-        where: {
-          id: memberId
+      try {
+        await deleteWorkspaceMember(app.prisma, workspaceId, memberId);
+      } catch (error) {
+        if (error instanceof WorkspaceMemberNotFoundError) {
+          throw app.httpErrors.notFound("Workspace member not found");
         }
-      });
+
+        if (
+          error instanceof LastOwnerConflictError ||
+          isMembershipTransactionConflictError(error)
+        ) {
+          throw app.httpErrors.conflict("Cannot remove the last owner");
+        }
+
+        throw error;
+      }
 
       return reply.code(204).send();
     }

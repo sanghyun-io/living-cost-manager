@@ -9,6 +9,8 @@ import argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 
+import { normalizeEmail } from "../services/email.js";
+
 function toUserDto(user: { id: string; email: string; name: string }): UserDto {
   return {
     id: user.id,
@@ -21,10 +23,6 @@ function signUserToken(app: FastifyInstance, userId: string): string {
   return app.jwt.sign({
     sub: userId
   });
-}
-
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 function normalizeAuthBody(body: unknown): unknown {

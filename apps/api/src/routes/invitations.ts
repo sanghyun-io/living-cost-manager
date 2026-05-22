@@ -9,12 +9,13 @@ import {
   acceptWorkspaceInvitation,
   createWorkspaceInvitation,
   findUserForAuthenticatedRequest,
+  InvalidInvitationError,
   InvitationConflictError,
+  isTransactionConflictError,
   isUniqueConstraintError,
-  listPendingInvitationsForEmail,
-  normalizeEmail,
-  verifyInvitationToken
+  listPendingInvitationsForEmail
 } from "../services/invitations.js";
+import { normalizeEmail } from "../services/email.js";
 import { requireWorkspaceOwner } from "../services/membership.js";
 
 const workspaceParamsSchema = z.object({
@@ -77,7 +78,11 @@ export async function invitationRoutes(app: FastifyInstance) {
 
         return reply.code(201).send(invitation);
       } catch (error) {
-        if (error instanceof InvitationConflictError || isUniqueConstraintError(error)) {
+        if (
+          error instanceof InvitationConflictError ||
+          isUniqueConstraintError(error) ||
+          isTransactionConflictError(error)
+        ) {
           throw app.httpErrors.conflict("Invitation conflict");
         }
 
@@ -113,44 +118,23 @@ export async function invitationRoutes(app: FastifyInstance) {
         throw app.httpErrors.unauthorized("Invalid token");
       }
 
-      const invitation = await app.prisma.workspaceInvitation.findUnique({
-        where: {
-          id: invitationId
-        },
-        include: {
-          workspace: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
-        }
-      });
-
-      if (!invitation) {
-        throw app.httpErrors.notFound("Invitation not found");
-      }
-
-      if (invitation.email !== user.email) {
-        throw app.httpErrors.forbidden("Forbidden");
-      }
-
-      if (invitation.acceptedAt) {
-        throw app.httpErrors.conflict("Invitation already accepted");
-      }
-
-      if (invitation.expiresAt <= new Date()) {
-        throw app.httpErrors.notFound("Invitation not found");
-      }
-
-      if (!verifyInvitationToken(parsedBody.data.token, invitation.tokenHash)) {
-        throw app.httpErrors.notFound("Invitation not found");
-      }
-
       try {
-        return await acceptWorkspaceInvitation(app.prisma, invitation, user);
+        return await acceptWorkspaceInvitation(
+          app.prisma,
+          invitationId,
+          parsedBody.data.token,
+          user
+        );
       } catch (error) {
+        if (error instanceof InvalidInvitationError) {
+          throw app.httpErrors.notFound("Invitation not found");
+        }
+
         if (error instanceof InvitationConflictError || isUniqueConstraintError(error)) {
+          throw app.httpErrors.conflict("Invitation conflict");
+        }
+
+        if (isTransactionConflictError(error)) {
           throw app.httpErrors.conflict("Invitation conflict");
         }
 
