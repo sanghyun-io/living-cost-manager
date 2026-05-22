@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ RUN pnpm --filter @living-cost-manager/api deploy --prod --legacy /prod/api
 RUN cp -R prisma /prod/api/prisma
 RUN cd /prod/api && ./node_modules/.bin/prisma generate --schema=./prisma/schema.prisma
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 WORKDIR /app
 
