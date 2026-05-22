@@ -3,21 +3,103 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model MonthlyFixedCost {
-  id            String   @id @default(cuid())
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String
+  passwordHash String
+  memberships  WorkspaceMember[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model Workspace {
+  id            String                @id @default(cuid())
   name          String
-  categoryId    String
+  monthlyIncome Int                   @default(0)
+  members       WorkspaceMember[]
+  invitations   WorkspaceInvitation[]
+  categories    Category[]
+  cards         PaymentCard[]
+  fixedCosts    FixedCost[]
+  backups       BackupSnapshot[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+
+  @@unique([workspaceId, userId])
+}
+
+model WorkspaceInvitation {
+  id          String        @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole
+  tokenHash   String        @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+
+  @@index([email])
+  @@index([workspaceId])
+}
+
+enum WorkspaceRole {
+  OWNER  @map("owner")
+  EDITOR @map("editor")
+  VIEWER @map("viewer")
+}
+
+model Category {
+  id          String    @id
+  workspaceId String
+  label       String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, label])
+}
+
+model PaymentCard {
+  id          String    @id
+  workspaceId String
+  label       String
+  billingDay  Int
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model FixedCost {
+  id              String    @id
+  workspaceId     String
+  name            String
+  categoryId      String
   paymentMethodId String
   paymentOptionId String
-  amount        Int
-  periodMonths  Float    @default(1)
-  billingDay    Int
-  memo          String?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  amount          Int
+  periodMonths    Float     @default(1)
+  billingDay      Int
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model BackupSnapshot {
+  id          String    @id @default(cuid())
+  workspaceId String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }

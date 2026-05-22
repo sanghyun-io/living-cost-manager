@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: living_cost
+      POSTGRES_PASSWORD: living_cost_dev
+      POSTGRES_DB: living_cost_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - living_cost_pgdata:/var/lib/postgresql/data
+
+volumes:
+  living_cost_pgdata:
