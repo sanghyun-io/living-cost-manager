@@ -1,6 +1,3 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
 -- CreateEnum
 CREATE TYPE "WorkspaceRole" AS ENUM ('owner', 'editor', 'viewer');
 
