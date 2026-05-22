@@ -74,6 +74,20 @@ docker compose -f docker-compose.prod.yml up -d
 
 컨테이너 시작 명령은 migration을 자동 실행하지 않습니다. 새 버전을 올리기 전에 `prisma migrate deploy`를 먼저 실행하는 전략을 사용하세요.
 
+OCI의 기존 PostgreSQL 인스턴스를 사용할 때는 `docker-compose.oci.yml`을 사용합니다. 이 Compose 파일은 API 컨테이너만 실행하고, `.env.oci`에서 `DATABASE_URL`과 `JWT_SECRET`을 읽습니다. `.env.oci`는 절대 커밋하지 않습니다.
+
+```bash
+docker compose -f docker-compose.oci.yml build api
+docker compose -f docker-compose.oci.yml run --rm api ./node_modules/.bin/prisma migrate deploy
+docker compose -f docker-compose.oci.yml up -d api
+```
+
+현재 OCI API gateway에서는 공개 API base URL을 다음 형식으로 둡니다.
+
+```text
+https://api.gamja.top/living-cost-manager/v1
+```
+
 운영 환경에서는 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`를 배포 환경의 비밀 관리 방식으로 주입합니다. Prisma schema는 서비스용 `lcm`, 테스트용 `lcm_test`처럼 분리해서 운영하세요. `JWT_SECRET`, DB 비밀번호, credentials가 포함된 API URL을 README, Compose 파일, Git 커밋, 로그에 남기지 마세요.
 
 OCI나 VM에서는 Docker Compose로 API와 Postgres를 실행하고, 외부 공개는 Nginx, Caddy, OCI Load Balancer 같은 HTTPS reverse proxy 뒤에 두는 구성을 권장합니다. Reverse proxy에서 TLS를 종료하고 API origin을 고정한 뒤, API의 `CORS_ORIGIN`을 GitHub Pages 프론트엔드 URL 또는 허용할 정확한 웹 origin으로 설정하세요.

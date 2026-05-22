@@ -1,0 +1,16 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env.oci
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      API_BASE_PATH: /living-cost-manager/v1
+      CORS_ORIGIN: https://sanghyun-io.github.io
+    ports:
+      - "127.0.0.1:4104:4000"
