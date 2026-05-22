@@ -500,7 +500,7 @@ export default function Home() {
     setSelectedDeleteIds([]);
   }
 
-  async function handleServerAuthSubmit() {
+  async function handleServerAuthSubmit(options: { enterApp?: boolean } = {}) {
     if (!serverApi) {
       setServerStatus("서버 API URL이 없어 로컬 전용으로 동작합니다.");
       return;
@@ -524,6 +524,9 @@ export default function Home() {
       setServerPassword("");
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
+      if (options.enterApp) {
+        handleLogin(nextSession.user.name || nextSession.user.email);
+      }
     } catch (error) {
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getErrorMessage(error));
@@ -980,63 +983,129 @@ export default function Home() {
   if (!currentUser) {
     return (
       <main className="page-shell login-shell">
-        <section className="login-card" aria-label="로그인">
+        <section className="login-card login-entry-card" aria-label="로그인">
           <p className="section-label">생활비 관리자</p>
-          <h1>사용자별 고정지출을 확인하세요</h1>
-          <p className="hero-copy">사용자 이름으로 로그인하면 이 브라우저 안에 수입, 고정비, 카테고리가 사용자별로 저장됩니다.</p>
-          <form
-            className="login-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              handleLogin(loginName);
-            }}
-          >
-            <label htmlFor="login-name">사용자 이름</label>
-            <input
-              id="login-name"
-              type="text"
-              value={loginName}
-              onChange={(event) => setLoginName(event.target.value)}
-            />
-            <div className="start-options" aria-label="신규 사용자 시작 방식">
-              <label>
-                <input
-                  checked={initialDataMode === "sample"}
-                  name="initial-data-mode"
-                  type="radio"
-                  value="sample"
-                  onChange={() => setInitialDataMode("sample")}
-                />
-                샘플 데이터로 시작
-              </label>
-              <label>
-                <input
-                  checked={initialDataMode === "blank"}
-                  name="initial-data-mode"
-                  type="radio"
-                  value="blank"
-                  onChange={() => setInitialDataMode("blank")}
-                />
-                빈 상태로 시작
-              </label>
-            </div>
-            <button className="primary-button" type="submit">
-              로그인
-            </button>
-          </form>
-          <p className="local-note">서버 없이 브라우저 localStorage에만 저장됩니다. 기기를 바꾸기 전에는 전체 백업을 내보내세요.</p>
-          {knownUsers.length > 0 ? (
-            <div className="known-users" aria-label="기존 사용자">
-              <span>기존 사용자</span>
-              <div>
-                {knownUsers.map((user) => (
-                  <button className="secondary-button" key={user.id} type="button" onClick={() => handleLogin(user.name)}>
-                    {user.name}
-                  </button>
-                ))}
+          <h1>계정으로 고정지출을 관리하세요</h1>
+          <p className="hero-copy">서버 계정으로 로그인하면 기기를 바꿔도 같은 워크스페이스 데이터를 불러오고, 초대받은 멤버와 함께 관리할 수 있습니다.</p>
+
+          <div className="entry-auth-grid">
+            <form
+              className="server-auth-form entry-server-auth-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleServerAuthSubmit({ enterApp: true });
+              }}
+            >
+              <div className="chart-toggle" aria-label="서버 계정 모드">
+                <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("login")}>
+                  로그인
+                </button>
+                <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("register")}>
+                  가입
+                </button>
               </div>
+              <div className="form-field">
+                <label htmlFor="entry-server-email">이메일</label>
+                <input
+                  autoComplete="email"
+                  id="entry-server-email"
+                  required
+                  type="email"
+                  value={serverEmail}
+                  onChange={(event) => setServerEmail(event.target.value)}
+                />
+              </div>
+              {serverAuthMode === "register" ? (
+                <div className="form-field">
+                  <label htmlFor="entry-server-name">이름</label>
+                  <input
+                    autoComplete="name"
+                    id="entry-server-name"
+                    type="text"
+                    value={serverName}
+                    onChange={(event) => setServerName(event.target.value)}
+                  />
+                </div>
+              ) : null}
+              <div className="form-field">
+                <label htmlFor="entry-server-password">비밀번호</label>
+                <input
+                  autoComplete={serverAuthMode === "register" ? "new-password" : "current-password"}
+                  id="entry-server-password"
+                  minLength={8}
+                  required
+                  type="password"
+                  value={serverPassword}
+                  onChange={(event) => setServerPassword(event.target.value)}
+                />
+              </div>
+              <button className="primary-button" disabled={isServerBusy || !serverApi} type="submit">
+                {serverAuthMode === "register" ? "서버 계정 만들기" : "서버 로그인"}
+              </button>
+              {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
+              {!serverApi ? <p className="local-note">서버 API URL이 없어 현재 배포에서는 서버 로그인을 사용할 수 없습니다.</p> : null}
+            </form>
+
+            <div className="local-entry-panel" aria-label="로컬 모드">
+              <div>
+                <p className="section-label">로컬 모드</p>
+                <h2>임시로 이 브라우저에만 저장</h2>
+                <p className="local-note">브라우저 데이터 삭제, 시크릿 모드 종료, 기기 변경 시 복구할 수 없습니다. 계속 쓸 경우 전체 Export 백업이 필요합니다.</p>
+              </div>
+              <form
+                className="login-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleLogin(loginName);
+                }}
+              >
+                <label htmlFor="login-name">로컬 사용자 이름</label>
+                <input
+                  id="login-name"
+                  type="text"
+                  value={loginName}
+                  onChange={(event) => setLoginName(event.target.value)}
+                />
+                <div className="start-options" aria-label="신규 사용자 시작 방식">
+                  <label>
+                    <input
+                      checked={initialDataMode === "sample"}
+                      name="initial-data-mode"
+                      type="radio"
+                      value="sample"
+                      onChange={() => setInitialDataMode("sample")}
+                    />
+                    샘플 데이터로 시작
+                  </label>
+                  <label>
+                    <input
+                      checked={initialDataMode === "blank"}
+                      name="initial-data-mode"
+                      type="radio"
+                      value="blank"
+                      onChange={() => setInitialDataMode("blank")}
+                    />
+                    빈 상태로 시작
+                  </label>
+                </div>
+                <button className="secondary-button" type="submit">
+                  로컬로 시작
+                </button>
+              </form>
+              {knownUsers.length > 0 ? (
+                <div className="known-users" aria-label="기존 로컬 사용자">
+                  <span>기존 로컬 사용자</span>
+                  <div>
+                    {knownUsers.map((user) => (
+                      <button className="secondary-button" key={user.id} type="button" onClick={() => handleLogin(user.name)}>
+                        {user.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </div>
         </section>
       </main>
     );
