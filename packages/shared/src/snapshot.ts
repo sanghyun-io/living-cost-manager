@@ -3,7 +3,7 @@ import {
   categoryDtoSchema,
   fixedCostDtoSchema,
   paymentCardDtoSchema,
-} from "./budget";
+} from "./budget.js";
 
 const idSchema = z.string().min(1);
 

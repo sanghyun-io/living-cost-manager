@@ -3,8 +3,11 @@ import { z } from "zod";
 const idSchema = z.string().min(1);
 const billingDaySchema = z.number().int().min(1).max(31);
 
-const roundToFirstDecimal = (value: number) =>
+export const roundPeriodMonths = (value: number) =>
   Math.round((value + Number.EPSILON) * 10) / 10;
+
+const isRoundedToFirstDecimal = (value: number) =>
+  Object.is(value, roundPeriodMonths(value));
 
 export const paymentMethodIdSchema = z.enum([
   "cash",
@@ -35,7 +38,11 @@ export const fixedCostDtoSchema = z.object({
   paymentMethodId: paymentMethodIdSchema,
   paymentOptionId: z.string(),
   amount: z.number().int().min(0),
-  periodMonths: z.number().min(1).max(120).transform(roundToFirstDecimal),
+  periodMonths: z
+    .number()
+    .min(1)
+    .max(120)
+    .refine(isRoundedToFirstDecimal, "Expected number rounded to one decimal"),
   billingDay: billingDaySchema,
 });
 

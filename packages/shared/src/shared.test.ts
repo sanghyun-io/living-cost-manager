@@ -1,11 +1,17 @@
 import { describe, expect, test } from "vitest";
-import { fixedCostDtoSchema } from "./budget";
 import {
   acceptInvitationRequestSchema,
+  authResponseSchema,
   createInvitationRequestSchema,
+  fixedCostDtoSchema,
+  loginRequestSchema,
+  registerRequestSchema,
+  roundPeriodMonths,
   updateMemberRoleRequestSchema,
-} from "./workspace";
-import { workspaceSnapshotSchema } from "./snapshot";
+  workspaceInvitationDtoSchema,
+  workspaceSnapshotSchema,
+} from "./index.js";
+import { z } from "zod";
 
 const minimalFixedCost = {
   id: "cost-1",
@@ -26,19 +32,19 @@ describe("shared api contracts", () => {
     expect(parsed.periodMonths).toBe(2.5);
   });
 
-  test("fixedCostDtoSchema rounds period months to one decimal place", () => {
-    expect(
+  test("roundPeriodMonths rounds values to one decimal place for callers", () => {
+    expect(roundPeriodMonths(2.5)).toBe(2.5);
+    expect(roundPeriodMonths(2.54)).toBe(2.5);
+    expect(roundPeriodMonths(2.55)).toBe(2.6);
+  });
+
+  test("fixedCostDtoSchema rejects period months that are not already rounded", () => {
+    expect(() =>
       fixedCostDtoSchema.parse({
         ...minimalFixedCost,
         periodMonths: 2.54,
-      }).periodMonths,
-    ).toBe(2.5);
-    expect(
-      fixedCostDtoSchema.parse({
-        ...minimalFixedCost,
-        periodMonths: 2.55,
-      }).periodMonths,
-    ).toBe(2.6);
+      }),
+    ).toThrow();
   });
 
   test("fixedCostDtoSchema accepts an empty payment option id", () => {
@@ -82,6 +88,11 @@ describe("shared api contracts", () => {
     expect(workspaceSnapshotSchema.parse(snapshot)).toEqual(snapshot);
   });
 
+  test("dto schemas can be converted to JSON schema", () => {
+    expect(() => z.toJSONSchema(fixedCostDtoSchema)).not.toThrow();
+    expect(() => z.toJSONSchema(workspaceSnapshotSchema)).not.toThrow();
+  });
+
   test("createInvitationRequestSchema rejects owner and defaults missing role to viewer", () => {
     expect(
       createInvitationRequestSchema.parse({
@@ -117,5 +128,83 @@ describe("shared api contracts", () => {
     expect(acceptInvitationRequestSchema.parse({ token: "token-1" })).toEqual({
       token: "token-1",
     });
+  });
+
+  test("workspaceInvitationDtoSchema validates ISO datetime fields", () => {
+    const invitation = {
+      id: "invitation-1",
+      workspaceId: "workspace-1",
+      email: "invitee@example.com",
+      role: "viewer",
+      expiresAt: "2026-05-22T10:00:00.000Z",
+      acceptedAt: null,
+    };
+
+    expect(workspaceInvitationDtoSchema.parse(invitation)).toEqual(invitation);
+    expect(
+      workspaceInvitationDtoSchema.parse({
+        ...invitation,
+        acceptedAt: "2026-05-22T10:30:00.000Z",
+      }).acceptedAt,
+    ).toBe("2026-05-22T10:30:00.000Z");
+    expect(() =>
+      workspaceInvitationDtoSchema.parse({
+        ...invitation,
+        expiresAt: "May 22, 2026",
+      }),
+    ).toThrow();
+  });
+
+  test("auth schemas validate requests and responses", () => {
+    expect(
+      registerRequestSchema.parse({
+        email: "user@example.com",
+        password: "password1",
+        name: "User",
+      }),
+    ).toEqual({
+      email: "user@example.com",
+      password: "password1",
+      name: "User",
+    });
+    expect(() =>
+      registerRequestSchema.parse({
+        email: "not-an-email",
+        password: "short",
+        name: "",
+      }),
+    ).toThrow();
+
+    expect(
+      loginRequestSchema.parse({
+        email: "user@example.com",
+        password: "password1",
+      }),
+    ).toEqual({
+      email: "user@example.com",
+      password: "password1",
+    });
+    expect(() =>
+      loginRequestSchema.parse({
+        email: "user@example.com",
+        password: "short",
+      }),
+    ).toThrow();
+
+    const response = {
+      token: "token-1",
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        name: "User",
+      },
+      workspace: {
+        id: "workspace-1",
+        name: "Home",
+        role: "owner",
+      },
+    };
+
+    expect(authResponseSchema.parse(response)).toEqual(response);
   });
 });

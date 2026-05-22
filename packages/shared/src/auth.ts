@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { workspaceDtoSchema } from "./workspace";
+import { workspaceDtoSchema } from "./workspace.js";
 
 const idSchema = z.string().min(1);
 

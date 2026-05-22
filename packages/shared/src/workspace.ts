@@ -25,8 +25,8 @@ export const workspaceInvitationDtoSchema = z.object({
   workspaceId: idSchema,
   email: z.string().email(),
   role: invitationRoleSchema,
-  expiresAt: z.string().min(1),
-  acceptedAt: z.string().min(1).nullable(),
+  expiresAt: z.iso.datetime(),
+  acceptedAt: z.iso.datetime().nullable(),
 });
 
 export const createInvitationRequestSchema = z.object({
@@ -49,7 +49,10 @@ export type WorkspaceMemberDto = z.infer<typeof workspaceMemberDtoSchema>;
 export type WorkspaceInvitationDto = z.infer<
   typeof workspaceInvitationDtoSchema
 >;
-export type CreateInvitationRequest = z.infer<
+export type CreateInvitationRequestInput = z.input<
+  typeof createInvitationRequestSchema
+>;
+export type CreateInvitationRequest = z.output<
   typeof createInvitationRequestSchema
 >;
 export type AcceptInvitationRequest = z.infer<
