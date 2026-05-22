@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: living_cost_dev
       POSTGRES_DB: living_cost_manager
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - living_cost_pgdata:/var/lib/postgresql/data
 

@@ -41,13 +41,14 @@ model WorkspaceMember {
   createdAt   DateTime      @default(now())
 
   @@unique([workspaceId, userId])
+  @@index([userId])
 }
 
 model WorkspaceInvitation {
   id          String        @id @default(cuid())
   workspaceId String
   email       String
-  role        WorkspaceRole
+  role        WorkspaceInvitationRole
   tokenHash   String        @unique
   expiresAt   DateTime
   acceptedAt  DateTime?
@@ -64,36 +65,53 @@ enum WorkspaceRole {
   viewer
 }
 
+enum WorkspaceInvitationRole {
+  editor
+  viewer
+}
+
 model Category {
-  id          String    @id
+  id          String
   workspaceId String
   label       String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fixedCosts  FixedCost[] @relation("FixedCostCategory")
 
+  @@id([workspaceId, id])
   @@unique([workspaceId, label])
 }
 
 model PaymentCard {
-  id          String    @id
+  id          String
   workspaceId String
   label       String
   billingDay  Int
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fixedCosts  FixedCost[] @relation("FixedCostPaymentCard")
+
+  @@id([workspaceId, id])
 }
 
 model FixedCost {
-  id              String    @id
+  id              String
   workspaceId     String
   name            String
   categoryId      String
   paymentMethodId String
   paymentOptionId String
+  paymentCardId   String?
   amount          Int
   periodMonths    Float     @default(1)
   billingDay      Int
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category        Category  @relation("FixedCostCategory", fields: [workspaceId, categoryId], references: [workspaceId, id])
+  paymentCard     PaymentCard? @relation("FixedCostPaymentCard", fields: [workspaceId, paymentCardId], references: [workspaceId, id], onDelete: NoAction)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, categoryId])
+  @@index([workspaceId, paymentCardId])
 }
 
 model BackupSnapshot {
@@ -102,4 +120,6 @@ model BackupSnapshot {
   payload     Json
   createdAt   DateTime  @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
 }
