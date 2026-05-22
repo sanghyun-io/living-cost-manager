@@ -50,6 +50,13 @@ import {
   type LocalBudgetSnapshot
 } from "./lib/snapshot";
 import { canManageSharing, canSyncWorkspace, findCurrentMember, invitationRoleLabels, workspaceRoleLabels } from "./lib/sharing";
+import {
+  getAccountSyncState,
+  getSyncStateView,
+  summarizeBudgetSnapshot,
+  type AccountSyncState,
+  type BudgetSnapshotSummary
+} from "./lib/syncStatus";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -165,6 +172,8 @@ export default function Home() {
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
   const [isServerBusy, setIsServerBusy] = useState(false);
+  const [serverErrorKind, setServerErrorKind] = useState<"auth" | "request" | null>(null);
+  const [lastServerSyncedAt, setLastServerSyncedAt] = useState<Date | null>(null);
   const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
   const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
@@ -309,6 +318,31 @@ export default function Home() {
   const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole) && isServerSnapshotChecked;
   const visibleCreatedInvitation =
     canManageCurrentWorkspace && createdInvitation?.workspaceId === serverSession?.workspace?.id ? createdInvitation : null;
+  const currentBudgetSnapshot = useMemo(
+    () => getCurrentBudgetSnapshotFromState({ monthlyIncome, categories, cards, fixedCosts }),
+    [cards, categories, fixedCosts, monthlyIncome]
+  );
+  const localSnapshotSummary = useMemo(() => summarizeBudgetSnapshot(currentBudgetSnapshot), [currentBudgetSnapshot]);
+  const serverSnapshotSummary = useMemo(
+    () => (serverSnapshot ? summarizeBudgetSnapshot(hydrateWorkspaceSnapshot(serverSnapshot)) : null),
+    [serverSnapshot]
+  );
+  const hasRemoteDecision =
+    !!serverSnapshot &&
+    (!isWorkspaceSnapshotEmpty(serverSnapshot) || hasLocalBudgetData(currentBudgetSnapshot));
+  const accountSyncState = getAccountSyncState({
+    hasServerApi: !!serverApi,
+    hasSession: !!serverSession,
+    hasWorkspace: !!serverSession?.workspace,
+    isBusy: isServerBusy,
+    isSnapshotChecked: isServerSnapshotChecked,
+    hasServerSnapshot: hasRemoteDecision,
+    hasAuthFailure: serverErrorKind === "auth",
+    hasError: serverErrorKind !== null
+  });
+  const displayedSyncState: AccountSyncState =
+    accountSyncState === "signed-in" && lastServerSyncedAt ? "synced" : accountSyncState;
+  const syncStateView = getSyncStateView(displayedSyncState);
 
   function handleIncomeChange(value: string) {
     setMonthlyIncome(parseCurrencyInput(value));
@@ -471,6 +505,7 @@ export default function Home() {
 
     setIsServerBusy(true);
     setServerStatus("");
+    setServerErrorKind(null);
 
     try {
       const authResult =
@@ -487,6 +522,7 @@ export default function Home() {
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
     } catch (error) {
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getErrorMessage(error));
     } finally {
       setIsServerBusy(false);
@@ -501,6 +537,8 @@ export default function Home() {
     setServerWorkspaces([]);
     setMembers([]);
     setInvitations([]);
+    setServerErrorKind(null);
+    setLastServerSyncedAt(null);
     clearWorkspaceScopedSharingDrafts();
     setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
   }
@@ -513,6 +551,7 @@ export default function Home() {
 
     setIsServerSnapshotChecked(false);
     setServerSnapshot(null);
+    setServerErrorKind(null);
 
     if (!session.workspace) {
       setServerStatus("서버 계정은 연결됐지만 선택된 워크스페이스가 없습니다. 초대 수락 후 동기화를 사용할 수 있습니다.");
@@ -537,7 +576,8 @@ export default function Home() {
       setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
       return true;
     } catch (error) {
-      setServerStatus(getErrorMessage(error) + " 서버 상태 확인 전에는 업로드를 막습니다. 로컬 저장은 계속 유지됩니다.");
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error) + " 서버 상태 확인 전에는 업로드를 막습니다. 로컬 저장은 계속 유지됩니다.");
       return false;
     }
   }
@@ -559,6 +599,7 @@ export default function Home() {
 
       saveServerSession(restoredSession);
       setServerSession(restoredSession);
+      setServerErrorKind(null);
       await loadServerWorkspaces(restoredSession);
       if (restoredSession.workspace) {
         await prepareServerSyncDecision(restoredSession);
@@ -571,10 +612,12 @@ export default function Home() {
         setServerSession(null);
         setServerWorkspaces([]);
         setIsServerSnapshotChecked(false);
-        setServerStatus(getErrorMessage(error));
+        setServerErrorKind("auth");
+        setServerStatus(getServerSyncErrorMessage(error));
         return;
       }
-      setServerStatus(getErrorMessage(error) + " 서버 연결은 유지했습니다. 데이터 관리에서 다시 시도하세요.");
+      setServerErrorKind("request");
+      setServerStatus(getServerSyncErrorMessage(error) + " 서버 연결은 유지했습니다. 데이터 관리에서 다시 시도하세요.");
     }
   }
 
@@ -589,6 +632,7 @@ export default function Home() {
     const nextSession = await resolveServerSessionWorkspace(serverApi, session);
     saveServerSession(nextSession);
     setServerSession(nextSession);
+    setServerErrorKind(null);
     setIsServerSnapshotChecked(false);
     await loadServerWorkspaces(nextSession);
     return nextSession;
@@ -646,9 +690,12 @@ export default function Home() {
       const nextSnapshot = buildWorkspaceSnapshot(serverSession.workspace.id, getCurrentBudgetSnapshot());
       const savedSnapshot = await serverApi.putWorkspaceSnapshot(serverSession.workspace.id, nextSnapshot, serverSession.token);
       setServerSnapshot(savedSnapshot);
+      setLastServerSyncedAt(new Date());
+      setServerErrorKind(null);
       setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
     } catch (error) {
-      setServerStatus(getErrorMessage(error) + " 로컬 저장은 계속 유지됩니다.");
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error) + " 로컬 저장은 계속 유지됩니다.");
     } finally {
       setIsServerBusy(false);
     }
@@ -665,9 +712,12 @@ export default function Home() {
       const nextSnapshot = serverSnapshot ?? (await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token));
       applyBudgetSnapshot(hydrateWorkspaceSnapshot(nextSnapshot));
       setServerSnapshot(nextSnapshot);
+      setLastServerSyncedAt(new Date());
+      setServerErrorKind(null);
       setServerStatus("서버 데이터를 이 브라우저에 불러왔습니다.");
     } catch (error) {
-      setServerStatus(getErrorMessage(error) + " 로컬 데이터는 변경하지 않았습니다.");
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error) + " 로컬 데이터는 변경하지 않았습니다.");
     } finally {
       setIsServerBusy(false);
     }
@@ -689,8 +739,10 @@ export default function Home() {
       ]);
       setMembers(nextMembers);
       setInvitations(nextInvitations);
+      setServerErrorKind(null);
     } catch (error) {
-      setServerStatus(getErrorMessage(error));
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error));
     }
   }
 
@@ -705,9 +757,11 @@ export default function Home() {
       setCreatedInvitation(invitation);
       setInviteEmail("");
       setServerStatus("초대를 만들었습니다. 아래 토큰을 초대받은 사용자에게 전달하세요.");
+      setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
-      setServerStatus(getErrorMessage(error));
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error));
     } finally {
       setIsServerBusy(false);
     }
@@ -730,10 +784,12 @@ export default function Home() {
       const nextSession = await resolveAndStoreServerSession({ ...serverSession, workspace: accepted.workspace });
       clearWorkspaceScopedSharingDrafts();
       setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
+      setServerErrorKind(null);
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
     } catch (error) {
-      setServerStatus(getErrorMessage(error));
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error));
     } finally {
       setIsServerBusy(false);
     }
@@ -748,9 +804,11 @@ export default function Home() {
     try {
       await serverApi.updateMemberRole(serverSession.workspace.id, memberId, role, serverSession.token);
       setServerStatus("멤버 권한을 변경했습니다.");
+      setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
-      setServerStatus(getErrorMessage(error));
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error));
     } finally {
       setIsServerBusy(false);
     }
@@ -769,9 +827,11 @@ export default function Home() {
     try {
       await serverApi.deleteMember(serverSession.workspace.id, memberId, serverSession.token);
       setServerStatus("멤버를 제거했습니다.");
+      setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
-      setServerStatus(getErrorMessage(error));
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error));
     } finally {
       setIsServerBusy(false);
     }
@@ -1378,6 +1438,42 @@ export default function Home() {
                   ) : null}
                 </div>
 
+                <div className={"sync-state-card sync-state-" + syncStateView.tone}>
+                  <div>
+                    <span>현재 저장 모드</span>
+                    <strong>{syncStateView.label}</strong>
+                    <small>{syncStateView.description}</small>
+                  </div>
+                  <div>
+                    <span>마지막 서버 동기화</span>
+                    <strong>{lastServerSyncedAt ? formatSaveTime(lastServerSyncedAt) : "아직 없음"}</strong>
+                    <small>{serverSession?.workspace ? serverSession.workspace.name : "서버 워크스페이스 선택 전"}</small>
+                  </div>
+                </div>
+
+                {displayedSyncState === "local-only" ? (
+                  <div className="local-mode-warning" role="status">
+                    <strong>로컬 모드: 이 브라우저에만 저장됩니다.</strong>
+                    <p>브라우저 데이터를 삭제하거나 기기를 바꾸면 복구할 수 없습니다. 계속 로컬 모드를 쓸 경우 정기적으로 전체 Export 백업을 보관하세요.</p>
+                    <button className="secondary-button" type="button" onClick={handleExportBackup}>
+                      전체 Export 백업
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="sync-summary-grid" aria-label="동기화 데이터 비교">
+                  <BudgetSummaryCard title="이 브라우저" summary={localSnapshotSummary} />
+                  {serverSnapshotSummary ? (
+                    <BudgetSummaryCard title="서버 데이터" summary={serverSnapshotSummary} />
+                  ) : (
+                    <div className="sync-summary-card muted">
+                      <span>서버 데이터</span>
+                      <strong>확인 전</strong>
+                      <small>서버 상태 확인을 누르면 비교 정보가 표시됩니다.</small>
+                    </div>
+                  )}
+                </div>
+
                 {serverSession ? (
                   <div className="server-session-summary">
                     <div>
@@ -1604,7 +1700,13 @@ export default function Home() {
                 ) : null}
               </section>
             ) : (
-              <p className="local-note">서버 API URL이 없어 로컬 전용으로 동작합니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
+              <div className="local-mode-warning" role="status">
+                <strong>서버 API URL이 없어 로컬 전용으로 동작합니다.</strong>
+                <p>이 브라우저에만 저장되며, 브라우저 데이터 삭제나 기기 교체 시 복구할 수 없습니다. 전체 Export 백업을 보관하세요.</p>
+                <button className="secondary-button" type="button" onClick={handleExportBackup}>
+                  전체 Export 백업
+                </button>
+              </div>
             )}
             <p className="local-note">브라우저 저장은 항상 유지됩니다. 서버 동기화와 별도로 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
             <input
@@ -1792,6 +1894,18 @@ export default function Home() {
   );
 }
 
+function BudgetSummaryCard({ title, summary }: { title: string; summary: BudgetSnapshotSummary }) {
+  return (
+    <div className="sync-summary-card">
+      <span>{title}</span>
+      <strong>{formatWon(summary.monthlyExpense)}</strong>
+      <small>
+        월 수입 {formatWon(summary.monthlyIncome)} · 항목 {summary.fixedCostCount}개 · 카테고리 {summary.categoryCount}개 · 카드 {summary.cardCount}개
+      </small>
+    </div>
+  );
+}
+
 function parseCurrencyInput(value: string) {
   const parsed = Number(value.replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
@@ -1924,6 +2038,15 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
+function getCurrentBudgetSnapshotFromState(snapshot: BudgetSnapshot): LocalBudgetSnapshot {
+  return {
+    monthlyIncome: snapshot.monthlyIncome,
+    categories: snapshot.categories,
+    cards: snapshot.cards,
+    fixedCosts: snapshot.fixedCosts
+  };
+}
+
 function isServerSession(value: ServerSession | null): value is ServerSession {
   return (
     !!value &&
@@ -1937,4 +2060,12 @@ function isServerSession(value: ServerSession | null): value is ServerSession {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "서버 요청에 실패했습니다.";
+}
+
+function getServerSyncErrorMessage(error: unknown) {
+  if (isServerAuthFailure(error)) {
+    return "서버 세션이 만료되었거나 권한이 없습니다. 다시 로그인해 주세요.";
+  }
+
+  return getErrorMessage(error);
 }

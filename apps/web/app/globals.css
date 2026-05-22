@@ -750,6 +750,86 @@ select:disabled {
   gap: 10px;
 }
 
+.sync-state-card,
+.sync-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sync-state-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.sync-state-card > div,
+.sync-summary-card {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.sync-state-card span,
+.sync-summary-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sync-state-card strong,
+.sync-summary-card strong {
+  overflow-wrap: anywhere;
+}
+
+.sync-state-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.sync-state-danger {
+  border-color: #fecdd3;
+  background: var(--rose-muted);
+}
+
+.sync-state-success {
+  border-color: #ccfbf1;
+  background: #f0fdfa;
+}
+
+.local-mode-warning {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+  background: #fffbeb;
+  color: #78350f;
+  padding: 12px;
+}
+
+.local-mode-warning p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.local-mode-warning button {
+  justify-self: start;
+}
+
+.sync-summary-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.sync-summary-card.muted {
+  background: var(--surface-muted);
+}
+
 .server-session-summary div {
   display: grid;
   gap: 5px;
@@ -1035,6 +1115,8 @@ select:disabled {
   .card-create,
   .start-options,
   .data-action-grid,
+  .sync-state-card,
+  .sync-summary-grid,
   .category-row,
   .server-session-summary,
   .server-auth-form,

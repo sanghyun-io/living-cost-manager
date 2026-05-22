@@ -38,12 +38,12 @@ export type BudgetSnapshotSummary = {
 };
 
 export function getAccountSyncState(input: AccountSyncStateInput): AccountSyncState {
-  if (!input.hasServerApi || !input.hasSession) {
-    return "local-only";
-  }
-
   if (input.hasAuthFailure) {
     return "auth-expired";
+  }
+
+  if (!input.hasServerApi || !input.hasSession) {
+    return "local-only";
   }
 
   if (input.isBusy) {

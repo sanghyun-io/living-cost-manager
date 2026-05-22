@@ -658,6 +658,19 @@ describe("account sync UX", () => {
     expect(
       getAccountSyncState({
         hasServerApi: true,
+        hasSession: false,
+        hasWorkspace: false,
+        isBusy: false,
+        isSnapshotChecked: false,
+        hasServerSnapshot: false,
+        hasAuthFailure: true,
+        hasError: true
+      })
+    ).toBe("auth-expired");
+
+    expect(
+      getAccountSyncState({
+        hasServerApi: true,
         hasSession: true,
         hasWorkspace: true,
         isBusy: true,
