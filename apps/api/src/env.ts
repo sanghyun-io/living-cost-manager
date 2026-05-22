@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const envSchema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
   DATABASE_URL: z.string().min(1),
@@ -8,4 +8,8 @@ const envSchema = z.object({
   CORS_ORIGIN: z.url().default("https://sanghyun-io.github.io")
 });
 
-export const env = envSchema.parse(process.env);
+export type Env = z.infer<typeof envSchema>;
+
+export function loadEnv(source: NodeJS.ProcessEnv | Record<string, unknown> = process.env): Env {
+  return envSchema.parse(source);
+}

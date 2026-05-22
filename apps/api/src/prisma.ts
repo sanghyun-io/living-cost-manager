@@ -1,11 +1,29 @@
 import { PrismaClient } from "@prisma/client";
 
+const prismaGlobalKey = "__livingCostManagerPrisma";
+
 const globalForPrisma = globalThis as typeof globalThis & {
-  prisma?: PrismaClient;
+  [prismaGlobalKey]?: PrismaClient;
 };
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+export function getPrismaClient(): PrismaClient {
+  const cachedClient = globalForPrisma[prismaGlobalKey];
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  if (cachedClient) {
+    return cachedClient;
+  }
+
+  const client = new PrismaClient();
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma[prismaGlobalKey] = client;
+  }
+
+  return client;
+}
+
+export function clearCachedPrismaClient(client: PrismaClient): void {
+  if (globalForPrisma[prismaGlobalKey] === client) {
+    delete globalForPrisma[prismaGlobalKey];
+  }
 }
