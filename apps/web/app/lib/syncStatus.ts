@@ -74,7 +74,7 @@ export function getSyncStateView(state: AccountSyncState): SyncStateView {
     case "local-only":
       return {
         label: "로컬 전용",
-        description: "이 브라우저에만 저장됩니다. 기기를 바꾸기 전 전체 Export 백업을 보관하세요.",
+        description: "이 브라우저에만 저장됩니다. 로그인해서 클라우드에 저장하면 다른 기기에서도 이어서 사용할 수 있습니다.",
         tone: "warning"
       };
     case "server-available":

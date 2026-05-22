@@ -33,7 +33,7 @@ import {
   updatePaymentCard,
   type PaymentCard
 } from "./lib/cards";
-import { createUser, getUserDataKey, mergeUsers, type AppUser } from "./lib/users";
+import { createUser, getUserDataKey, LOCAL_USER_NAME, mergeUsers, resolveStartupUser, type AppUser } from "./lib/users";
 import {
   createServerApiClient,
   isServerAuthFailure,
@@ -140,8 +140,7 @@ function formatWon(amount: number) {
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [knownUsers, setKnownUsers] = useState<AppUser[]>([]);
-  const [loginName, setLoginName] = useState("");
-  const [initialDataMode, setInitialDataMode] = useState<"sample" | "blank">("sample");
+  const initialDataMode: "sample" | "blank" = "sample";
   const [monthlyIncome, setMonthlyIncome] = useState(3_000_000);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(seedFixedCosts);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
@@ -190,15 +189,22 @@ export default function Home() {
   useEffect(() => {
     const users = readJson<AppUser[]>(USERS_KEY, []);
     const activeUserId = window.localStorage.getItem(ACTIVE_USER_KEY);
-    const activeUser = users.find((user) => user.id === activeUserId) ?? null;
     const storedServerSession = readJson<ServerSession | null>(SERVER_SESSION_STORAGE_KEY, null);
+    const validServerSession = isServerSession(storedServerSession) ? storedServerSession : null;
+    const startupUser = resolveStartupUser({
+      users,
+      activeUserId,
+      serverUser: validServerSession?.user ?? null
+    });
 
-    setKnownUsers(users);
-    setCurrentUser(activeUser);
-    if (isServerSession(storedServerSession)) {
-      setServerSession(storedServerSession);
-      setServerEmail(storedServerSession.user.email);
-      setServerName(storedServerSession.user.name);
+    window.localStorage.setItem(USERS_KEY, JSON.stringify(startupUser.users));
+    window.localStorage.setItem(ACTIVE_USER_KEY, startupUser.user.id);
+    setKnownUsers(startupUser.users);
+    setCurrentUser(startupUser.user);
+    if (validServerSession) {
+      setServerSession(validServerSession);
+      setServerEmail(validServerSession.user.email);
+      setServerName(validServerSession.user.name);
     }
     setIsBootLoaded(true);
   }, []);
@@ -480,19 +486,26 @@ export default function Home() {
 
     window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
     window.localStorage.setItem(ACTIVE_USER_KEY, nextUser.id);
-    if (isNewUser && !window.localStorage.getItem(userDataKey)) {
+    if (currentUser && currentUser.id !== nextUser.id) {
+      window.localStorage.setItem(userDataKey, JSON.stringify(getCurrentBudgetSnapshot()));
+    } else if (isNewUser && !window.localStorage.getItem(userDataKey)) {
       const snapshot = initialDataMode === "blank" ? emptyBudgetSnapshot : sampleBudgetSnapshot;
       window.localStorage.setItem(userDataKey, JSON.stringify(snapshot));
     }
     setKnownUsers(nextUsers);
     setIsLoaded(false);
     setCurrentUser(nextUser);
-    setLoginName("");
   }
 
   function handleLogout() {
-    window.localStorage.removeItem(ACTIVE_USER_KEY);
-    setCurrentUser(null);
+    const localUser = createUser(LOCAL_USER_NAME);
+    const nextUsers = mergeUsers(knownUsers, localUser);
+
+    window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
+    window.localStorage.setItem(ACTIVE_USER_KEY, localUser.id);
+    setKnownUsers(nextUsers);
+    setCurrentUser(localUser);
+    setIsLoaded(false);
     setIsCategoryModalOpen(false);
     setIsCardModalOpen(false);
     setIsDataModalOpen(false);
@@ -500,7 +513,7 @@ export default function Home() {
     setSelectedDeleteIds([]);
   }
 
-  async function handleServerAuthSubmit(options: { enterApp?: boolean } = {}) {
+  async function handleServerAuthSubmit() {
     if (!serverApi) {
       setServerStatus("서버 API URL이 없어 로컬 전용으로 동작합니다.");
       return;
@@ -524,9 +537,7 @@ export default function Home() {
       setServerPassword("");
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
-      if (options.enterApp) {
-        handleLogin(nextSession.user.name || nextSession.user.email);
-      }
+      handleLogin(nextSession.user.name || nextSession.user.email);
     } catch (error) {
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getErrorMessage(error));
@@ -980,154 +991,28 @@ export default function Home() {
     );
   }
 
-  if (!currentUser) {
-    return (
-      <main className="page-shell login-shell">
-        <section className="login-card login-entry-card" aria-label="로그인">
-          <p className="section-label">생활비 관리자</p>
-          <h1>계정으로 고정지출을 관리하세요</h1>
-          <p className="hero-copy">서버 계정으로 로그인하면 기기를 바꿔도 같은 워크스페이스 데이터를 불러오고, 초대받은 멤버와 함께 관리할 수 있습니다.</p>
-
-          <div className="entry-auth-grid">
-            <form
-              className="server-auth-form entry-server-auth-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleServerAuthSubmit({ enterApp: true });
-              }}
-            >
-              <div className="chart-toggle" aria-label="서버 계정 모드">
-                <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("login")}>
-                  로그인
-                </button>
-                <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("register")}>
-                  가입
-                </button>
-              </div>
-              <div className="form-field">
-                <label htmlFor="entry-server-email">이메일</label>
-                <input
-                  autoComplete="email"
-                  id="entry-server-email"
-                  required
-                  type="email"
-                  value={serverEmail}
-                  onChange={(event) => setServerEmail(event.target.value)}
-                />
-              </div>
-              {serverAuthMode === "register" ? (
-                <div className="form-field">
-                  <label htmlFor="entry-server-name">이름</label>
-                  <input
-                    autoComplete="name"
-                    id="entry-server-name"
-                    type="text"
-                    value={serverName}
-                    onChange={(event) => setServerName(event.target.value)}
-                  />
-                </div>
-              ) : null}
-              <div className="form-field">
-                <label htmlFor="entry-server-password">비밀번호</label>
-                <input
-                  autoComplete={serverAuthMode === "register" ? "new-password" : "current-password"}
-                  id="entry-server-password"
-                  minLength={8}
-                  required
-                  type="password"
-                  value={serverPassword}
-                  onChange={(event) => setServerPassword(event.target.value)}
-                />
-              </div>
-              <button className="primary-button" disabled={isServerBusy || !serverApi} type="submit">
-                {serverAuthMode === "register" ? "서버 계정 만들기" : "서버 로그인"}
-              </button>
-              {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
-              {!serverApi ? <p className="local-note">서버 API URL이 없어 현재 배포에서는 서버 로그인을 사용할 수 없습니다.</p> : null}
-            </form>
-
-            <div className="local-entry-panel" aria-label="로컬 모드">
-              <div>
-                <p className="section-label">로컬 모드</p>
-                <h2>임시로 이 브라우저에만 저장</h2>
-                <p className="local-note">브라우저 데이터 삭제, 시크릿 모드 종료, 기기 변경 시 복구할 수 없습니다. 계속 쓸 경우 전체 Export 백업이 필요합니다.</p>
-              </div>
-              <form
-                className="login-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  handleLogin(loginName);
-                }}
-              >
-                <label htmlFor="login-name">로컬 사용자 이름</label>
-                <input
-                  id="login-name"
-                  type="text"
-                  value={loginName}
-                  onChange={(event) => setLoginName(event.target.value)}
-                />
-                <div className="start-options" aria-label="신규 사용자 시작 방식">
-                  <label>
-                    <input
-                      checked={initialDataMode === "sample"}
-                      name="initial-data-mode"
-                      type="radio"
-                      value="sample"
-                      onChange={() => setInitialDataMode("sample")}
-                    />
-                    샘플 데이터로 시작
-                  </label>
-                  <label>
-                    <input
-                      checked={initialDataMode === "blank"}
-                      name="initial-data-mode"
-                      type="radio"
-                      value="blank"
-                      onChange={() => setInitialDataMode("blank")}
-                    />
-                    빈 상태로 시작
-                  </label>
-                </div>
-                <button className="secondary-button" type="submit">
-                  로컬로 시작
-                </button>
-              </form>
-              {knownUsers.length > 0 ? (
-                <div className="known-users" aria-label="기존 로컬 사용자">
-                  <span>기존 로컬 사용자</span>
-                  <div>
-                    {knownUsers.map((user) => (
-                      <button className="secondary-button" key={user.id} type="button" onClick={() => handleLogin(user.name)}>
-                        {user.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main className="page-shell">
       <header className="app-header">
         <span className={saveError ? "save-status save-status-error" : "save-status"}>
           {saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기")}
         </span>
-        <button
-          className={serverSession ? "account-status-pill account-status-connected" : "primary-button"}
-          type="button"
-          onClick={() => setIsDataModalOpen(true)}
-        >
-          {serverSession ? "서버 연결됨 · 동기화 관리" : "서버 로그인/가입"}
+        <button className={serverSession ? "account-status-pill account-status-connected" : "primary-button"} type="button" onClick={() => setIsDataModalOpen(true)}>
+          {serverSession ? "서버 연결됨 · 동기화 관리" : "클라우드에 저장하기"}
         </button>
-        <strong>{currentUser.name}</strong>
-        <button className="secondary-button" type="button" onClick={handleLogout}>
-          로그아웃
-        </button>
+        <strong>{currentUser?.name ?? LOCAL_USER_NAME}</strong>
+        {serverSession ? (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              handleServerLogout();
+              handleLogout();
+            }}
+          >
+            서버 로그아웃
+          </button>
+        ) : null}
       </header>
       <section className="hero">
         <div>
@@ -1139,7 +1024,7 @@ export default function Home() {
           <p className="local-note inline-note">
             {serverSession?.workspace
               ? "서버 계정이 연결되어 있습니다. 변경 후 데이터 관리에서 서버 동기화를 실행하세요."
-              : "현재 로컬 모드입니다. 서버 로그인/가입 전에는 이 브라우저에만 저장되며, 정기적으로 데이터 관리에서 전체 백업을 내보내세요."}
+              : "현재 로그인 없이 로컬 저장 중입니다. 로그인해서 클라우드에 저장하면 기기를 바꿔도 데이터를 이어서 사용할 수 있습니다."}
           </p>
         </div>
         <div className="summary-panel" aria-label="이번 달 고정비 요약">
@@ -1540,7 +1425,7 @@ export default function Home() {
                 {displayedSyncState === "local-only" || displayedSyncState === "server-available" ? (
                   <div className="local-mode-warning" role="status">
                     <strong>로컬 모드: 이 브라우저에만 저장됩니다.</strong>
-                    <p>브라우저 데이터를 삭제하거나 기기를 바꾸면 복구할 수 없습니다. 계속 로컬 모드를 쓸 경우 정기적으로 전체 Export 백업을 보관하세요.</p>
+                    <p>브라우저 데이터를 삭제하거나 기기를 바꾸면 복구할 수 없습니다. 로그인해서 클라우드에 저장하면 다른 기기에서도 이어서 사용할 수 있습니다.</p>
                     <button className="secondary-button" type="button" onClick={handleExportBackup}>
                       전체 Export 백업
                     </button>

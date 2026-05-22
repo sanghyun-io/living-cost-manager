@@ -47,7 +47,7 @@ import {
   renamePaymentCard,
   updatePaymentCard
 } from "../app/lib/cards";
-import { createUser, getUserDataKey, mergeUsers } from "../app/lib/users";
+import { createUser, getUserDataKey, mergeUsers, resolveStartupUser } from "../app/lib/users";
 
 describe("fixed cost dashboard", () => {
   test("summarizes fixed costs against monthly income", () => {
@@ -212,6 +212,33 @@ describe("fixed cost dashboard", () => {
 
     expect(mergeUsers([user], createUser("mina"))).toEqual([user]);
     expect(mergeUsers([user], createUser("june"))).toHaveLength(2);
+  });
+
+  test("starts in a local profile when no active user or server session exists", () => {
+    const resolved = resolveStartupUser({
+      users: [],
+      activeUserId: null,
+      serverUser: null
+    });
+
+    expect(resolved.user.name).toBe("로컬 사용자");
+    expect(resolved.users).toEqual([resolved.user]);
+  });
+
+  test("uses a restored server session as the startup profile", () => {
+    const localUser = createUser("로컬 사용자");
+    const resolved = resolveStartupUser({
+      users: [localUser],
+      activeUserId: localUser.id,
+      serverUser: {
+        email: "mina@example.com",
+        name: "Mina"
+      }
+    });
+
+    expect(resolved.user.name).toBe("Mina");
+    expect(resolved.user.id).not.toBe(localUser.id);
+    expect(resolved.users).toContainEqual(resolved.user);
   });
 
   test("renames custom payment cards while keeping ids stable", () => {
@@ -726,6 +753,7 @@ describe("account sync UX", () => {
       label: "로컬 전용",
       tone: "warning"
     });
+    expect(getSyncStateView("local-only").description).toContain("로그인해서 클라우드에 저장");
     expect(getSyncStateView("auth-expired").description).toContain("다시 로그인");
   });
 
