@@ -4,13 +4,13 @@ app:
   type: b2b-saas
 stack:
   frontend: nextjs
-  backend: nextjs-api-routes
-  database: sqlite
+  backend: fastify
+  database: postgresql
   orm: prisma
-  auth: none
-  styling: tailwind
-  ui: shadcn
-  deploy: local
+  auth: jwt
+  styling: css-modules
+  ui: custom-shadcn-inspired
+  deploy: github-pages-plus-oci-api
 preferences:
   packageManager: pnpm
   testing: vitest

@@ -37,6 +37,16 @@ pnpm build
 
 GitHub Pages 프론트엔드는 계속 정적 export 방식입니다. 서버 공유 기능을 사용할 빌드에서는 웹 빌드 시점에 `NEXT_PUBLIC_API_BASE_URL`을 API 공개 URL로 설정해야 합니다.
 
+## 프론트 배포 제공자 호환성
+
+프론트엔드는 정적 export 결과물만 배포하므로 GitHub Pages와 Cloudflare Pages 모두 같은 구조로 배포할 수 있습니다. 호스팅 제공자에 종속되는 서버 코드는 프론트에 두지 않고, API origin은 빌드 시점 환경 변수 하나로만 주입합니다.
+
+```text
+NEXT_PUBLIC_API_BASE_URL=https://api.gamja.top/living-cost-manager/v1
+```
+
+Cloudflare Pages로 옮길 때도 빌드 명령은 `pnpm --filter @living-cost-manager/web... build`, 출력 디렉터리는 `apps/web/out`을 사용합니다. 변경해야 하는 값은 Cloudflare Pages 프로젝트 변수의 `NEXT_PUBLIC_API_BASE_URL`과 API 서버의 `CORS_ORIGIN` 허용 origin뿐입니다. GitHub Pages와 Cloudflare Pages를 동시에 열어두는 동안에는 API 서버에서 두 origin을 명시적으로 허용하도록 설정해야 합니다.
+
 ## 로컬 API/Postgres 개발
 
 로컬 Postgres는 개발용 Compose 파일로 실행합니다.
@@ -82,6 +92,16 @@ docker compose -f docker-compose.oci.yml run --rm api ./node_modules/.bin/prisma
 docker compose -f docker-compose.oci.yml up -d api
 ```
 
+현재 VM은 Docker 없이 systemd 서비스로 운영할 수 있습니다. repo 관리형 배포 절차는 `scripts/deploy-oci-api.ps1`에 있으며, 비밀값은 로컬 셸 환경 변수로만 전달합니다.
+
+```powershell
+$env:LCM_DATABASE_URL = "<credentials sheet에서 읽은 값>"
+$env:LCM_JWT_SECRET = "<충분히 긴 JWT secret>"
+pnpm deploy:oci-api -- -WriteEnv
+```
+
+평상시 코드만 갱신할 때는 `-WriteEnv` 없이 실행합니다. 이 스크립트는 원격에서 `git fetch`, `pnpm install`, API build, `prisma migrate deploy`, systemd 재시작, 내부/public health 확인을 순서대로 수행합니다. 비밀값은 출력하지 않습니다.
+
 현재 OCI API gateway에서는 공개 API base URL을 다음 형식으로 둡니다.
 
 ```text
@@ -91,6 +111,16 @@ https://api.gamja.top/living-cost-manager/v1
 운영 환경에서는 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`를 배포 환경의 비밀 관리 방식으로 주입합니다. Prisma schema는 서비스용 `lcm`, 테스트용 `lcm_test`처럼 분리해서 운영하세요. `JWT_SECRET`, DB 비밀번호, credentials가 포함된 API URL을 README, Compose 파일, Git 커밋, 로그에 남기지 마세요.
 
 OCI나 VM에서는 Docker Compose로 API와 Postgres를 실행하고, 외부 공개는 Nginx, Caddy, OCI Load Balancer 같은 HTTPS reverse proxy 뒤에 두는 구성을 권장합니다. Reverse proxy에서 TLS를 종료하고 API origin을 고정한 뒤, API의 `CORS_ORIGIN`을 GitHub Pages 프론트엔드 URL 또는 허용할 정확한 웹 origin으로 설정하세요.
+
+## 공개 배포 smoke
+
+공개 API와 Pages 연결은 아래 명령으로 확인합니다.
+
+```powershell
+pnpm smoke:public
+```
+
+이 smoke는 공개 API에 disposable 계정과 워크스페이스를 만들고, 로그인, `/me`, 워크스페이스 조회, snapshot PUT/GET, 초대/수락까지 확인합니다. 현재 공개 API에는 마지막 owner 계정/워크스페이스 삭제 엔드포인트가 없으므로 smoke 데이터는 남습니다. 운영 DB 정리는 별도 DB/schema maintenance 절차로 처리합니다.
 
 ## 참고
 
