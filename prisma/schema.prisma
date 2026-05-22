@@ -98,8 +98,8 @@ model FixedCost {
   name            String
   categoryId      String
   paymentMethodId String
-  paymentOptionId String
-  paymentCardId   String?
+  paymentCardId    String?
+  paymentOptionKey String?
   amount          Int
   periodMonths    Float     @default(1)
   billingDay      Int

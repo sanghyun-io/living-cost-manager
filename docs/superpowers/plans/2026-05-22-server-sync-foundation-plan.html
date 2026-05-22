@@ -573,7 +573,8 @@ model FixedCost {
   name            String
   categoryId      String
   paymentMethodId String
-  paymentOptionId String
+  paymentCardId   String?
+  paymentOptionKey String?
   amount          Int
   periodMonths    Float     @default(1)
   billingDay      Int
@@ -876,12 +877,26 @@ git commit -m "feat: add account auth"</code></pre>
     await tx.fixedCost.deleteMany({ where: { workspaceId: snapshot.workspaceId } });
     await tx.paymentCard.deleteMany({ where: { workspaceId: snapshot.workspaceId } });
     await tx.category.deleteMany({ where: { workspaceId: snapshot.workspaceId } });
+    const fixedCosts = snapshot.fixedCosts.map((item) =&gt; ({
+      id: item.id,
+      workspaceId: item.workspaceId,
+      name: item.name,
+      categoryId: item.categoryId,
+      paymentMethodId: item.paymentMethodId,
+      paymentCardId: item.paymentMethodId === "credit-card" ? item.paymentOptionId || null : null,
+      paymentOptionKey: item.paymentMethodId === "credit-card" ? null : item.paymentOptionId || null,
+      amount: item.amount,
+      periodMonths: item.periodMonths,
+      billingDay: item.billingDay
+    }));
+
     await tx.category.createMany({ data: snapshot.categories });
     await tx.paymentCard.createMany({ data: snapshot.cards });
-    await tx.fixedCost.createMany({ data: snapshot.fixedCosts });
+    await tx.fixedCost.createMany({ data: fixedCosts });
     await tx.backupSnapshot.create({ data: { workspaceId: snapshot.workspaceId, payload: snapshot } });
   });
 }</code></pre>
+        <p>DTO <code>paymentOptionId</code>는 저장 컬럼이 아니다. API는 credit-card 행에서 <code>paymentCardId</code>를 설정하고, 그 외 결제수단은 <code>paymentOptionKey</code>를 설정한다. 응답 DTO를 만들 때는 credit-card 행은 <code>paymentCardId</code>, 그 외 행은 <code>paymentOptionKey ?? ""</code>를 <code>paymentOptionId</code>로 파생한다.</p>
         <ul class="checklist">
           <li><strong>Step 4:</strong> routes에서 owner/editor는 PUT, owner/editor/viewer는 GET 가능하게 한다.</li>
           <li><strong>Step 5:</strong> 테스트 후 커밋한다.</li>
