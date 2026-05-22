@@ -61,7 +61,7 @@ API 컨테이너는 `apps/api/Dockerfile`로 빌드합니다. 운영 Compose 예
 
 ```bash
 docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml run --rm api pnpm prisma migrate deploy
+docker compose -f docker-compose.prod.yml run --rm api ./node_modules/.bin/prisma migrate deploy
 docker compose -f docker-compose.prod.yml up -d
 ```
 

@@ -42,6 +42,9 @@ importers:
       fastify-plugin:
         specifier: ^5.1.0
         version: 5.1.0
+      prisma:
+        specifier: ^6.19.3
+        version: 6.19.3(typescript@5.9.3)
       zod:
         specifier: ^4.1.13
         version: 4.4.3

@@ -23,25 +23,17 @@ COPY apps/api/src ./apps/api/src
 RUN pnpm db:generate
 RUN pnpm --filter @living-cost-manager/shared build
 RUN pnpm --filter @living-cost-manager/api build
+RUN pnpm --filter @living-cost-manager/api deploy --prod --legacy /prod/api
+RUN cp -R prisma /prod/api/prisma
 
 FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
 ENV NODE_ENV="production"
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
 
-RUN corepack enable
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/apps/api/package.json ./apps/api/package.json
-COPY --from=build /app/apps/api/dist ./apps/api/dist
-COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json
-COPY --from=build /app/packages/shared/dist ./packages/shared/dist
+COPY --from=build /prod/api ./
 
 EXPOSE 4000
 
-CMD ["pnpm", "--filter", "@living-cost-manager/api", "start"]
+CMD ["node", "dist/server.js"]
