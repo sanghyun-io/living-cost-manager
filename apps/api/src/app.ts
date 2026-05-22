@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import type { PrismaClient } from "@prisma/client";
+import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
 
 import { type Env, loadEnv } from "./env.js";
@@ -45,13 +46,21 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(authPlugin, {
     secret: env.JWT_SECRET
   });
-  await app.register(authRoutes);
-  await app.register(workspaceRoutes);
-  await app.register(invitationRoutes);
-  await app.register(memberRoutes);
-  await app.register(snapshotRoutes);
 
-  app.get("/health", async () => ({ ok: true }));
+  const registerApiRoutes = async (api: FastifyInstance) => {
+    await api.register(authRoutes);
+    await api.register(workspaceRoutes);
+    await api.register(invitationRoutes);
+    await api.register(memberRoutes);
+    await api.register(snapshotRoutes);
+    api.get("/health", async () => ({ ok: true }));
+  };
+
+  if (env.API_BASE_PATH) {
+    await app.register(registerApiRoutes, { prefix: env.API_BASE_PATH });
+  } else {
+    await registerApiRoutes(app);
+  }
 
   return app;
 }
