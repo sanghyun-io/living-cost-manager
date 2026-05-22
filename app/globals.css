@@ -415,6 +415,18 @@ small {
   white-space: nowrap;
 }
 
+.period-input {
+  padding-right: 44px;
+}
+
+.input-suffix {
+  display: block;
+  margin-top: -29px;
+  padding-right: 10px;
+  text-align: right;
+  pointer-events: none;
+}
+
 input,
 select {
   width: 100%;

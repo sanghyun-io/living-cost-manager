@@ -35,17 +35,18 @@ describe("fixed cost dashboard", () => {
     const fixedCosts = [
       createFixedCost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000, billingDay: 25 }),
       createFixedCost({ id: "phone", name: "통신비", categoryId: "telecom", amount: 79000, billingDay: 10 }),
-      createFixedCost({ id: "litter", name: "고양이 모래", categoryId: "other", amount: 45000, periodMonths: 3, billingDay: 1 })
+      createFixedCost({ id: "litter", name: "고양이 모래", categoryId: "other", amount: 45000, periodMonths: 2.5, billingDay: 1 })
     ];
 
     const summary = buildBudgetSummary(fixedCosts, 3_000_000);
 
     expect(fixedCosts[0].periodMonths).toBe(1);
-    expect(getMonthlyEquivalentAmount(fixedCosts[2])).toBe(15_000);
-    expect(summary.monthlyExpense).toBe(744_000);
-    expect(summary.annualExpense).toBe(8_928_000);
-    expect(summary.remainingIncome).toBe(2_256_000);
-    expect(summary.expenseRate).toBe(24.8);
+    expect(fixedCosts[2].periodMonths).toBe(2.5);
+    expect(getMonthlyEquivalentAmount(fixedCosts[2])).toBe(18_000);
+    expect(summary.monthlyExpense).toBe(747_000);
+    expect(summary.annualExpense).toBe(8_964_000);
+    expect(summary.remainingIncome).toBe(2_253_000);
+    expect(summary.expenseRate).toBe(24.9);
   });
 
   test("updates editable fixed cost fields safely", () => {
@@ -66,6 +67,13 @@ describe("fixed cost dashboard", () => {
     expect(updated.categoryId).toBe("insurance");
     expect(updated.paymentMethodId).toBe("credit-card");
     expect(updated.paymentOptionId).toBe("card-living");
+  });
+
+  test("rounds fixed cost periods to one decimal place", () => {
+    const item = createFixedCost({ id: "litter", name: "고양이 모래", categoryId: "other", amount: 45000, periodMonths: 2.57, billingDay: 1 });
+
+    expect(item.periodMonths).toBe(2.6);
+    expect(updateFixedCost(item, { periodMonths: 1.24 }).periodMonths).toBe(1.2);
   });
 
   test("keeps payment option empty except for supported payment methods", () => {
@@ -266,7 +274,7 @@ describe("fixed cost dashboard", () => {
         paymentMethodId: "credit-card",
         paymentOptionId: card.id,
         amount: 79000,
-        periodMonths: 3,
+        periodMonths: 2.5,
         billingDay: 10
       })
     ];
@@ -297,7 +305,7 @@ describe("fixed cost dashboard", () => {
     });
     expect(imported.fixedCosts[1].paymentMethodId).toBe("credit-card");
     expect(imported.fixedCosts[1].paymentOptionId).toBe(card.id);
-    expect(imported.fixedCosts[1].periodMonths).toBe(3);
+    expect(imported.fixedCosts[1].periodMonths).toBe(2.5);
     expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 10 }]);
   });
 
@@ -312,7 +320,7 @@ describe("fixed cost dashboard", () => {
         paymentMethodId: "credit-card",
         paymentOptionId: card.id,
         amount: 99000,
-        periodMonths: 12,
+        periodMonths: 12.5,
         billingDay: 21
       })
     ];

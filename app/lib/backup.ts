@@ -127,7 +127,7 @@ function parseFixedCosts(rows: string[][]): FixedCost[] {
         paymentOptionId: row[4] ?? "",
         amount: sanitizeNumber(Number(row[5]), 0),
         billingDay: sanitizeNumber(Number(row[6]), 1),
-        periodMonths: sanitizeNumber(Number(row[7]), 1) || 1
+        periodMonths: sanitizePeriodMonths(Number(row[7]))
       })
     );
 }
@@ -210,4 +210,12 @@ function sanitizeNumber(value: number, fallback: number): number {
   }
 
   return Math.max(0, Math.round(value));
+}
+
+function sanitizePeriodMonths(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.round(value * 10) / 10);
 }

@@ -119,7 +119,7 @@ export function parseFixedCostCsvTemplate({ csv, categories, cards }: ImportInpu
         paymentOptionId,
         billingDay: parseCurrencyAmount(getCell(row, headerMap, "납부일")) || 1,
         amount,
-        periodMonths: parseCurrencyAmount(getCell(row, headerMap, "주기")) || 1
+        periodMonths: parsePeriodMonths(getCell(row, headerMap, "주기"))
       })
     );
   });
@@ -272,6 +272,16 @@ function parseCurrencyAmount(value: string): number {
   const normalized = value.replace(/[^\d.-]/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+}
+
+function parsePeriodMonths(value: string): number {
+  const normalized = value.replace(/[^\d.-]/g, "");
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.round(parsed * 10) / 10);
 }
 
 function sanitizeImportId(value: string, index: number): string {

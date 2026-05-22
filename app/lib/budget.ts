@@ -140,7 +140,7 @@ export function updateFixedCost(item: FixedCost, patch: Partial<Omit<FixedCost, 
     paymentMethodId,
     paymentOptionId: sanitizePaymentOptionId(paymentMethodId, patch.paymentOptionId ?? item.paymentOptionId),
     amount: clampNumber(patch.amount ?? item.amount, 0, Number.MAX_SAFE_INTEGER),
-    periodMonths: clampNumber(patch.periodMonths ?? item.periodMonths ?? 1, 1, 120),
+    periodMonths: clampPeriodMonths(patch.periodMonths ?? item.periodMonths ?? 1),
     billingDay: clampNumber(patch.billingDay ?? item.billingDay, 1, 31)
   };
 }
@@ -292,6 +292,15 @@ function clampNumber(value: number, min: number, max: number): number {
   }
 
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function clampPeriodMonths(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  const rounded = Math.round(value * 10) / 10;
+  return Math.min(120, Math.max(1, rounded));
 }
 
 function sanitizeCategoryId(value: string): string {

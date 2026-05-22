@@ -3,7 +3,8 @@ const fixedCosts = [
   { name: "통신비", categoryId: "telecom", paymentMethodId: "credit-card", paymentOptionId: "", amount: 79000, periodMonths: 1, billingDay: 10 },
   { name: "보험료", categoryId: "insurance", paymentMethodId: "bank-transfer", paymentOptionId: "auto-transfer", amount: 155000, periodMonths: 1, billingDay: 15 },
   { name: "구독 서비스", categoryId: "subscription", paymentMethodId: "credit-card", paymentOptionId: "", amount: 35000, periodMonths: 1, billingDay: 5 },
-  { name: "교통 정기권", categoryId: "transport", paymentMethodId: "debit-card", paymentOptionId: "", amount: 120000, periodMonths: 1, billingDay: 1 }
+  { name: "교통 정기권", categoryId: "transport", paymentMethodId: "debit-card", paymentOptionId: "", amount: 120000, periodMonths: 1, billingDay: 1 },
+  { name: "고양이 모래", categoryId: "other", paymentMethodId: "debit-card", paymentOptionId: "", amount: 45000, periodMonths: 2.5, billingDay: 1 }
 ];
 
 export const dynamic = "force-static";

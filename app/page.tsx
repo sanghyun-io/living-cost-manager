@@ -798,13 +798,16 @@ export default function Home() {
                   </label>
                   <input
                     id={item.id + "-period"}
+                    className="period-input"
                     inputMode="numeric"
                     max="120"
                     min="1"
+                    step="0.1"
                     type="number"
                     value={item.periodMonths}
-                    onChange={(event) => handleItemChange(item.id, { periodMonths: parseCurrencyInput(event.target.value) || 1 })}
+                    onChange={(event) => handleItemChange(item.id, { periodMonths: parsePeriodInput(event.target.value) })}
                   />
+                  <small className="input-suffix">개월</small>
                 </span>
                 <span className="monthly-equivalent-cell">
                   <strong>{formatWon(getMonthlyEquivalentAmount(item))}</strong>
@@ -1139,6 +1142,15 @@ export default function Home() {
 function parseCurrencyInput(value: string) {
   const parsed = Number(value.replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+}
+
+function parsePeriodInput(value: string) {
+  const parsed = Number(value.replace(/[^\d.-]/g, ""));
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.round(parsed * 10) / 10);
 }
 
 function formatNumberInput(value: number) {
