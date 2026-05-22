@@ -8,6 +8,7 @@
     "build": "pnpm -r --if-present build",
     "start": "pnpm --filter @living-cost-manager/web start",
     "test": "pnpm -r test",
+    "test:api": "pnpm --filter @living-cost-manager/api test",
     "test:web": "pnpm --filter @living-cost-manager/web test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
