@@ -1,37 +1,76 @@
 # Living Cost Manager
 
-생활비와 고정비를 관리하는 Next.js 기반 웹 앱입니다.
+생활비와 고정비를 관리하는 모노레포 프로젝트입니다. 프론트엔드는 GitHub Pages에 정적 파일로 배포하고, 공유/동기화 기능은 별도의 API 서버와 Postgres를 사용합니다.
 
-## Features
+## 모노레포 구조
 
-- 사용자별 로컬 로그인
-- 월 수입 입력 및 수입 대비 고정비 요약
-- 고정비 항목 편집 및 주기별 월 환산 계산
-- 카테고리 관리 및 카테고리 필터
-- 결제수단/결제옵션 관리
-- 신용카드 결제일 기반 납부일 자동 반영
-- 카드 관리
-- 막대/원형 차트 기반 카테고리별 비중 확인
-- CSV 템플릿 export/import
-- `.lcm` 전체 백업 export/import
-- GitHub Pages 정적 배포
-- 브라우저 localStorage 자동 저장 상태 표시
-- PWA manifest 및 오프라인 캐시
+```text
+apps/
+  web/      Next.js 정적 export 프론트엔드
+  api/      Fastify API 서버
+packages/
+  shared/   웹과 API가 함께 쓰는 Zod 스키마와 타입
+prisma/     Prisma schema와 migration
+```
 
-## Development
+루트 `package.json`에서 pnpm workspace를 관리합니다.
+
+## 로컬 웹 개발
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-## Checks
+웹 앱만 직접 실행하려면 다음 명령을 사용합니다.
+
+```bash
+pnpm --filter @living-cost-manager/web dev
+```
+
+기본 확인 명령은 다음과 같습니다.
 
 ```bash
 pnpm test
 pnpm build
 ```
 
-## Notes
+GitHub Pages 프론트엔드는 계속 정적 export 방식입니다. 서버 공유 기능을 사용할 빌드에서는 웹 빌드 시점에 `NEXT_PUBLIC_API_BASE_URL`을 API 공개 URL로 설정해야 합니다.
 
-The app currently stores user data in browser localStorage. Do not use it as a production finance system without adding server-side authentication, persistence, and backup controls.
+## 로컬 API/Postgres 개발
+
+로컬 Postgres는 개발용 Compose 파일로 실행합니다.
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+API 환경 변수는 `apps/api/.env.example`을 참고해 로컬 셸이나 실행 도구에서 프로세스 환경 변수로 주입합니다. 실제 비밀값은 커밋하지 않습니다.
+
+```bash
+pnpm db:generate
+pnpm db:migrate
+pnpm --filter @living-cost-manager/api dev
+```
+
+API 테스트와 전체 테스트에서 DB 연동 테스트를 실행하려면 `API_TEST_DATABASE_URL`이 필요합니다. 테스트 전용 Postgres 데이터베이스 URL을 지정하고, 운영/개발 DB와 같은 데이터베이스를 공유하지 마세요.
+
+## OCI/백엔드 배포 개요
+
+API 컨테이너는 `apps/api/Dockerfile`로 빌드합니다. 운영 Compose 예시는 `docker-compose.prod.yml`입니다.
+
+```bash
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml run --rm api pnpm prisma migrate deploy
+docker compose -f docker-compose.prod.yml up -d
+```
+
+컨테이너 시작 명령은 migration을 자동 실행하지 않습니다. 새 버전을 올리기 전에 `prisma migrate deploy`를 먼저 실행하는 전략을 사용하세요.
+
+운영 환경에서는 `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`를 배포 환경의 비밀 관리 방식으로 주입합니다. `JWT_SECRET`, DB 비밀번호, credentials가 포함된 API URL을 README, Compose 파일, Git 커밋, 로그에 남기지 마세요.
+
+OCI나 VM에서는 Docker Compose로 API와 Postgres를 실행하고, 외부 공개는 Nginx, Caddy, OCI Load Balancer 같은 HTTPS reverse proxy 뒤에 두는 구성을 권장합니다. Reverse proxy에서 TLS를 종료하고 API origin을 고정한 뒤, API의 `CORS_ORIGIN`을 GitHub Pages 프론트엔드 URL 또는 허용할 정확한 웹 origin으로 설정하세요.
+
+## 참고
+
+브라우저 localStorage 기반 기능은 정적 프론트엔드에서 계속 동작합니다. 공유/동기화 기능은 API 서버, Postgres, 올바른 빌드 시점 `NEXT_PUBLIC_API_BASE_URL`이 준비된 경우에만 사용할 수 있습니다.
