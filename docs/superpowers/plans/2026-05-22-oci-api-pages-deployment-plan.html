@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OCI API 배포 및 Pages 연결 구현 계획</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #18181b;
+        font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(1080px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e4e4e7;
+        padding-top: 28px;
+      }
+
+      h3 {
+        margin-top: 28px;
+      }
+
+      section {
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        margin-top: 18px;
+      }
+
+      code,
+      pre {
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+
+      code {
+        padding: 2px 5px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .meta {
+        color: #52525b;
+      }
+
+      .task {
+        display: inline-block;
+        margin-bottom: 8px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #134e4a;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .warn {
+        border-color: #fde68a;
+        background: #fffbeb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OCI API 배포 및 Pages 연결 구현 계획</h1>
+      <p class="meta">
+        For agentic workers: REQUIRED SUB-SKILL: Use
+        <code>superpowers:subagent-driven-development</code> or
+        <code>superpowers:executing-plans</code> to implement this plan task-by-task. Steps use checkbox syntax for tracking.
+      </p>
+
+      <section>
+        <p><strong>Goal:</strong> OCI VM의 기존 API gateway에 Living Cost Manager API를 배포하고, GitHub Pages 프론트가 공개 API를 사용해 로그인과 snapshot 동기화를 수행하게 만든다.</p>
+        <p><strong>Architecture:</strong> 공개 API는 <code>https://api.gamja.top/living-cost-manager/v1</code>로 제공한다. Fastify는 같은 prefix 아래에 route를 등록하고, nginx는 해당 path를 OCI VM 내부 API 컨테이너 포트 <code>4104</code>로 proxy한다. 프론트는 정적 export를 유지하고 <code>NEXT_PUBLIC_API_BASE_URL</code>만 빌드 시점에 주입한다.</p>
+        <p><strong>Tech Stack:</strong> Next static export, GitHub Pages, Fastify, Prisma, PostgreSQL, Docker Compose, nginx, OCI VM, pnpm, Vitest.</p>
+      </section>
+
+      <h2>파일 구조</h2>
+      <section>
+        <ul>
+          <li>Modify: <code>apps/api/src/env.ts</code> - API route prefix 환경 변수 추가</li>
+          <li>Modify: <code>apps/api/src/app.ts</code> - route 등록을 prefix-aware로 변경</li>
+          <li>Modify: <code>apps/api/tests/health.test.ts</code> - prefixed health route 회귀 테스트 추가</li>
+          <li>Create: <code>docker-compose.oci.yml</code> - OCI 외부 DB 연결용 API-only Compose</li>
+          <li>Create: <code>docs/deployment/oci-api-runbook.html</code> - 비밀값 없는 운영 배포 runbook</li>
+          <li>Modify: <code>.github/workflows/pages.yml</code> - Pages 빌드에 public API URL 주입</li>
+          <li>Modify: <code>README.md</code> - 공개 API URL과 Cloudflare Pages 호환 배포 원칙 문서화</li>
+        </ul>
+      </section>
+
+      <h2>Task 1: API route prefix 지원</h2>
+      <section>
+        <span class="task">api</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Modify: <code>apps/api/src/env.ts</code></li>
+          <li>Modify: <code>apps/api/src/app.ts</code></li>
+          <li>Test: <code>apps/api/tests/health.test.ts</code></li>
+        </ul>
+
+        <h3>Step 1: failing test 작성</h3>
+        <p><code>apps/api/tests/health.test.ts</code>에 prefix route 테스트를 추가한다.</p>
+        <pre><code>test("serves health under configured api base path", async () =&gt; {
+  const app = await buildApp({
+    env: {
+      NODE_ENV: "test",
+      PORT: 4000,
+      DATABASE_URL: "postgresql://living_cost:living_cost_dev@localhost:5432/living_cost_manager?schema=lcm_test",
+      JWT_SECRET: "test-secret-with-at-least-thirty-two-chars",
+      CORS_ORIGIN: "https://sanghyun-io.github.io",
+      API_BASE_PATH: "/living-cost-manager/v1"
+    }
+  });
+
+  const prefixed = await app.inject({ method: "GET", url: "/living-cost-manager/v1/health" });
+  const root = await app.inject({ method: "GET", url: "/health" });
+
+  expect(prefixed.statusCode).toBe(200);
+  expect(prefixed.json()).toEqual({ ok: true });
+  expect(root.statusCode).toBe(404);
+});</code></pre>
+
+        <h3>Step 2: 실패 확인</h3>
+        <pre><code>pnpm --filter @living-cost-manager/api test -- health.test.ts
+Expected: FAIL. "/living-cost-manager/v1/health" returns 404 before prefix support.</code></pre>
+
+        <h3>Step 3: env schema 확장</h3>
+        <p><code>apps/api/src/env.ts</code>의 schema에 <code>API_BASE_PATH</code>를 추가한다.</p>
+        <pre><code>export const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  PORT: z.coerce.number().int().positive().default(4000),
+  DATABASE_URL: z.string().min(1),
+  JWT_SECRET: z.string().min(32),
+  CORS_ORIGIN: z.url().default("https://sanghyun-io.github.io"),
+  API_BASE_PATH: z
+    .string()
+    .trim()
+    .regex(/^$|^\/[A-Za-z0-9/_-]+$/, "API_BASE_PATH must be empty or start with /")
+    .transform((value) =&gt; value.replace(/\/+$/, ""))
+    .default("")
+});</code></pre>
+
+        <h3>Step 4: app route 등록 prefix-aware 변경</h3>
+        <p><code>apps/api/src/app.ts</code>에서 route 등록부를 plugin으로 감싼다.</p>
+        <pre><code>const registerApiRoutes = async (api: typeof app) =&gt; {
+  await api.register(authRoutes);
+  await api.register(workspaceRoutes);
+  await api.register(invitationRoutes);
+  await api.register(memberRoutes);
+  await api.register(snapshotRoutes);
+  api.get("/health", async () =&gt; ({ ok: true }));
+};
+
+if (env.API_BASE_PATH) {
+  await app.register(registerApiRoutes, { prefix: env.API_BASE_PATH });
+} else {
+  await registerApiRoutes(app);
+}</code></pre>
+        <p>기존 route 등록과 root <code>/health</code> 등록은 위 블록으로 대체한다.</p>
+
+        <h3>Step 5: 검증과 커밋</h3>
+        <pre><code>pnpm --filter @living-cost-manager/api test -- health.test.ts
+pnpm --filter @living-cost-manager/api build
+git add apps/api/src/env.ts apps/api/src/app.ts apps/api/tests/health.test.ts
+git commit -m "feat: support API base path"</code></pre>
+      </section>
+
+      <h2>Task 2: OCI API-only Compose 추가</h2>
+      <section>
+        <span class="task">deploy config</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>docker-compose.oci.yml</code></li>
+          <li>Modify: <code>README.md</code></li>
+        </ul>
+
+        <h3>Step 1: Compose 파일 작성</h3>
+        <p><code>docker-compose.oci.yml</code>을 새로 만든다. 이 파일은 내장 Postgres를 띄우지 않는다.</p>
+        <pre><code>services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.oci
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      API_BASE_PATH: /living-cost-manager/v1
+      CORS_ORIGIN: https://sanghyun-io.github.io
+    ports:
+      - "127.0.0.1:4104:4000"</code></pre>
+
+        <h3>Step 2: README에 파일 용도 추가</h3>
+        <p><code>README.md</code>의 OCI/백엔드 배포 개요에 아래 문장을 추가한다.</p>
+        <pre><code>OCI의 기존 PostgreSQL 인스턴스를 사용할 때는 `docker-compose.oci.yml`을 사용합니다. 이 Compose 파일은 API 컨테이너만 실행하고, `.env.oci`에서 `DATABASE_URL`과 `JWT_SECRET`을 읽습니다. `.env.oci`는 절대 커밋하지 않습니다.</code></pre>
+
+        <h3>Step 3: 검증과 커밋</h3>
+        <pre><code>docker compose -f docker-compose.oci.yml config
+git add docker-compose.oci.yml README.md
+git commit -m "chore: add OCI API compose"</code></pre>
+      </section>
+
+      <h2>Task 3: GitHub Pages 빌드에 API URL 주입</h2>
+      <section>
+        <span class="task">pages</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Modify: <code>.github/workflows/pages.yml</code></li>
+          <li>Test: <code>apps/web/tests/smoke.test.ts</code></li>
+        </ul>
+
+        <h3>Step 1: workflow 수정</h3>
+        <p><code>Build static site</code> step의 env를 아래처럼 확장한다.</p>
+        <pre><code>- name: Build static site
+  env:
+    GITHUB_PAGES: "true"
+    NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+  run: pnpm --filter @living-cost-manager/web... build</code></pre>
+
+        <h3>Step 2: 로컬 빌드 검증</h3>
+        <pre><code>$env:GITHUB_PAGES='true'
+$env:NEXT_PUBLIC_API_BASE_URL='https://api.gamja.top/living-cost-manager/v1'
+pnpm --filter @living-cost-manager/web... build
+Remove-Item Env:GITHUB_PAGES
+Remove-Item Env:NEXT_PUBLIC_API_BASE_URL
+Expected: apps/web build succeeds and apps/web/out exists.</code></pre>
+
+        <h3>Step 3: GitHub repo variable 설정</h3>
+        <p>값은 공개 API origin이므로 secret이 아니라 variable로 둔다.</p>
+        <pre><code>gh variable set NEXT_PUBLIC_API_BASE_URL --repo sanghyun-io/living-cost-manager --body "https://api.gamja.top/living-cost-manager/v1"
+gh variable list --repo sanghyun-io/living-cost-manager</code></pre>
+        <p>Expected: <code>NEXT_PUBLIC_API_BASE_URL</code>가 목록에 표시된다. GitHub token 값은 출력하지 않는다.</p>
+
+        <h3>Step 4: 커밋</h3>
+        <pre><code>git add .github/workflows/pages.yml
+git commit -m "chore: configure Pages API base URL"</code></pre>
+      </section>
+
+      <h2>Task 4: OCI 배포 runbook 작성</h2>
+      <section>
+        <span class="task">runbook</span>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li>Create: <code>docs/deployment/oci-api-runbook.html</code></li>
+        </ul>
+
+        <h3>Step 1: runbook 작성</h3>
+        <p>아래 내용을 포함한 HTML runbook을 만든다. 비밀번호, JWT secret, 전체 DB URL 값은 문서에 넣지 않는다.</p>
+        <pre><code>&lt;h1&gt;OCI API 배포 Runbook&lt;/h1&gt;
+&lt;ol&gt;
+  &lt;li&gt;중앙 credentials sheet에서 living-cost-manager의 DATABASE_URL 값을 로컬 셸 변수로만 읽는다.&lt;/li&gt;
+  &lt;li&gt;JWT secret은 로컬 셸에서 생성하고 출력하지 않는다.&lt;/li&gt;
+  &lt;li&gt;OCI API VM의 /home/ubuntu/living-cost-manager에 repo를 준비한다.&lt;/li&gt;
+  &lt;li&gt;.env.oci는 VM 안에서만 생성하고 chmod 600을 적용한다.&lt;/li&gt;
+  &lt;li&gt;DATABASE_URL이 schema=lcm을 가리키는지 확인한다.&lt;/li&gt;
+  &lt;li&gt;docker compose -f docker-compose.oci.yml build api를 실행한다.&lt;/li&gt;
+  &lt;li&gt;docker compose -f docker-compose.oci.yml run --rm api ./node_modules/.bin/prisma migrate deploy를 실행한다.&lt;/li&gt;
+  &lt;li&gt;docker compose -f docker-compose.oci.yml up -d api를 실행한다.&lt;/li&gt;
+  &lt;li&gt;curl http://127.0.0.1:4104/living-cost-manager/v1/health로 내부 health를 확인한다.&lt;/li&gt;
+  &lt;li&gt;nginx에 /living-cost-manager/v1/ proxy를 추가하고 reload한다.&lt;/li&gt;
+  &lt;li&gt;https://api.gamja.top/living-cost-manager/v1/health를 확인한다.&lt;/li&gt;
+&lt;/ol&gt;</code></pre>
+
+        <h3>Step 2: secret scan</h3>
+        <pre><code>rg -n --hidden -i "(password|jwt_secret|database_url|postgresql://|private key|token)" docs/deployment/oci-api-runbook.html
+Expected: only variable names or warnings, no real values.</code></pre>
+
+        <h3>Step 3: 커밋</h3>
+        <pre><code>git add docs/deployment/oci-api-runbook.html
+git commit -m "docs: add OCI API deployment runbook"</code></pre>
+      </section>
+
+      <h2>Task 5: OCI VM 실제 배포</h2>
+      <section class="warn">
+        <span class="task">ops</span>
+        <p><strong>Files on VM only:</strong></p>
+        <ul>
+          <li>Create on VM: <code>/home/ubuntu/living-cost-manager/.env.oci</code></li>
+          <li>Modify on VM: <code>/etc/nginx/sites-enabled/api-gateway</code></li>
+        </ul>
+        <p>이 task는 비밀값을 출력하지 않는다. 중앙 credentials sheet의 값을 명령 출력에 남기지 않는다.</p>
+
+        <h3>Step 1: repo 준비</h3>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "mkdir -p /home/ubuntu/living-cost-manager"
+git remote get-url origin
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager &amp;&amp; git init &amp;&amp; git remote remove origin 2&gt;/dev/null || true"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager &amp;&amp; git remote add origin https://github.com/sanghyun-io/living-cost-manager.git"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager &amp;&amp; git fetch origin main &amp;&amp; git checkout -B main origin/main"</code></pre>
+
+        <h3>Step 2: VM 환경 파일 생성</h3>
+        <p>로컬 셸에서 중앙 credentials sheet 값을 변수로 읽고, <code>.env.oci</code> 내용을 SSH stdin으로만 전달한다. 값은 출력하지 않는다.</p>
+        <pre><code># Pseudocode shape only. Implementation must keep values inside variables.
+# DATABASE_URL: central credentials sheet living-cost-manager/DATABASE_URL
+# JWT_SECRET: generated with a cryptographic RNG
+# .env.oci lines:
+DATABASE_URL=&lt;secret value from credentials sheet&gt;
+JWT_SECRET=&lt;generated secret&gt;</code></pre>
+
+        <h3>Step 3: migration과 API 실행</h3>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager &amp;&amp; docker compose -f docker-compose.oci.yml build api"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager &amp;&amp; docker compose -f docker-compose.oci.yml run --rm api ./node_modules/.bin/prisma migrate deploy"
+ssh sh-oracle-cloud-dev-1 "cd /home/ubuntu/living-cost-manager &amp;&amp; docker compose -f docker-compose.oci.yml up -d api"
+ssh sh-oracle-cloud-dev-1 "curl -fsS http://127.0.0.1:4104/living-cost-manager/v1/health"</code></pre>
+        <p>Expected: <code>{"ok":true}</code></p>
+
+        <h3>Step 4: nginx proxy 추가</h3>
+        <p><code>/etc/nginx/sites-enabled/api-gateway</code>의 HTTPS server block에 아래 location을 추가한다.</p>
+        <pre><code># Living Cost Manager API (port 4104)
+location ^~ /living-cost-manager/v1/ {
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:4104;
+}</code></pre>
+
+        <h3>Step 5: nginx 검증과 공개 health 확인</h3>
+        <pre><code>ssh sh-oracle-cloud-dev-1 "sudo nginx -t"
+ssh sh-oracle-cloud-dev-1 "sudo systemctl reload nginx"
+Invoke-WebRequest https://api.gamja.top/living-cost-manager/v1/health -UseBasicParsing
+Expected: 200 with {"ok":true}</code></pre>
+      </section>
+
+      <h2>Task 6: Pages 배포와 브라우저 smoke</h2>
+      <section>
+        <span class="task">verification</span>
+        <p><strong>Files:</strong> none unless verification reveals a bug.</p>
+
+        <h3>Step 1: 전체 검증</h3>
+        <pre><code>pnpm -r --if-present build
+git status --short --branch</code></pre>
+        <p>Expected: build succeeds, branch is clean except planned commits.</p>
+
+        <h3>Step 2: main push</h3>
+        <pre><code>git push origin main
+gh run watch --repo sanghyun-io/living-cost-manager --exit-status</code></pre>
+        <p>Expected: GitHub Pages workflow succeeds.</p>
+
+        <h3>Step 3: Pages 확인</h3>
+        <pre><code>Invoke-WebRequest https://sanghyun-io.github.io/living-cost-manager/ -UseBasicParsing
+Expected: 200 and app HTML is returned.</code></pre>
+
+        <h3>Step 4: 실제 auth smoke</h3>
+        <p>브라우저에서 Pages 앱을 열고 새 테스트 계정으로 회원가입한다. 성공 조건은 다음과 같다.</p>
+        <ul>
+          <li>회원가입 후 서버 세션이 생성된다.</li>
+          <li>워크스페이스가 하나 이상 표시된다.</li>
+          <li>현재 브라우저 데이터를 서버 snapshot으로 업로드할 수 있다.</li>
+          <li>새로고침 후 서버 세션과 동기화 상태가 유지된다.</li>
+        </ul>
+      </section>
+
+      <h2>Self Review</h2>
+      <section>
+        <ul>
+          <li>설계의 공개 API URL, OCI API 배포, Pages 연결, Cloudflare Pages 호환 조건을 모두 task로 연결했습니다.</li>
+          <li>비밀값은 repo 파일이나 계획 문서에 들어가지 않게 변수명과 절차만 적었습니다.</li>
+          <li>기존 API gateway 관례인 <code>/{service}/v1/</code>를 따르도록 Fastify prefix 지원 task를 포함했습니다.</li>
+          <li>내장 Postgres가 아니라 기존 OCI PostgreSQL <code>lcm</code> schema를 쓰도록 API-only Compose를 분리했습니다.</li>
+          <li>프론트는 provider 분기 없이 build-time public env만 사용합니다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
