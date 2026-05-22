@@ -37,6 +37,13 @@ export class InvalidInvitationError extends Error {
   }
 }
 
+export class WorkspaceInvitationAuthorizationError extends Error {
+  constructor(message = "Forbidden") {
+    super(message);
+    this.name = "WorkspaceInvitationAuthorizationError";
+  }
+}
+
 export function createInvitationToken(): string {
   return randomBytes(invitationTokenBytes).toString("base64url");
 }
@@ -73,62 +80,58 @@ export async function createWorkspaceInvitation(
   prisma: PrismaClient,
   workspaceId: string,
   email: string,
-  role: WorkspaceInvitationRole
+  role: WorkspaceInvitationRole,
+  actorUserId: string
 ): Promise<CreatedInvitation> {
   const normalizedEmail = normalizeEmail(email);
   const now = new Date();
 
-  return prisma.$transaction(async (tx) => {
-    const invitee = await tx.user.findUnique({
-      where: {
-        email: normalizedEmail
-      },
-      select: {
-        id: true
-      }
-    });
-
-    if (invitee) {
-      const existingMember = await tx.workspaceMember.findUnique({
+  return prisma.$transaction(
+    async (tx) => {
+      const actorMembership = await tx.workspaceMember.findUnique({
         where: {
           workspaceId_userId: {
             workspaceId,
-            userId: invitee.id
+            userId: actorUserId
           }
+        },
+        select: {
+          role: true
+        }
+      });
+
+      if (actorMembership?.role !== "owner") {
+        throw new WorkspaceInvitationAuthorizationError();
+      }
+
+      const invitee = await tx.user.findUnique({
+        where: {
+          email: normalizedEmail
         },
         select: {
           id: true
         }
       });
 
-      if (existingMember) {
-        throw new InvitationConflictError("User is already a workspace member");
-      }
-    }
+      if (invitee) {
+        const existingMember = await tx.workspaceMember.findUnique({
+          where: {
+            workspaceId_userId: {
+              workspaceId,
+              userId: invitee.id
+            }
+          },
+          select: {
+            id: true
+          }
+        });
 
-    const expiredPendingInvitation = await tx.workspaceInvitation.findFirst({
-      where: {
-        workspaceId,
-        email: normalizedEmail,
-        status: "pending",
-        expiresAt: {
-          lte: now
+        if (existingMember) {
+          throw new InvitationConflictError("User is already a workspace member");
         }
-      },
-      select: {
-        id: true
       }
-    });
 
-    if (expiredPendingInvitation) {
-      await tx.workspaceInvitation.deleteMany({
-        where: {
-          workspaceId,
-          email: normalizedEmail,
-          status: "expired"
-        }
-      });
-      await tx.workspaceInvitation.updateMany({
+      const expiredPendingInvitation = await tx.workspaceInvitation.findFirst({
         where: {
           workspaceId,
           email: normalizedEmail,
@@ -137,29 +140,48 @@ export async function createWorkspaceInvitation(
             lte: now
           }
         },
-        data: {
-          status: "expired"
+        select: {
+          id: true
         }
       });
-    }
 
-    const token = createInvitationToken();
-    const invitation = await tx.workspaceInvitation.create({
-      data: {
-        workspaceId,
-        email: normalizedEmail,
-        role,
-        status: "pending",
-        tokenHash: hashInvitationToken(token),
-        expiresAt: new Date(Date.now() + invitationTtlMs)
+      if (expiredPendingInvitation) {
+        await tx.workspaceInvitation.updateMany({
+          where: {
+            workspaceId,
+            email: normalizedEmail,
+            status: "pending",
+            expiresAt: {
+              lte: now
+            }
+          },
+          data: {
+            status: "expired"
+          }
+        });
       }
-    });
 
-    return {
-      ...toWorkspaceInvitationDto(invitation),
-      token
-    };
-  });
+      const token = createInvitationToken();
+      const invitation = await tx.workspaceInvitation.create({
+        data: {
+          workspaceId,
+          email: normalizedEmail,
+          role,
+          status: "pending",
+          tokenHash: hashInvitationToken(token),
+          expiresAt: new Date(Date.now() + invitationTtlMs)
+        }
+      });
+
+      return {
+        ...toWorkspaceInvitationDto(invitation),
+        token
+      };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+    }
+  );
 }
 
 export async function listPendingInvitationsForEmail(

@@ -13,7 +13,8 @@ import {
   InvitationConflictError,
   isTransactionConflictError,
   isUniqueConstraintError,
-  listPendingInvitationsForEmail
+  listPendingInvitationsForEmail,
+  WorkspaceInvitationAuthorizationError
 } from "../services/invitations.js";
 import { normalizeEmail } from "../services/email.js";
 import { requireWorkspaceOwner } from "../services/membership.js";
@@ -73,11 +74,16 @@ export async function invitationRoutes(app: FastifyInstance) {
           app.prisma,
           workspaceId,
           parsedBody.data.email,
-          parsedBody.data.role
+          parsedBody.data.role,
+          request.user.sub
         );
 
         return reply.code(201).send(invitation);
       } catch (error) {
+        if (error instanceof WorkspaceInvitationAuthorizationError) {
+          throw app.httpErrors.forbidden("Forbidden");
+        }
+
         if (
           error instanceof InvitationConflictError ||
           isUniqueConstraintError(error) ||

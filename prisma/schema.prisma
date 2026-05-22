@@ -58,7 +58,6 @@ model WorkspaceInvitation {
 
   @@index([email])
   @@index([workspaceId])
-  @@unique([workspaceId, email, status])
 }
 
 enum WorkspaceRole {

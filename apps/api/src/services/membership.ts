@@ -28,6 +28,13 @@ export class WorkspaceMemberNotFoundError extends Error {
   }
 }
 
+export class WorkspaceMemberAuthorizationError extends Error {
+  constructor(message = "Forbidden") {
+    super(message);
+    this.name = "WorkspaceMemberAuthorizationError";
+  }
+}
+
 export function toWorkspaceMemberDto(
   member: WorkspaceMemberWithUser
 ): WorkspaceMemberDto {
@@ -151,10 +158,27 @@ export async function updateWorkspaceMemberRole(
   prisma: PrismaClient,
   workspaceId: string,
   memberId: string,
-  role: WorkspaceRole
+  role: WorkspaceRole,
+  actorUserId: string
 ): Promise<WorkspaceMemberDto> {
   return prisma.$transaction(
     async (tx) => {
+      const actorMembership = await tx.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: {
+            workspaceId,
+            userId: actorUserId
+          }
+        },
+        select: {
+          role: true
+        }
+      });
+
+      if (actorMembership?.role !== "owner") {
+        throw new WorkspaceMemberAuthorizationError();
+      }
+
       const member = await tx.workspaceMember.findFirst({
         where: {
           id: memberId,
@@ -215,10 +239,27 @@ export async function updateWorkspaceMemberRole(
 export async function deleteWorkspaceMember(
   prisma: PrismaClient,
   workspaceId: string,
-  memberId: string
+  memberId: string,
+  actorUserId: string
 ): Promise<void> {
   await prisma.$transaction(
     async (tx) => {
+      const actorMembership = await tx.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: {
+            workspaceId,
+            userId: actorUserId
+          }
+        },
+        select: {
+          role: true
+        }
+      });
+
+      if (actorMembership?.role !== "owner") {
+        throw new WorkspaceMemberAuthorizationError();
+      }
+
       const member = await tx.workspaceMember.findFirst({
         where: {
           id: memberId,

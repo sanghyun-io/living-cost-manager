@@ -10,6 +10,7 @@ import {
   requireWorkspaceOwner,
   requireWorkspaceRole,
   updateWorkspaceMemberRole,
+  WorkspaceMemberAuthorizationError,
   WorkspaceMemberNotFoundError
 } from "../services/membership.js";
 
@@ -66,9 +67,14 @@ export async function memberRoutes(app: FastifyInstance) {
           app.prisma,
           workspaceId,
           memberId,
-          parsedBody.data.role
+          parsedBody.data.role,
+          request.user.sub
         );
       } catch (error) {
+        if (error instanceof WorkspaceMemberAuthorizationError) {
+          throw app.httpErrors.forbidden("Forbidden");
+        }
+
         if (error instanceof WorkspaceMemberNotFoundError) {
           throw app.httpErrors.notFound("Workspace member not found");
         }
@@ -94,8 +100,17 @@ export async function memberRoutes(app: FastifyInstance) {
       await requireWorkspaceOwner(app, request.user.sub, workspaceId);
 
       try {
-        await deleteWorkspaceMember(app.prisma, workspaceId, memberId);
+        await deleteWorkspaceMember(
+          app.prisma,
+          workspaceId,
+          memberId,
+          request.user.sub
+        );
       } catch (error) {
+        if (error instanceof WorkspaceMemberAuthorizationError) {
+          throw app.httpErrors.forbidden("Forbidden");
+        }
+
         if (error instanceof WorkspaceMemberNotFoundError) {
           throw app.httpErrors.notFound("Workspace member not found");
         }

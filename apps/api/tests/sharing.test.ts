@@ -8,6 +8,15 @@ import {
   cleanupAuthTestRecords,
   resolveApiTestDatabaseUrl
 } from "./test-database.js";
+import {
+  createWorkspaceInvitation,
+  WorkspaceInvitationAuthorizationError
+} from "../src/services/invitations.js";
+import {
+  deleteWorkspaceMember,
+  updateWorkspaceMemberRole,
+  WorkspaceMemberAuthorizationError
+} from "../src/services/membership.js";
 
 const sharingTestEmailPrefix = "sharing-test-";
 const databaseUrl = resolveApiTestDatabaseUrl();
@@ -582,6 +591,54 @@ describe("workspace sharing routes", () => {
     });
   });
 
+  test("accepted invitation history does not block reinviting a removed member", async () => {
+    const owner = await registerTestUser("Reinvite Owner");
+    const { accept: firstAccept, invitee } = await createAcceptedMember(owner, "viewer");
+
+    const removeResponse = await app.inject({
+      method: "DELETE",
+      url: `/workspaces/${owner.workspace.id}/members/${firstAccept.member.id}`,
+      headers: authHeaders(owner.token)
+    });
+    expect(removeResponse.statusCode).toBe(204);
+
+    const secondInvitationResponse = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      invitee.user.email,
+      "editor"
+    );
+    expect(secondInvitationResponse.statusCode).toBe(201);
+    const secondInvitation =
+      secondInvitationResponse.json<InvitationCreateResponse>();
+
+    const secondAcceptResponse = await app.inject({
+      method: "POST",
+      url: `/invitations/${secondInvitation.id}/accept`,
+      headers: authHeaders(invitee.token),
+      payload: {
+        token: secondInvitation.token
+      }
+    });
+    expect(secondAcceptResponse.statusCode).toBe(200);
+    expect(secondAcceptResponse.json()).toMatchObject({
+      member: {
+        workspaceId: owner.workspace.id,
+        userId: invitee.user.id,
+        role: "editor"
+      }
+    });
+
+    const acceptedInvitationCount = await prisma.workspaceInvitation.count({
+      where: {
+        workspaceId: owner.workspace.id,
+        email: invitee.user.email,
+        status: "accepted"
+      }
+    });
+    expect(acceptedInvitationCount).toBe(2);
+  });
+
   test("owner can change member role", async () => {
     const owner = await registerTestUser("Role Owner");
     const { accept } = await createAcceptedMember(owner, "viewer");
@@ -747,5 +804,65 @@ describe("workspace sharing routes", () => {
       }
     });
     expect(updateResponse.statusCode).toBe(403);
+  });
+
+  test("sharing mutation services re-check actor owner status inside write transactions", async () => {
+    const owner = await registerTestUser("Recheck Owner");
+    const invitee = await registerTestUser("Recheck Invitee");
+    const target = await addWorkspaceMember(owner.workspace.id, "viewer");
+    const ownerMembership = await prisma.workspaceMember.findUniqueOrThrow({
+      where: {
+        workspaceId_userId: {
+          workspaceId: owner.workspace.id,
+          userId: owner.user.id
+        }
+      }
+    });
+    const targetMembership = await prisma.workspaceMember.findUniqueOrThrow({
+      where: {
+        workspaceId_userId: {
+          workspaceId: owner.workspace.id,
+          userId: target.user.id
+        }
+      }
+    });
+
+    await prisma.workspaceMember.update({
+      where: {
+        id: ownerMembership.id
+      },
+      data: {
+        role: "viewer"
+      }
+    });
+
+    await expect(
+      createWorkspaceInvitation(
+        prisma,
+        owner.workspace.id,
+        invitee.user.email,
+        "viewer",
+        owner.user.id
+      )
+    ).rejects.toBeInstanceOf(WorkspaceInvitationAuthorizationError);
+
+    await expect(
+      updateWorkspaceMemberRole(
+        prisma,
+        owner.workspace.id,
+        targetMembership.id,
+        "editor",
+        owner.user.id
+      )
+    ).rejects.toBeInstanceOf(WorkspaceMemberAuthorizationError);
+
+    await expect(
+      deleteWorkspaceMember(
+        prisma,
+        owner.workspace.id,
+        targetMembership.id,
+        owner.user.id
+      )
+    ).rejects.toBeInstanceOf(WorkspaceMemberAuthorizationError);
   });
 });
