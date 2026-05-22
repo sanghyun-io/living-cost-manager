@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>계정 및 동기화 UX 구현 계획</title>
+    <style>
+      body { margin: 0; background: #f8fafc; color: #18181b; font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; line-height: 1.65; }
+      main { width: min(1080px, calc(100% - 40px)); margin: 0 auto; padding: 40px 0 72px; }
+      h1, h2, h3 { line-height: 1.25; }
+      h2 { margin-top: 36px; border-top: 1px solid #e4e4e7; padding-top: 28px; }
+      section { border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; padding: 22px; margin-top: 18px; }
+      code, pre { border-radius: 6px; background: #f4f4f5; }
+      code { padding: 2px 5px; }
+      pre { overflow: auto; padding: 14px; }
+      li { margin: 6px 0; }
+      .meta { color: #52525b; }
+      .task { display: inline-block; border-radius: 999px; background: #ccfbf1; color: #134e4a; padding: 3px 9px; font-size: 12px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>계정 및 동기화 UX 구현 계획</h1>
+      <p class="meta">
+        For agentic workers: REQUIRED SUB-SKILL: Use <code>superpowers:subagent-driven-development</code>
+        or <code>superpowers:executing-plans</code> to implement this plan task-by-task. Steps use checkbox syntax for tracking.
+      </p>
+
+      <section>
+        <p><strong>Goal:</strong> 로컬 모드 제약을 명확히 경고하고, 서버 계정/동기화 상태를 상태 카드 중심으로 정리한다.</p>
+        <p><strong>Architecture:</strong> 동기화 상태 계산과 snapshot 비교 요약은 <code>apps/web/app/lib/syncStatus.ts</code>로 분리한다. UI는 기존 <code>page.tsx</code> 데이터 관리 모달 안에서 상태 카드, 로컬 모드 경고, 동기화 결정 카드로 재구성한다.</p>
+        <p><strong>Tech Stack:</strong> Next static export, React client component, TypeScript, Vitest.</p>
+      </section>
+
+      <h2>파일 구조</h2>
+      <section>
+        <ul>
+          <li>Create: <code>apps/web/app/lib/syncStatus.ts</code> - 상태 계산, 표시 문구, snapshot 요약</li>
+          <li>Modify: <code>apps/web/tests/smoke.test.ts</code> - helper 테스트 추가</li>
+          <li>Modify: <code>apps/web/app/page.tsx</code> - 데이터 관리 모달 UI 재구성</li>
+          <li>Modify: <code>apps/web/app/globals.css</code> - 상태 카드, 로컬 경고, 비교 요약 스타일</li>
+        </ul>
+      </section>
+
+      <h2>Task 1: sync status helper</h2>
+      <section>
+        <span class="task">TDD</span>
+        <ol>
+          <li>테스트에 <code>getAccountSyncState</code>, <code>summarizeBudgetSnapshot</code> 기대값을 먼저 추가한다.</li>
+          <li><code>pnpm --filter @living-cost-manager/web test -- smoke.test.ts -t "account sync UX"</code>로 실패를 확인한다.</li>
+          <li><code>apps/web/app/lib/syncStatus.ts</code>를 구현한다.</li>
+          <li>테스트와 web build를 실행한다.</li>
+          <li>커밋 메시지: <code>feat: add account sync status helpers</code></li>
+        </ol>
+      </section>
+
+      <h2>Task 2: 로컬 모드 경고와 상태 카드 UI</h2>
+      <section>
+        <span class="task">UI</span>
+        <ol>
+          <li><code>page.tsx</code>에서 helper를 import하고 현재 상태/요약을 계산한다.</li>
+          <li>데이터 관리 모달의 서버 패널 상단에 상태 카드 grid를 추가한다.</li>
+          <li>서버 미로그인 또는 API 미설정 상태에서는 persistent local warning을 표시한다.</li>
+          <li>서버 snapshot이 있으면 로컬/서버 비교 요약을 표시한다.</li>
+          <li>401/403 오류는 다시 로그인 필요 문구로 정리한다.</li>
+          <li>테스트와 build를 실행한다.</li>
+          <li>커밋 메시지: <code>feat: improve account sync UX</code></li>
+        </ol>
+      </section>
+
+      <h2>Task 3: 최종 검증</h2>
+      <section>
+        <ol>
+          <li><code>pnpm --filter @living-cost-manager/web test</code></li>
+          <li><code>pnpm --filter @living-cost-manager/web... build</code></li>
+          <li><code>pnpm -r --if-present build</code></li>
+          <li><code>git diff --check</code></li>
+          <li>리뷰 에이전트로 UX 범위와 회귀 위험을 점검한다.</li>
+          <li><code>git push origin main</code></li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>
