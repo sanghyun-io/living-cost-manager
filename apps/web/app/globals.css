@@ -721,7 +721,7 @@ select:disabled {
 .invite-panel,
 .created-token {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 10px;
   align-items: end;
 }
@@ -732,9 +732,13 @@ select:disabled {
   justify-self: start;
 }
 
-.server-auth-form label,
-.invite-panel label,
-.created-token label {
+.form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.form-field label {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
@@ -820,7 +824,7 @@ select:disabled {
   font-weight: 700;
 }
 
-.created-token input {
+.created-token .form-field {
   grid-column: 1 / 3;
 }
 
@@ -1107,7 +1111,7 @@ select:disabled {
 
   .server-auth-form .chart-toggle,
   .server-auth-form button[type="submit"],
-  .created-token input {
+  .created-token .form-field {
     grid-column: 1;
     justify-self: stretch;
   }

@@ -24,6 +24,7 @@ import {
 import {
   createServerApiClient,
   getServerApiBaseUrl,
+  isServerAuthFailure,
   isServerApiAvailable,
   resolveServerSessionWorkspace,
   ServerApiError
@@ -609,5 +610,12 @@ describe("server api client", () => {
       status: 409
     });
     await expect(client?.login({ email: "mina@example.com", password: "password123" })).rejects.toBeInstanceOf(ServerApiError);
+  });
+
+  test("classifies only auth API failures as session-clearing errors", () => {
+    expect(isServerAuthFailure(new ServerApiError("Invalid token", 401))).toBe(true);
+    expect(isServerAuthFailure(new ServerApiError("Forbidden", 403))).toBe(true);
+    expect(isServerAuthFailure(new ServerApiError("Server unavailable", 503))).toBe(false);
+    expect(isServerAuthFailure(new TypeError("Failed to fetch"))).toBe(false);
   });
 });

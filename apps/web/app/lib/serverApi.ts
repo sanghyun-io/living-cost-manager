@@ -55,6 +55,10 @@ export class ServerApiError extends Error {
   }
 }
 
+export function isServerAuthFailure(error: unknown): boolean {
+  return error instanceof ServerApiError && (error.status === 401 || error.status === 403);
+}
+
 type ClientOptions = {
   baseUrl?: string | null;
   fetchImpl?: typeof fetch;

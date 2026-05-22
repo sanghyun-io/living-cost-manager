@@ -36,6 +36,7 @@ import {
 import { createUser, getUserDataKey, mergeUsers, type AppUser } from "./lib/users";
 import {
   createServerApiClient,
+  isServerAuthFailure,
   resolveServerSessionWorkspace,
   SERVER_SESSION_STORAGE_KEY,
   type CreatedInvitation,
@@ -162,6 +163,7 @@ export default function Home() {
   const [serverName, setServerName] = useState("");
   const [serverStatus, setServerStatus] = useState("");
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
   const [isServerBusy, setIsServerBusy] = useState(false);
   const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
@@ -304,7 +306,9 @@ export default function Home() {
   );
   const currentWorkspaceRole = currentServerMember?.role ?? serverSession?.workspace?.role ?? null;
   const canManageCurrentWorkspace = canManageSharing(currentWorkspaceRole);
-  const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole);
+  const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole) && isServerSnapshotChecked;
+  const visibleCreatedInvitation =
+    canManageCurrentWorkspace && createdInvitation?.workspaceId === serverSession?.workspace?.id ? createdInvitation : null;
 
   function handleIncomeChange(value: string) {
     setMonthlyIncome(parseCurrencyInput(value));
@@ -493,39 +497,49 @@ export default function Home() {
     window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
     setServerSession(null);
     setServerSnapshot(null);
+    setIsServerSnapshotChecked(false);
     setServerWorkspaces([]);
     setMembers([]);
     setInvitations([]);
-    setCreatedInvitation(null);
-    setAcceptTokens({});
+    clearWorkspaceScopedSharingDrafts();
     setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
   }
 
   async function prepareServerSyncDecision(session: ServerSession) {
     if (!serverApi) {
-      return;
+      setIsServerSnapshotChecked(false);
+      return false;
     }
+
+    setIsServerSnapshotChecked(false);
+    setServerSnapshot(null);
 
     if (!session.workspace) {
-      setServerSnapshot(null);
       setServerStatus("서버 계정은 연결됐지만 선택된 워크스페이스가 없습니다. 초대 수락 후 동기화를 사용할 수 있습니다.");
-      return;
+      return false;
     }
 
-    const remoteSnapshot = await serverApi.getWorkspaceSnapshot(session.workspace.id, session.token);
-    setServerSnapshot(remoteSnapshot);
+    try {
+      const remoteSnapshot = await serverApi.getWorkspaceSnapshot(session.workspace.id, session.token);
+      setServerSnapshot(remoteSnapshot);
+      setIsServerSnapshotChecked(true);
 
-    if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())) {
-      setServerStatus("서버 워크스페이스가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
-      return;
+      if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())) {
+        setServerStatus("서버 워크스페이스가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
+        return true;
+      }
+
+      if (!isWorkspaceSnapshotEmpty(remoteSnapshot)) {
+        setServerStatus("서버 데이터가 있습니다. 불러오거나 현재 브라우저 데이터로 동기화할 수 있습니다.");
+        return true;
+      }
+
+      setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
+      return true;
+    } catch (error) {
+      setServerStatus(getErrorMessage(error) + " 서버 상태 확인 전에는 업로드를 막습니다. 로컬 저장은 계속 유지됩니다.");
+      return false;
     }
-
-    if (!isWorkspaceSnapshotEmpty(remoteSnapshot)) {
-      setServerStatus("서버 데이터가 있습니다. 불러오거나 현재 브라우저 데이터로 동기화할 수 있습니다.");
-      return;
-    }
-
-    setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
   }
 
   async function refreshRestoredServerSession(session: ServerSession) {
@@ -546,14 +560,21 @@ export default function Home() {
       saveServerSession(restoredSession);
       setServerSession(restoredSession);
       await loadServerWorkspaces(restoredSession);
-      if (!restoredSession.workspace) {
+      if (restoredSession.workspace) {
+        await prepareServerSyncDecision(restoredSession);
+      } else {
         setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
       }
     } catch (error) {
-      window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
-      setServerSession(null);
-      setServerWorkspaces([]);
-      setServerStatus(getErrorMessage(error));
+      if (isServerAuthFailure(error)) {
+        window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
+        setServerSession(null);
+        setServerWorkspaces([]);
+        setIsServerSnapshotChecked(false);
+        setServerStatus(getErrorMessage(error));
+        return;
+      }
+      setServerStatus(getErrorMessage(error) + " 서버 연결은 유지했습니다. 데이터 관리에서 다시 시도하세요.");
     }
   }
 
@@ -561,12 +582,14 @@ export default function Home() {
     if (!serverApi) {
       saveServerSession(session);
       setServerSession(session);
+      setIsServerSnapshotChecked(false);
       return session;
     }
 
     const nextSession = await resolveServerSessionWorkspace(serverApi, session);
     saveServerSession(nextSession);
     setServerSession(nextSession);
+    setIsServerSnapshotChecked(false);
     await loadServerWorkspaces(nextSession);
     return nextSession;
   }
@@ -595,6 +618,8 @@ export default function Home() {
 
     saveServerSession(nextSession);
     setServerSession(nextSession);
+    setIsServerSnapshotChecked(false);
+    clearWorkspaceScopedSharingDrafts();
     setMembers([]);
     setServerSnapshot(null);
     if (workspace) {
@@ -612,7 +637,7 @@ export default function Home() {
     }
 
     if (!canUploadServerSnapshot) {
-      setServerStatus("보기 전용 권한은 서버에 업로드할 수 없습니다.");
+      setServerStatus(isServerSnapshotChecked ? "보기 전용 권한은 서버에 업로드할 수 없습니다." : "서버 상태 확인이 끝난 뒤 업로드할 수 있습니다.");
       return;
     }
 
@@ -703,7 +728,7 @@ export default function Home() {
     try {
       const accepted = await serverApi.acceptInvitation(invitationId, tokenValue, serverSession.token);
       const nextSession = await resolveAndStoreServerSession({ ...serverSession, workspace: accepted.workspace });
-      setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: "" }));
+      clearWorkspaceScopedSharingDrafts();
       setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
@@ -853,6 +878,13 @@ export default function Home() {
 
   function saveServerSession(session: ServerSession) {
     window.localStorage.setItem(SERVER_SESSION_STORAGE_KEY, JSON.stringify(session));
+  }
+
+  function clearWorkspaceScopedSharingDrafts() {
+    setCreatedInvitation(null);
+    setInviteEmail("");
+    setInviteRole("viewer");
+    setAcceptTokens({});
   }
 
   function handlePieMove(event: MouseEvent<HTMLDivElement>) {
@@ -1388,21 +1420,25 @@ export default function Home() {
                         가입
                       </button>
                     </div>
-                    <label htmlFor="server-email">이메일</label>
-                    <input id="server-email" type="email" value={serverEmail} onChange={(event) => setServerEmail(event.target.value)} />
+                    <div className="form-field">
+                      <label htmlFor="server-email">이메일</label>
+                      <input id="server-email" type="email" value={serverEmail} onChange={(event) => setServerEmail(event.target.value)} />
+                    </div>
                     {serverAuthMode === "register" ? (
-                      <>
+                      <div className="form-field">
                         <label htmlFor="server-name">이름</label>
                         <input id="server-name" type="text" value={serverName} onChange={(event) => setServerName(event.target.value)} />
-                      </>
+                      </div>
                     ) : null}
-                    <label htmlFor="server-password">비밀번호</label>
-                    <input
-                      id="server-password"
-                      type="password"
-                      value={serverPassword}
-                      onChange={(event) => setServerPassword(event.target.value)}
-                    />
+                    <div className="form-field">
+                      <label htmlFor="server-password">비밀번호</label>
+                      <input
+                        id="server-password"
+                        type="password"
+                        value={serverPassword}
+                        onChange={(event) => setServerPassword(event.target.value)}
+                      />
+                    </div>
                     <button className="primary-button" disabled={isServerBusy} type="submit">
                       {serverAuthMode === "register" ? "서버 가입" : "서버 로그인"}
                     </button>
@@ -1416,6 +1452,14 @@ export default function Home() {
 
                 {serverSession?.workspace ? (
                   <div className="sync-actions">
+                    <button
+                      className="secondary-button"
+                      disabled={isServerBusy}
+                      type="button"
+                      onClick={() => void prepareServerSyncDecision(serverSession)}
+                    >
+                      서버 상태 확인
+                    </button>
                     <button
                       className="secondary-button"
                       disabled={isServerBusy || !canUploadServerSnapshot}
@@ -1519,16 +1563,20 @@ export default function Home() {
 
                     {canManageCurrentWorkspace ? (
                       <div className="invite-panel">
-                        <label htmlFor="invite-email">초대 이메일</label>
-                        <input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} />
-                        <label htmlFor="invite-role">권한</label>
-                        <select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as InvitationRole)}>
-                          {(["viewer", "editor"] as const).map((role) => (
-                            <option key={role} value={role}>
-                              {invitationRoleLabels[role]}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="form-field">
+                          <label htmlFor="invite-email">초대 이메일</label>
+                          <input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} />
+                        </div>
+                        <div className="form-field">
+                          <label htmlFor="invite-role">권한</label>
+                          <select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as InvitationRole)}>
+                            {(["viewer", "editor"] as const).map((role) => (
+                              <option key={role} value={role}>
+                                {invitationRoleLabels[role]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <button className="secondary-button" disabled={isServerBusy} type="button" onClick={() => void handleCreateInvitation()}>
                           초대 생성
                         </button>
@@ -1537,14 +1585,16 @@ export default function Home() {
                       <p className="local-note">공유 변경은 소유자만 할 수 있습니다.</p>
                     )}
 
-                    {createdInvitation?.token ? (
+                    {visibleCreatedInvitation?.token ? (
                       <div className="created-token">
-                        <label htmlFor="created-invitation-token">방금 만든 초대 토큰</label>
-                        <input id="created-invitation-token" readOnly type="text" value={createdInvitation.token} />
+                        <div className="form-field">
+                          <label htmlFor="created-invitation-token">방금 만든 초대 토큰</label>
+                          <input id="created-invitation-token" readOnly type="text" value={visibleCreatedInvitation.token} />
+                        </div>
                         <button
                           className="secondary-button"
                           type="button"
-                          onClick={() => void navigator.clipboard?.writeText(createdInvitation.token ?? "")}
+                          onClick={() => void navigator.clipboard?.writeText(visibleCreatedInvitation.token ?? "")}
                         >
                           토큰 복사
                         </button>
@@ -1556,7 +1606,7 @@ export default function Home() {
             ) : (
               <p className="local-note">서버 API URL이 없어 로컬 전용으로 동작합니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
             )}
-            <p className="local-note">GitHub Pages 버전은 서버 저장이 없어도 그대로 사용할 수 있습니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
+            <p className="local-note">브라우저 저장은 항상 유지됩니다. 서버 동기화와 별도로 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
             <input
               ref={importFileRef}
               className="sr-only"
