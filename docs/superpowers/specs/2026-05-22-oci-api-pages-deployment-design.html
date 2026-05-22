@@ -103,6 +103,7 @@
           <li>DB는 OCI PostgreSQL 인스턴스의 <code>gamja_apps_dev</code> 안에 서비스 schema <code>lcm</code>, 테스트 schema <code>lcm_test</code>가 준비되어 있습니다.</li>
           <li>DB role과 실제 접속 정보는 중앙 credentials sheet에 저장되어 있으며, repo에는 커밋하지 않습니다.</li>
           <li>GitHub Pages 프론트는 <code>NEXT_PUBLIC_API_BASE_URL</code>이 설정되면 서버 기능을 사용하고, 없으면 localStorage 모드로 남습니다.</li>
+          <li>프론트는 나중에 Cloudflare Pages로 옮길 수 있도록 특정 호스팅 플랫폼에 강하게 결합하지 않습니다.</li>
         </ul>
       </section>
 
@@ -140,6 +141,23 @@
        -> OCI reverse proxy
        -> living-cost-manager API container
        -> OCI PostgreSQL gamja_apps_dev, schema=lcm</code></pre>
+      </section>
+
+      <h2>Cloudflare Pages 호환성</h2>
+      <section>
+        <p>
+          이번 배포 대상은 GitHub Pages이지만, 프론트는 Cloudflare Pages로 이전 가능한 정적 산출물 구조를 유지합니다.
+          즉, 호스팅 제공자별 차이는 배포 설정에만 두고 애플리케이션 코드는 동일하게 유지합니다.
+        </p>
+        <ul>
+          <li><code>apps/web/out</code> 정적 export 산출물을 단일 배포 artifact로 취급합니다.</li>
+          <li><code>NEXT_PUBLIC_API_BASE_URL</code>은 빌드 시점 public 환경 변수로만 주입합니다.</li>
+          <li>API origin은 프론트 origin과 독립적으로 유지합니다.</li>
+          <li>GitHub Pages의 <code>/living-cost-manager</code> base path는 설정으로만 관리하고, 컴포넌트 내부에 하드코딩하지 않습니다.</li>
+          <li>Cloudflare Pages 이전 시에는 base path 없이 루트 배포가 가능하도록 asset path와 라우팅을 Next 설정에서만 제어합니다.</li>
+          <li>Cloudflare Pages Functions, KV, D1 같은 Cloudflare 전용 런타임 기능은 이번 단계에서 사용하지 않습니다.</li>
+          <li>나중에 Cloudflare로 옮겨도 API는 계속 OCI Fastify 서버를 바라볼 수 있게 CORS 허용 origin만 추가/변경합니다.</li>
+        </ul>
       </section>
 
       <h2>배포 구성</h2>
@@ -183,6 +201,7 @@
           <li>GitHub Pages workflow에 <code>NEXT_PUBLIC_API_BASE_URL</code>을 추가합니다.</li>
           <li>배포된 정적 앱에서 회원가입, 로그인, 워크스페이스 조회, snapshot 업로드/다운로드를 확인합니다.</li>
           <li>API URL이 없거나 API 호출이 실패하면 기존 localStorage 모드를 계속 사용할 수 있어야 합니다.</li>
+          <li>Pages 전용 설정은 GitHub Actions와 <code>next.config.mjs</code>로 제한하고, 앱 코드에는 호스팅 provider 분기를 추가하지 않습니다.</li>
         </ul>
       </section>
 
@@ -194,6 +213,7 @@
           <li>API 컨테이너 <code>/health</code> 응답 확인</li>
           <li>OCI PostgreSQL <code>lcm</code> schema에 migration table과 앱 테이블이 생성되는지 확인</li>
           <li>GitHub Pages 배포 완료 후 실제 URL에서 앱 로딩 확인</li>
+          <li>정적 산출물 <code>apps/web/out</code>이 provider 독립적으로 생성되는지 확인</li>
           <li>브라우저에서 회원가입/로그인 후 snapshot sync 수동 확인</li>
         </ul>
       </section>
@@ -226,6 +246,7 @@
           <li>기존 Pages 정적 배포와 localStorage fallback을 유지합니다.</li>
           <li>운영 schema <code>lcm</code>과 테스트 schema <code>lcm_test</code>를 혼동하지 않도록 명시했습니다.</li>
           <li>HTTPS 전 공개 연결 금지와 롤백 경로를 포함했습니다.</li>
+          <li>향후 Cloudflare Pages 이전을 위해 호스팅 provider별 차이를 배포 설정으로 제한했습니다.</li>
         </ul>
       </section>
     </main>
