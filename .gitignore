@@ -5,4 +5,5 @@ out/
 .env
 .env.*
 *.log
+*.tsbuildinfo
 .superpowers/
