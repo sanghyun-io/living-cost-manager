@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Server Sync and Sharing Design</title>
+    <title>서버 동기화 및 공유 설계</title>
     <style>
       body {
         margin: 0;
@@ -85,31 +85,31 @@
   </head>
   <body>
     <main>
-      <h1>Server Sync and Sharing Design</h1>
+      <h1>서버 동기화 및 공유 설계</h1>
       <p class="meta">
-        Add a backend to the living cost manager while keeping the current GitHub Pages frontend.
+        현재 GitHub Pages 프론트엔드는 유지하면서 생활비 고정비 관리자에 백엔드를 추가합니다.
       </p>
 
-      <h2>Goal</h2>
+      <h2>목표</h2>
       <section>
         <p>
-          The first server-backed feature is account-based sync and backup. Family/workspace sharing comes next.
-          Actual one-off spending and full household accounting are explicitly out of scope for this design.
+          첫 번째 서버 기능은 계정 기반 동기화와 백업입니다. 그 다음 단계로 가족 또는 생활비 공동 관리용
+          워크스페이스 공유를 추가합니다. 일회성 실제 지출 기록과 완전한 가계부 기능은 이 설계 범위에서 제외합니다.
         </p>
       </section>
 
-      <h2>Priorities</h2>
+      <h2>우선순위</h2>
       <section>
         <ol>
-          <li><span class="priority">1</span>Account-based sync and backup.</li>
-          <li><span class="priority">2</span>Workspace sharing for family or household management.</li>
-          <li><span class="priority">3</span>Actual spend tracking is deferred.</li>
+          <li><span class="priority">1</span>계정 기반 동기화와 백업</li>
+          <li><span class="priority">2</span>가족 또는 공동 생활비 관리를 위한 워크스페이스 공유</li>
+          <li><span class="priority">3</span>실제 지출 기록은 보류</li>
         </ol>
       </section>
 
-      <h2>Architecture</h2>
+      <h2>아키텍처</h2>
       <section>
-        <p>Use a monorepo:</p>
+        <p>모노레포 구조를 사용합니다.</p>
         <pre><code>living-cost-manager/
   apps/
     web/
@@ -119,40 +119,40 @@
   prisma/
     schema.prisma</code></pre>
         <ul>
-          <li><code>apps/web</code>: existing Next static frontend deployed to GitHub Pages.</li>
-          <li><code>apps/api</code>: Fastify API server deployed to an OCI VM.</li>
-          <li><code>packages/shared</code>: shared Zod schemas, DTO types, enums, and API contracts.</li>
-          <li><code>prisma/schema.prisma</code>: PostgreSQL database model.</li>
+          <li><code>apps/web</code>: 기존 Next 정적 프론트엔드입니다. GitHub Pages에 배포합니다.</li>
+          <li><code>apps/api</code>: Fastify API 서버입니다. OCI VM에 배포합니다.</li>
+          <li><code>packages/shared</code>: Zod 스키마, DTO 타입, enum, API 계약을 공유합니다.</li>
+          <li><code>prisma/schema.prisma</code>: PostgreSQL 데이터베이스 모델입니다.</li>
         </ul>
         <p>
-          The frontend must not import Prisma models directly. It should only import DTOs and schemas from
-          <code>packages/shared</code>.
+          프론트엔드는 Prisma 모델을 직접 가져오지 않습니다. 프론트와 백엔드는
+          <code>packages/shared</code>의 DTO와 Zod 스키마만 공유합니다.
         </p>
       </section>
 
-      <h2>Technology Choices</h2>
+      <h2>기술 선택</h2>
       <section>
-        <p><strong>Backend</strong></p>
+        <p><strong>백엔드</strong></p>
         <ul>
           <li>Fastify</li>
           <li>TypeScript</li>
-          <li>Zod for request and response validation</li>
-          <li>JWT authentication</li>
+          <li>Zod 기반 요청/응답 검증</li>
+          <li>JWT 인증</li>
           <li>Prisma ORM</li>
           <li>PostgreSQL</li>
-          <li>Docker Compose on OCI VM</li>
+          <li>OCI VM에서 Docker Compose로 운영</li>
         </ul>
-        <p><strong>Frontend</strong></p>
+        <p><strong>프론트엔드</strong></p>
         <ul>
-          <li>Existing Next static export</li>
-          <li>GitHub Pages hosting</li>
-          <li>Existing localStorage data remains available as offline cache and migration source</li>
+          <li>기존 Next static export 유지</li>
+          <li>GitHub Pages 호스팅 유지</li>
+          <li>기존 localStorage 데이터는 오프라인 캐시와 마이그레이션 원본으로 유지</li>
         </ul>
       </section>
 
-      <h2>Data Model</h2>
+      <h2>데이터 모델</h2>
       <section>
-        <p><strong>Core tables</strong></p>
+        <p><strong>핵심 테이블</strong></p>
         <ul>
           <li><code>User</code></li>
           <li><code>Workspace</code></li>
@@ -162,27 +162,27 @@
           <li><code>FixedCost</code></li>
           <li><code>BackupSnapshot</code></li>
         </ul>
-        <p><strong>First release behavior</strong></p>
+        <p><strong>1차 릴리스 동작</strong></p>
         <ul>
-          <li>A user signs up or logs in.</li>
-          <li>A personal workspace is created automatically for that user.</li>
-          <li>Categories, cards, and fixed costs are saved under that workspace.</li>
-          <li>The app can sync all workspace budget data between the server and the current browser.</li>
+          <li>사용자는 회원가입 또는 로그인을 합니다.</li>
+          <li>사용자마다 개인 워크스페이스가 자동 생성됩니다.</li>
+          <li>카테고리, 카드, 고정비 항목은 해당 워크스페이스 아래에 저장됩니다.</li>
+          <li>앱은 서버와 현재 브라우저 사이에서 워크스페이스 예산 데이터를 동기화할 수 있습니다.</li>
         </ul>
-        <p><strong>Later sharing behavior</strong></p>
+        <p><strong>이후 공유 기능 동작</strong></p>
         <ul>
-          <li>A workspace owner can invite members.</li>
-          <li>Members can access the same workspace.</li>
-          <li>Roles are <code>owner</code>, <code>editor</code>, and <code>viewer</code>.</li>
-          <li><code>owner</code> can manage members and all budget data.</li>
-          <li><code>editor</code> can edit budget data but cannot manage members.</li>
-          <li><code>viewer</code> can read budget data only.</li>
+          <li>워크스페이스 owner는 멤버를 초대할 수 있습니다.</li>
+          <li>멤버는 같은 워크스페이스에 접근할 수 있습니다.</li>
+          <li>역할은 <code>owner</code>, <code>editor</code>, <code>viewer</code>입니다.</li>
+          <li><code>owner</code>는 멤버와 모든 예산 데이터를 관리할 수 있습니다.</li>
+          <li><code>editor</code>는 예산 데이터를 수정할 수 있지만 멤버는 관리할 수 없습니다.</li>
+          <li><code>viewer</code>는 예산 데이터를 조회만 할 수 있습니다.</li>
         </ul>
       </section>
 
-      <h2>Shared API Contracts</h2>
+      <h2>공유 API 계약</h2>
       <section>
-        <p><code>packages/shared</code> should define:</p>
+        <p><code>packages/shared</code>는 다음 항목을 정의합니다.</p>
         <ul>
           <li><code>PaymentMethodId</code></li>
           <li><code>WorkspaceRole</code></li>
@@ -192,10 +192,10 @@
           <li><code>CategoryDto</code></li>
           <li><code>PaymentCardDto</code></li>
           <li><code>FixedCostDto</code></li>
-          <li>create/update schemas for categories, cards, and fixed costs</li>
-          <li>sync request and response schemas</li>
+          <li>카테고리, 카드, 고정비 생성/수정 스키마</li>
+          <li>동기화 요청/응답 스키마</li>
         </ul>
-        <p><code>FixedCostDto</code> should preserve the current client model:</p>
+        <p><code>FixedCostDto</code>는 현재 클라이언트 모델을 유지합니다.</p>
         <ul>
           <li><code>id</code></li>
           <li><code>workspaceId</code></li>
@@ -207,55 +207,55 @@
           <li><code>periodMonths</code></li>
           <li><code>billingDay</code></li>
         </ul>
-        <p><code>periodMonths</code> remains a number rounded to one decimal place.</p>
+        <p><code>periodMonths</code>는 소수점 첫째 자리까지 반올림된 숫자로 유지합니다.</p>
       </section>
 
-      <h2>Sync Model</h2>
+      <h2>동기화 모델</h2>
       <section>
-        <p>Keep localStorage as a cache and fallback.</p>
-        <p><strong>On login</strong></p>
+        <p>localStorage는 캐시와 fallback으로 유지합니다.</p>
+        <p><strong>로그인 시</strong></p>
         <ol>
-          <li>Load local browser data.</li>
-          <li>Load server workspace data.</li>
-          <li>If the server workspace is empty, offer to upload local data.</li>
+          <li>브라우저의 로컬 데이터를 읽습니다.</li>
+          <li>서버의 워크스페이스 데이터를 읽습니다.</li>
+          <li>서버 워크스페이스가 비어 있으면 로컬 데이터를 업로드할지 묻습니다.</li>
           <li>
-            If both local and server data exist and differ, let the user choose:
+            로컬 데이터와 서버 데이터가 모두 있고 내용이 다르면 사용자가 선택하게 합니다.
             <ul>
-              <li>use server data</li>
-              <li>upload this browser data</li>
-              <li>keep local-only for now</li>
+              <li>서버 데이터 사용</li>
+              <li>이 브라우저 데이터 업로드</li>
+              <li>일단 로컬 전용으로 유지</li>
             </ul>
           </li>
         </ol>
-        <p><strong>After sync is enabled</strong></p>
+        <p><strong>동기화 활성화 후</strong></p>
         <ul>
-          <li>Normal edits update local state immediately.</li>
-          <li>The app sends changes to the API.</li>
-          <li>If the API call fails, localStorage keeps the latest browser state and the UI shows a sync warning.</li>
-          <li>A manual "sync now" action retries pending changes.</li>
+          <li>일반 편집은 먼저 로컬 상태에 즉시 반영합니다.</li>
+          <li>앱은 변경사항을 API로 전송합니다.</li>
+          <li>API 호출이 실패하면 localStorage가 최신 브라우저 상태를 보존하고 UI에 동기화 경고를 표시합니다.</li>
+          <li>수동 "지금 동기화" 동작으로 실패한 변경사항을 다시 전송합니다.</li>
         </ul>
       </section>
 
-      <h2>API Surface</h2>
+      <h2>API 표면</h2>
       <section>
-        <p><strong>Authentication</strong></p>
+        <p><strong>인증</strong></p>
         <ul>
           <li><code>POST /auth/register</code></li>
           <li><code>POST /auth/login</code></li>
           <li><code>GET /me</code></li>
         </ul>
-        <p><strong>Workspace</strong></p>
+        <p><strong>워크스페이스</strong></p>
         <ul>
           <li><code>GET /workspaces</code></li>
           <li><code>POST /workspaces</code></li>
           <li><code>GET /workspaces/:workspaceId</code></li>
         </ul>
-        <p><strong>Sync</strong></p>
+        <p><strong>동기화</strong></p>
         <ul>
           <li><code>GET /workspaces/:workspaceId/snapshot</code></li>
           <li><code>PUT /workspaces/:workspaceId/snapshot</code></li>
         </ul>
-        <p><strong>Sharing, implemented after personal sync</strong></p>
+        <p><strong>공유 기능: 개인 동기화 이후 구현</strong></p>
         <ul>
           <li><code>GET /workspaces/:workspaceId/members</code></li>
           <li><code>POST /workspaces/:workspaceId/invitations</code></li>
@@ -263,89 +263,89 @@
           <li><code>DELETE /workspaces/:workspaceId/members/:memberId</code></li>
         </ul>
         <p>
-          The first implementation should prefer snapshot sync over many fine-grained CRUD endpoints. This keeps the
-          server migration smaller and matches the current client state shape.
+          첫 구현은 세부 CRUD API를 많이 만들기보다 snapshot 동기화를 우선합니다. 이렇게 하면 현재 클라이언트 상태 구조와
+          잘 맞고 서버 마이그레이션 범위도 작아집니다.
         </p>
       </section>
 
-      <h2>Security</h2>
+      <h2>보안</h2>
       <section>
         <ul>
-          <li>Passwords are hashed with a modern password hashing function.</li>
-          <li>JWT secrets are never committed.</li>
-          <li>API CORS allows the GitHub Pages origin.</li>
-          <li>Every workspace route verifies membership.</li>
-          <li>Role checks are enforced on server mutations.</li>
-          <li>Backups and snapshots are scoped to a workspace.</li>
+          <li>비밀번호는 현대적인 password hashing 방식으로 해시합니다.</li>
+          <li>JWT secret은 절대 커밋하지 않습니다.</li>
+          <li>API CORS는 GitHub Pages origin만 허용합니다.</li>
+          <li>모든 워크스페이스 route는 멤버십을 검증합니다.</li>
+          <li>서버 mutation에는 역할 기반 권한 검사를 적용합니다.</li>
+          <li>백업과 snapshot은 워크스페이스 단위로 격리합니다.</li>
         </ul>
-        <p>The allowed CORS origin for the current frontend is:</p>
+        <p>현재 프론트엔드에 허용할 CORS origin은 다음과 같습니다.</p>
         <pre><code>https://sanghyun-io.github.io</code></pre>
-        <p>The path <code>/living-cost-manager</code> is not part of the CORS origin.</p>
+        <p><code>/living-cost-manager</code> 경로는 CORS origin에 포함되지 않습니다.</p>
       </section>
 
-      <h2>Deployment</h2>
+      <h2>배포</h2>
       <section>
-        <p><strong>Frontend</strong></p>
+        <p><strong>프론트엔드</strong></p>
         <ul>
-          <li>Keep GitHub Pages.</li>
-          <li>Keep the current <code>/living-cost-manager</code> base path.</li>
-          <li>Add an API base URL configuration for production builds.</li>
+          <li>GitHub Pages를 유지합니다.</li>
+          <li>현재 <code>/living-cost-manager</code> base path를 유지합니다.</li>
+          <li>production build에 API base URL 설정을 추가합니다.</li>
         </ul>
-        <p><strong>Backend</strong></p>
+        <p><strong>백엔드</strong></p>
         <ul>
-          <li>Deploy <code>apps/api</code> to an OCI VM using Docker Compose.</li>
-          <li>Run PostgreSQL in Docker for the first server release.</li>
-          <li>Store environment variables on the VM, not in the repo.</li>
-          <li>Use HTTPS through a reverse proxy before exposing auth endpoints publicly.</li>
+          <li><code>apps/api</code>를 Docker Compose로 OCI VM에 배포합니다.</li>
+          <li>첫 서버 릴리스에서는 PostgreSQL도 Docker로 실행합니다.</li>
+          <li>환경 변수는 repo가 아니라 VM에 저장합니다.</li>
+          <li>인증 endpoint를 공개하기 전 reverse proxy를 통해 HTTPS를 적용합니다.</li>
         </ul>
       </section>
 
-      <h2>Migration From Current App</h2>
+      <h2>현재 앱에서의 마이그레이션</h2>
       <section>
-        <p>The current app is localStorage-first. Server adoption should not destroy local data.</p>
+        <p>현재 앱은 localStorage 우선 구조입니다. 서버 도입 과정에서 로컬 데이터를 잃지 않아야 합니다.</p>
         <ol>
-          <li>User opens the existing Pages app.</li>
-          <li>User logs into the new server account.</li>
-          <li>App detects local browser data.</li>
-          <li>App asks whether to upload that local data to the personal workspace.</li>
-          <li>After upload, the server snapshot becomes the source of truth.</li>
+          <li>사용자가 기존 Pages 앱을 엽니다.</li>
+          <li>새 서버 계정으로 로그인합니다.</li>
+          <li>앱이 브라우저 로컬 데이터를 감지합니다.</li>
+          <li>앱은 해당 로컬 데이터를 개인 워크스페이스에 업로드할지 묻습니다.</li>
+          <li>업로드 후에는 서버 snapshot을 source of truth로 사용합니다.</li>
         </ol>
-        <p>The <code>.lcm</code> full backup export/import remains available regardless of server sync.</p>
+        <p><code>.lcm</code> 전체 백업 export/import는 서버 동기화 여부와 관계없이 계속 제공합니다.</p>
       </section>
 
-      <h2>Testing</h2>
+      <h2>테스트</h2>
       <section>
-        <p><strong>Backend tests</strong></p>
+        <p><strong>백엔드 테스트</strong></p>
         <ul>
-          <li>auth register/login</li>
-          <li>workspace membership enforcement</li>
-          <li>snapshot read/write</li>
-          <li>role-based mutation rejection</li>
-          <li>validation rejection for invalid fixed-cost period</li>
+          <li>회원가입/로그인</li>
+          <li>워크스페이스 멤버십 검증</li>
+          <li>snapshot 읽기/쓰기</li>
+          <li>역할 기반 mutation 거부</li>
+          <li>잘못된 고정비 주기 값 validation 거부</li>
         </ul>
-        <p><strong>Shared package tests</strong></p>
+        <p><strong>shared package 테스트</strong></p>
         <ul>
-          <li>DTO schemas accept current fixed-cost/category/card shapes</li>
-          <li>decimal <code>periodMonths</code> is preserved to one decimal place</li>
+          <li>DTO 스키마가 현재 고정비/카테고리/카드 shape를 허용하는지 확인</li>
+          <li>소수점 <code>periodMonths</code>가 첫째 자리까지 보존되는지 확인</li>
         </ul>
-        <p><strong>Frontend tests</strong></p>
+        <p><strong>프론트엔드 테스트</strong></p>
         <ul>
-          <li>local-only mode still works</li>
-          <li>login sync prompt appears when local data exists</li>
-          <li>server snapshot can hydrate the dashboard</li>
-          <li>failed sync leaves local edits intact and shows a warning</li>
+          <li>로컬 전용 모드가 계속 동작하는지 확인</li>
+          <li>로컬 데이터가 있을 때 로그인 동기화 안내가 뜨는지 확인</li>
+          <li>서버 snapshot으로 대시보드를 hydrate할 수 있는지 확인</li>
+          <li>동기화 실패 시 로컬 편집이 유지되고 경고가 표시되는지 확인</li>
         </ul>
       </section>
 
-      <h2>Explicitly Out Of Scope</h2>
+      <h2>명시적 제외 범위</h2>
       <section>
         <ul>
-          <li>One-off actual spend tracking</li>
-          <li>Bank/card transaction import</li>
-          <li>OCR receipts</li>
-          <li>automated payment reminders</li>
-          <li>native mobile app</li>
-          <li>moving the frontend away from GitHub Pages</li>
+          <li>일회성 실제 지출 기록</li>
+          <li>은행/카드 거래내역 import</li>
+          <li>영수증 OCR</li>
+          <li>자동 납부 알림</li>
+          <li>네이티브 모바일 앱</li>
+          <li>프론트엔드를 GitHub Pages 밖으로 이전하는 작업</li>
         </ul>
       </section>
     </main>
