@@ -25,6 +25,7 @@ RUN pnpm --filter @living-cost-manager/shared build
 RUN pnpm --filter @living-cost-manager/api build
 RUN pnpm --filter @living-cost-manager/api deploy --prod --legacy /prod/api
 RUN cp -R prisma /prod/api/prisma
+RUN cd /prod/api && ./node_modules/.bin/prisma generate --schema=./prisma/schema.prisma
 
 FROM node:22-alpine AS runtime
 
