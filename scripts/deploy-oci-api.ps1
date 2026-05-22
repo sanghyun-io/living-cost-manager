@@ -11,7 +11,10 @@ $ErrorActionPreference = "Stop"
 
 function Invoke-Remote {
   param([string]$Command)
-  ssh $HostName $Command
+  ssh $HostName "set -e; $Command"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Remote command failed with exit code $LASTEXITCODE."
+  }
 }
 
 if ($WriteEnv) {
@@ -35,8 +38,8 @@ if ($WriteEnv) {
 
 Invoke-Remote "mkdir -p '$RemotePath'"
 Invoke-Remote "cd '$RemotePath' && git fetch origin main && git checkout -B main origin/main"
-Invoke-Remote "cd '$RemotePath' && corepack enable >/dev/null 2>&1 || true && pnpm install --frozen-lockfile"
-Invoke-Remote "cd '$RemotePath' && set -a && . ./.env.oci && set +a && pnpm --filter @living-cost-manager/api build"
+Invoke-Remote "cd '$RemotePath' && corepack pnpm install --frozen-lockfile --prod=false"
+Invoke-Remote "cd '$RemotePath' && set -a && . ./.env.oci && set +a && corepack pnpm --filter @living-cost-manager/api build"
 Invoke-Remote "cd '$RemotePath' && set -a && . ./.env.oci && set +a && ./node_modules/.bin/prisma migrate deploy"
 
 $preRestart = Invoke-Remote "curl -fsS 'http://127.0.0.1:$Port$ApiBasePath/health'"
