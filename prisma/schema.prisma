@@ -59,9 +59,9 @@ model WorkspaceInvitation {
 }
 
 enum WorkspaceRole {
-  OWNER  @map("owner")
-  EDITOR @map("editor")
-  VIEWER @map("viewer")
+  owner
+  editor
+  viewer
 }
 
 model Category {
