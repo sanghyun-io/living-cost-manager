@@ -7,6 +7,7 @@ import {
 } from "@living-cost-manager/shared";
 import argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
+import type { z } from "zod";
 
 function toUserDto(user: { id: string; email: string; name: string }): UserDto {
   return {
@@ -22,9 +23,36 @@ function signUserToken(app: FastifyInstance, userId: string): string {
   });
 }
 
+function parseAuthBody<TSchema extends z.ZodType>(
+  app: FastifyInstance,
+  schema: TSchema,
+  body: unknown
+): z.infer<TSchema> {
+  const result = schema.safeParse(body);
+
+  if (!result.success) {
+    throw app.httpErrors.badRequest("Invalid request body");
+  }
+
+  return result.data;
+}
+
 export async function authRoutes(app: FastifyInstance) {
   app.post("/auth/register", async (request, reply) => {
-    const body = registerRequestSchema.parse(request.body);
+    const body = parseAuthBody(app, registerRequestSchema, request.body);
+    const existingUser = await app.prisma.user.findUnique({
+      where: {
+        email: body.email
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (existingUser) {
+      throw app.httpErrors.conflict("Email already registered");
+    }
+
     const passwordHash = await argon2.hash(body.password);
 
     try {
@@ -71,7 +99,7 @@ export async function authRoutes(app: FastifyInstance) {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
-        throw app.httpErrors.conflict("Email is already registered");
+        throw app.httpErrors.conflict("Email already registered");
       }
 
       throw error;
@@ -79,7 +107,7 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post("/auth/login", async (request) => {
-    const body = loginRequestSchema.parse(request.body);
+    const body = parseAuthBody(app, loginRequestSchema, request.body);
     const user = await app.prisma.user.findUnique({
       where: {
         email: body.email

@@ -3,11 +3,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import { loadEnv } from "../src/env.js";
+import {
+  authTestEmailPrefix,
+  cleanupAuthTestRecords,
+  resolveApiTestDatabaseUrl
+} from "./test-database.js";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgresql://living_cost:living_cost_dev@localhost:5432/living_cost_manager";
-const runId = `auth-${Date.now()}`;
+const databaseUrl = resolveApiTestDatabaseUrl();
+const runId = `${authTestEmailPrefix}${Date.now()}`;
 const env = loadEnv({
   NODE_ENV: "test",
   DATABASE_URL: databaseUrl,
@@ -18,40 +21,11 @@ const prisma = new PrismaClient({
   datasourceUrl: databaseUrl
 });
 const app = await buildApp({ env, prisma });
-const createdUserIds = new Set<string>();
-const createdWorkspaceIds = new Set<string>();
-
-async function cleanupCreatedRecords() {
-  const workspaceIds = [...createdWorkspaceIds];
-  const userIds = [...createdUserIds];
-
-  if (workspaceIds.length > 0) {
-    await prisma.workspace.deleteMany({
-      where: {
-        id: {
-          in: workspaceIds
-        }
-      }
-    });
-    createdWorkspaceIds.clear();
-  }
-
-  if (userIds.length > 0) {
-    await prisma.user.deleteMany({
-      where: {
-        id: {
-          in: userIds
-        }
-      }
-    });
-    createdUserIds.clear();
-  }
-}
 
 async function registerTestUser(overrides: { email?: string; name?: string } = {}) {
   const email = overrides.email ?? `${runId}-${crypto.randomUUID()}@example.com`;
   const name = overrides.name ?? "Test User";
-  const response = await app.inject({
+  return app.inject({
     method: "POST",
     url: "/auth/register",
     payload: {
@@ -60,30 +34,19 @@ async function registerTestUser(overrides: { email?: string; name?: string } = {
       name
     }
   });
-
-  if (response.statusCode === 201) {
-    const body = response.json<{
-      user: { id: string; email: string; name: string };
-      workspace: { id: string; name: string; role: string };
-      token: string;
-    }>();
-    createdUserIds.add(body.user.id);
-    createdWorkspaceIds.add(body.workspace.id);
-  }
-
-  return response;
 }
 
 beforeAll(async () => {
   await prisma.$connect();
+  await cleanupAuthTestRecords(prisma);
 });
 
 afterEach(async () => {
-  await cleanupCreatedRecords();
+  await cleanupAuthTestRecords(prisma);
 });
 
 afterAll(async () => {
-  await cleanupCreatedRecords();
+  await cleanupAuthTestRecords(prisma);
   await app.close();
   await prisma.$disconnect();
 });
@@ -129,6 +92,31 @@ describe("auth routes", () => {
       userId: body.user.id,
       role: "owner"
     });
+  });
+
+  test("register token includes expiry, issuer, and audience claims", async () => {
+    const response = await registerTestUser({
+      email: `${runId}-jwt-claims@example.com`,
+      name: "Jwt User"
+    });
+    const token = response.json<{ token: string }>().token;
+
+    const decoded = app.jwt.verify<{
+      sub: string;
+      exp: number;
+      iat: number;
+      iss: string;
+      aud: string;
+    }>(token);
+
+    expect(decoded).toMatchObject({
+      sub: expect.any(String),
+      exp: expect.any(Number),
+      iat: expect.any(Number),
+      iss: "living-cost-manager-api",
+      aud: "living-cost-manager"
+    });
+    expect(decoded.exp - decoded.iat).toBeLessThanOrEqual(7 * 24 * 60 * 60);
   });
 
   test("login succeeds and returns a token", async () => {
@@ -181,6 +169,20 @@ describe("auth routes", () => {
     });
   });
 
+  test("/me rejects a verified token with an invalid payload shape", async () => {
+    const token = app.jwt.sign({});
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/me",
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
   test("duplicate register returns a non-500 conflict", async () => {
     const email = `${runId}-duplicate@example.com`;
     await registerTestUser({ email, name: "First User" });
@@ -196,6 +198,9 @@ describe("auth routes", () => {
     });
 
     expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      message: "Email already registered"
+    });
   });
 
   test("bad login returns unauthorized", async () => {
@@ -212,6 +217,41 @@ describe("auth routes", () => {
     });
 
     expect(response.statusCode).toBe(401);
+  });
+
+  test("invalid register payload returns a sanitized bad request", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "not-an-email",
+        password: "short",
+        name: ""
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: "Invalid request body"
+    });
+    expect(JSON.stringify(response.json())).not.toContain("ZodError");
+  });
+
+  test("invalid login payload returns a sanitized bad request", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: {
+        email: "not-an-email",
+        password: "short"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: "Invalid request body"
+    });
+    expect(JSON.stringify(response.json())).not.toContain("ZodError");
   });
 
   test("missing /me token returns unauthorized", async () => {

@@ -15,7 +15,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "test": "vitest run"
+    "test": "tsx tests/setup-test-db.ts && vitest run"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
