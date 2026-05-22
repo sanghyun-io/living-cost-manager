@@ -14,6 +14,7 @@ model MonthlyFixedCost {
   paymentMethodId String
   paymentOptionId String
   amount        Int
+  periodMonths  Int      @default(1)
   billingDay    Int
   memo          String?
   isActive      Boolean  @default(true)

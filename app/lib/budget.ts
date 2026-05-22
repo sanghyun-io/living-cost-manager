@@ -10,6 +10,7 @@ export type FixedCost = {
   paymentMethodId: PaymentMethodId;
   paymentOptionId: string;
   amount: number;
+  periodMonths: number;
   billingDay: number;
 };
 
@@ -56,6 +57,7 @@ type FixedCostInput = {
   paymentOptionId?: string;
   cardId?: string;
   amount: number;
+  periodMonths?: number;
   billingDay: number;
   paymentMethod?: string;
 };
@@ -112,6 +114,7 @@ export function createFixedCost(input: FixedCostInput): FixedCost {
       paymentMethodId: "bank-transfer",
       paymentOptionId: "auto-transfer",
       amount: 0,
+      periodMonths: 1,
       billingDay: 1
     },
     {
@@ -120,6 +123,7 @@ export function createFixedCost(input: FixedCostInput): FixedCost {
       paymentMethodId: input.paymentMethodId ?? paymentMethodIdFromLegacyPaymentMethod(input.paymentMethod),
       paymentOptionId: input.paymentOptionId ?? input.cardId ?? paymentOptionIdFromLegacyPaymentMethod(input.paymentMethod),
       amount: input.amount,
+      periodMonths: input.periodMonths ?? 1,
       billingDay: input.billingDay
     }
   );
@@ -136,14 +140,15 @@ export function updateFixedCost(item: FixedCost, patch: Partial<Omit<FixedCost, 
     paymentMethodId,
     paymentOptionId: sanitizePaymentOptionId(paymentMethodId, patch.paymentOptionId ?? item.paymentOptionId),
     amount: clampNumber(patch.amount ?? item.amount, 0, Number.MAX_SAFE_INTEGER),
+    periodMonths: clampNumber(patch.periodMonths ?? item.periodMonths ?? 1, 1, 120),
     billingDay: clampNumber(patch.billingDay ?? item.billingDay, 1, 31)
   };
 }
 
 export function buildBudgetSummary(items: FixedCost[], monthlyIncome: number): BudgetSummary {
-  const monthlyExpense = items.reduce((sum, item) => sum + item.amount, 0);
+  const monthlyExpense = items.reduce((sum, item) => sum + getMonthlyEquivalentAmount(item), 0);
   const highestCost = items.reduce<FixedCost | null>(
-    (highest, item) => (!highest || item.amount > highest.amount ? item : highest),
+    (highest, item) => (!highest || getMonthlyEquivalentAmount(item) > getMonthlyEquivalentAmount(highest) ? item : highest),
     null
   );
 
@@ -159,7 +164,7 @@ export function buildBudgetSummary(items: FixedCost[], monthlyIncome: number): B
 
 export function getCategoryBuckets(items: FixedCost[], categories: Category[]): CategoryBucket[] {
   const totals = items.reduce<Record<string, number>>((bucketMap, item) => {
-    bucketMap[item.categoryId] = (bucketMap[item.categoryId] ?? 0) + item.amount;
+    bucketMap[item.categoryId] = (bucketMap[item.categoryId] ?? 0) + getMonthlyEquivalentAmount(item);
     return bucketMap;
   }, {});
 
@@ -170,6 +175,10 @@ export function getCategoryBuckets(items: FixedCost[], categories: Category[]): 
       amount
     }))
     .sort((a, b) => b.amount - a.amount);
+}
+
+export function getMonthlyEquivalentAmount(item: FixedCost): number {
+  return Math.round(item.amount / Math.max(1, item.periodMonths));
 }
 
 export function getCategoryLabel(categories: Category[], categoryId: string): string {

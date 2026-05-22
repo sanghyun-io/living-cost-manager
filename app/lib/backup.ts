@@ -27,7 +27,7 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
     writeRow(["id", "label", "billingDay"]),
     ...cards.map((card) => writeRow([card.id, card.label, String(card.billingDay)])),
     "[fixedCosts]",
-    writeRow(["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay"]),
+    writeRow(["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay", "periodMonths"]),
     ...fixedCosts.map((item) =>
       writeRow([
         item.id,
@@ -36,7 +36,8 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
         item.paymentMethodId,
         item.paymentOptionId,
         String(item.amount),
-        String(item.billingDay)
+        String(item.billingDay),
+        String(item.periodMonths)
       ])
     )
   ].join("\n");
@@ -125,7 +126,8 @@ function parseFixedCosts(rows: string[][]): FixedCost[] {
         paymentMethodId: row[3] as FixedCost["paymentMethodId"],
         paymentOptionId: row[4] ?? "",
         amount: sanitizeNumber(Number(row[5]), 0),
-        billingDay: sanitizeNumber(Number(row[6]), 1)
+        billingDay: sanitizeNumber(Number(row[6]), 1),
+        periodMonths: sanitizeNumber(Number(row[7]), 1) || 1
       })
     );
 }

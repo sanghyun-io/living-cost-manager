@@ -9,6 +9,7 @@ import {
   DEFAULT_CATEGORIES,
   deleteCategory,
   getCategoryBuckets,
+  getMonthlyEquivalentAmount,
   getCategoryPieSegments,
   getPieSegmentAtPercent,
   isDefaultCategory,
@@ -37,6 +38,13 @@ const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
 const STORAGE_KEY = "living-cost-manager:v2";
 const LEGACY_STORAGE_KEY = "living-cost-manager:v1";
+
+type BudgetSnapshot = {
+  monthlyIncome: number;
+  fixedCosts: FixedCost[];
+  categories: Category[];
+  cards: PaymentCard[];
+};
 
 const seedFixedCosts: FixedCost[] = [
   createFixedCost({
@@ -83,6 +91,20 @@ const seedFixedCosts: FixedCost[] = [
   })
 ];
 
+const sampleBudgetSnapshot: BudgetSnapshot = {
+  monthlyIncome: 3_000_000,
+  fixedCosts: seedFixedCosts,
+  categories: DEFAULT_CATEGORIES,
+  cards: DEFAULT_CARDS
+};
+
+const emptyBudgetSnapshot: BudgetSnapshot = {
+  monthlyIncome: 0,
+  fixedCosts: [],
+  categories: DEFAULT_CATEGORIES,
+  cards: DEFAULT_CARDS
+};
+
 function formatWon(amount: number) {
   return new Intl.NumberFormat("ko-KR", {
     style: "currency",
@@ -95,6 +117,7 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [knownUsers, setKnownUsers] = useState<AppUser[]>([]);
   const [loginName, setLoginName] = useState("");
+  const [initialDataMode, setInitialDataMode] = useState<"sample" | "blank">("sample");
   const [monthlyIncome, setMonthlyIncome] = useState(3_000_000);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(seedFixedCosts);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
@@ -112,6 +135,8 @@ export default function Home() {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<string[]>([]);
   const [importMessage, setImportMessage] = useState("");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [saveError, setSaveError] = useState("");
   const [isBootLoaded, setIsBootLoaded] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const importFileRef = useRef<HTMLInputElement | null>(null);
@@ -125,6 +150,19 @@ export default function Home() {
     setKnownUsers(users);
     setCurrentUser(activeUser);
     setIsBootLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) {
+      return;
+    }
+
+    const registerWorker = () => {
+      void navigator.serviceWorker.register("./sw.js").catch(() => undefined);
+    };
+
+    window.addEventListener("load", registerWorker);
+    return () => window.removeEventListener("load", registerWorker);
   }, []);
 
   useEffect(() => {
@@ -142,10 +180,21 @@ export default function Home() {
     const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = parseBudgetSnapshot(stored ?? legacyStored);
 
-    setMonthlyIncome(parsed.monthlyIncome);
-    setCategories(parsed.categories);
-    setCards(parsed.cards);
-    setFixedCosts(parsed.fixedCosts);
+    if (parsed.recovered && stored) {
+      try {
+        window.localStorage.setItem(getUserDataKey(currentUser.id) + ":corrupt:" + Date.now().toString(36), stored);
+      } catch {
+        // Recovery should continue even if the browser refuses the extra copy.
+      }
+      setImportMessage("저장 데이터가 손상되어 기본값으로 복구했습니다. 가능하면 전체 백업을 내보내세요.");
+    }
+
+    setMonthlyIncome(parsed.snapshot.monthlyIncome);
+    setCategories(parsed.snapshot.categories);
+    setCards(parsed.snapshot.cards);
+    setFixedCosts(parsed.snapshot.fixedCosts);
+    setLastSavedAt(null);
+    setSaveError("");
     setIsLoaded(true);
   }, [currentUser, isBootLoaded]);
 
@@ -154,7 +203,13 @@ export default function Home() {
       return;
     }
 
-    window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
+    try {
+      window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
+      setLastSavedAt(new Date());
+      setSaveError("");
+    } catch {
+      setSaveError("브라우저 저장 공간에 저장하지 못했습니다. 전체 백업을 먼저 내보내세요.");
+    }
   }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, monthlyIncome]);
 
   useEffect(() => {
@@ -182,7 +237,7 @@ export default function Home() {
     [categoryFilterId, fixedCosts]
   );
   const visibleFixedCostTotal = useMemo(
-    () => visibleFixedCosts.reduce((total, item) => total + item.amount, 0),
+    () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
     [visibleFixedCosts]
   );
   const progressWidth = String(Math.min(summary.expenseRate, 100)) + "%";
@@ -222,6 +277,7 @@ export default function Home() {
         paymentMethodId: "bank-transfer",
         paymentOptionId: "auto-transfer",
         amount: 0,
+        periodMonths: 1,
         billingDay: 1
       })
     ]);
@@ -314,10 +370,16 @@ export default function Home() {
 
   function handleLogin(userName: string) {
     const nextUser = createUser(userName);
+    const isNewUser = !knownUsers.some((user) => user.id === nextUser.id);
     const nextUsers = mergeUsers(knownUsers, nextUser);
+    const userDataKey = getUserDataKey(nextUser.id);
 
     window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
     window.localStorage.setItem(ACTIVE_USER_KEY, nextUser.id);
+    if (isNewUser && !window.localStorage.getItem(userDataKey)) {
+      const snapshot = initialDataMode === "blank" ? emptyBudgetSnapshot : sampleBudgetSnapshot;
+      window.localStorage.setItem(userDataKey, JSON.stringify(snapshot));
+    }
     setKnownUsers(nextUsers);
     setIsLoaded(false);
     setCurrentUser(nextUser);
@@ -444,7 +506,7 @@ export default function Home() {
         <section className="login-card" aria-label="로그인">
           <p className="section-label">생활비 관리자</p>
           <h1>사용자별 고정지출을 확인하세요</h1>
-          <p className="hero-copy">사용자 이름으로 로그인하면 각자의 수입, 고정비, 카테고리가 따로 저장됩니다.</p>
+          <p className="hero-copy">사용자 이름으로 로그인하면 이 브라우저 안에 수입, 고정비, 카테고리가 사용자별로 저장됩니다.</p>
           <form
             className="login-form"
             onSubmit={(event) => {
@@ -459,10 +521,33 @@ export default function Home() {
               value={loginName}
               onChange={(event) => setLoginName(event.target.value)}
             />
+            <div className="start-options" aria-label="신규 사용자 시작 방식">
+              <label>
+                <input
+                  checked={initialDataMode === "sample"}
+                  name="initial-data-mode"
+                  type="radio"
+                  value="sample"
+                  onChange={() => setInitialDataMode("sample")}
+                />
+                샘플 데이터로 시작
+              </label>
+              <label>
+                <input
+                  checked={initialDataMode === "blank"}
+                  name="initial-data-mode"
+                  type="radio"
+                  value="blank"
+                  onChange={() => setInitialDataMode("blank")}
+                />
+                빈 상태로 시작
+              </label>
+            </div>
             <button className="primary-button" type="submit">
               로그인
             </button>
           </form>
+          <p className="local-note">서버 없이 브라우저 localStorage에만 저장됩니다. 기기를 바꾸기 전에는 전체 백업을 내보내세요.</p>
           {knownUsers.length > 0 ? (
             <div className="known-users" aria-label="기존 사용자">
               <span>기존 사용자</span>
@@ -483,6 +568,9 @@ export default function Home() {
   return (
     <main className="page-shell">
       <header className="app-header">
+        <span className={saveError ? "save-status save-status-error" : "save-status"}>
+          {saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기")}
+        </span>
         <strong>{currentUser.name}</strong>
         <button className="secondary-button" type="button" onClick={handleLogout}>
           로그아웃
@@ -493,8 +581,9 @@ export default function Home() {
           <p className="section-label">고정비 대시보드</p>
           <h1>생활비 고정비를 한 화면에서 정리하세요</h1>
           <p className="hero-copy">
-            월마다 반복되는 지출을 항목, 납부일, 결제수단별로 모아 보고 예산 압박이 큰 영역을 바로 확인합니다.
+            매월 또는 몇 개월마다 반복되는 지출을 항목, 납부일, 결제수단별로 모아 보고 월 환산 예산 압박을 바로 확인합니다.
           </p>
+          <p className="local-note inline-note">데이터는 이 브라우저에만 저장됩니다. 정기적으로 데이터 관리에서 전체 백업을 내보내세요.</p>
         </div>
         <div className="summary-panel" aria-label="이번 달 고정비 요약">
           <label htmlFor="monthly-income">월 수입</label>
@@ -506,8 +595,8 @@ export default function Home() {
             value={formatNumberInput(monthlyIncome)}
             onChange={(event) => handleIncomeChange(event.target.value)}
           />
-          <p>수입 대비 고정비 {summary.expenseRate}%</p>
-          <div className="income-progress" aria-label="수입 대비 고정비 비율">
+          <p>수입 대비 월 환산 고정비 {summary.expenseRate}%</p>
+          <div className="income-progress" aria-label="수입 대비 월 환산 고정비 비율">
             <div className="income-progress-fill" style={{ width: progressWidth }} />
           </div>
         </div>
@@ -515,7 +604,7 @@ export default function Home() {
 
       <section className="metric-grid" aria-label="핵심 지표">
         <article>
-          <span>이번 달 고정비</span>
+          <span>월 환산 고정비</span>
           <strong>{formatWon(summary.monthlyExpense)}</strong>
           <small>연 환산 {formatWon(summary.annualExpense)}</small>
         </article>
@@ -533,7 +622,7 @@ export default function Home() {
         <article>
           <span>가장 큰 항목</span>
           <strong>{summary.highestCost?.name ?? "없음"}</strong>
-          <small>{summary.highestCost ? formatWon(summary.highestCost.amount) : "항목을 추가하세요"}</small>
+          <small>{summary.highestCost ? "월 환산 " + formatWon(getMonthlyEquivalentAmount(summary.highestCost)) : "항목을 추가하세요"}</small>
         </article>
         <article>
           <span>평균 고정비</span>
@@ -597,7 +686,7 @@ export default function Home() {
               ))}
             </select>
             <span>{visibleFixedCosts.length}개 항목</span>
-            <strong>{formatWon(visibleFixedCostTotal)}</strong>
+            <strong>월 환산 {formatWon(visibleFixedCostTotal)}</strong>
           </div>
           <div className="table" role="table" aria-label="고정비 목록">
             <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} role="row">
@@ -607,6 +696,8 @@ export default function Home() {
               <span>결제 옵션</span>
               <span>납부일</span>
               <span>금액</span>
+              <span>주기</span>
+              <span>월 환산</span>
               {isDeleteMode ? <span>선택</span> : null}
             </div>
             {visibleFixedCosts.map((item) => (
@@ -700,6 +791,24 @@ export default function Home() {
                     value={formatNumberInput(item.amount)}
                     onChange={(event) => handleItemChange(item.id, { amount: parseCurrencyInput(event.target.value) })}
                   />
+                </span>
+                <span>
+                  <label className="sr-only" htmlFor={item.id + "-period"}>
+                    주기
+                  </label>
+                  <input
+                    id={item.id + "-period"}
+                    inputMode="numeric"
+                    max="120"
+                    min="1"
+                    type="number"
+                    value={item.periodMonths}
+                    onChange={(event) => handleItemChange(item.id, { periodMonths: parseCurrencyInput(event.target.value) || 1 })}
+                  />
+                </span>
+                <span className="monthly-equivalent-cell">
+                  <strong>{formatWon(getMonthlyEquivalentAmount(item))}</strong>
+                  <small>{item.periodMonths}개월 기준</small>
                 </span>
                 {isDeleteMode ? (
                   <span className="delete-select-cell">
@@ -814,6 +923,7 @@ export default function Home() {
                 <div>
                   <p className="section-label">엑셀 템플릿</p>
                   <h3>항목 일괄 편집</h3>
+                  <small>고정비 항목만 CSV로 편집합니다.</small>
                 </div>
                 <div className="data-action-buttons">
                   <button className="secondary-button" type="button" onClick={handleExportTemplate}>
@@ -828,6 +938,7 @@ export default function Home() {
                 <div>
                   <p className="section-label">LCM 백업</p>
                   <h3>전체 백업</h3>
+                  <small>수입, 카테고리, 카드, 고정비를 모두 저장합니다.</small>
                 </div>
                 <div className="data-action-buttons">
                   <button className="secondary-button" type="button" onClick={handleExportBackup}>
@@ -839,6 +950,7 @@ export default function Home() {
                 </div>
               </section>
             </div>
+            <p className="local-note">GitHub Pages 버전은 서버 저장이 없습니다. 브라우저를 초기화하거나 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
             <input
               ref={importFileRef}
               className="sr-only"
@@ -1035,6 +1147,14 @@ function formatNumberInput(value: number) {
   }).format(value);
 }
 
+function formatSaveTime(value: Date) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(value);
+}
+
 function clampBillingDay(value: number) {
   if (!Number.isFinite(value)) {
     return 1;
@@ -1097,16 +1217,11 @@ function buildPieBackground(segments: ReturnType<typeof getCategoryPieSegments>)
   return `conic-gradient(${stops.join(", ")})`;
 }
 
-function parseBudgetSnapshot(stored: string | null) {
-  const fallback = {
-    monthlyIncome: 3_000_000,
-    fixedCosts: seedFixedCosts,
-    categories: DEFAULT_CATEGORIES,
-    cards: DEFAULT_CARDS
-  };
+function parseBudgetSnapshot(stored: string | null): { snapshot: BudgetSnapshot; recovered: boolean } {
+  const fallback = sampleBudgetSnapshot;
 
   if (!stored) {
-    return fallback;
+    return { snapshot: fallback, recovered: false };
   }
 
   try {
@@ -1118,13 +1233,16 @@ function parseBudgetSnapshot(stored: string | null) {
     };
 
     return {
+      snapshot: {
       monthlyIncome: typeof parsed.monthlyIncome === "number" ? Math.max(0, Math.round(parsed.monthlyIncome)) : fallback.monthlyIncome,
       fixedCosts: Array.isArray(parsed.fixedCosts) ? parsed.fixedCosts.map((item) => createFixedCost(item)) : fallback.fixedCosts,
       categories: Array.isArray(parsed.categories) ? mergeCategories(DEFAULT_CATEGORIES, parsed.categories) : fallback.categories,
       cards: Array.isArray(parsed.cards) ? mergeCards(DEFAULT_CARDS, parsed.cards) : fallback.cards
+      },
+      recovered: false
     };
   } catch {
-    return fallback;
+    return { snapshot: fallback, recovered: true };
   }
 }
 

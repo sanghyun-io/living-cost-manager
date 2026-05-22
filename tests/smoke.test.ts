@@ -8,6 +8,7 @@ import {
   deleteCategory,
   getCategoryBuckets,
   getCategoryPieSegments,
+  getMonthlyEquivalentAmount,
   getPieSegmentAtPercent,
   renameCategory,
   updateFixedCost
@@ -33,15 +34,18 @@ describe("fixed cost dashboard", () => {
   test("summarizes fixed costs against monthly income", () => {
     const fixedCosts = [
       createFixedCost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000, billingDay: 25 }),
-      createFixedCost({ id: "phone", name: "통신비", categoryId: "telecom", amount: 79000, billingDay: 10 })
+      createFixedCost({ id: "phone", name: "통신비", categoryId: "telecom", amount: 79000, billingDay: 10 }),
+      createFixedCost({ id: "litter", name: "고양이 모래", categoryId: "other", amount: 45000, periodMonths: 3, billingDay: 1 })
     ];
 
     const summary = buildBudgetSummary(fixedCosts, 3_000_000);
 
-    expect(summary.monthlyExpense).toBe(729_000);
-    expect(summary.annualExpense).toBe(8_748_000);
-    expect(summary.remainingIncome).toBe(2_271_000);
-    expect(summary.expenseRate).toBe(24.3);
+    expect(fixedCosts[0].periodMonths).toBe(1);
+    expect(getMonthlyEquivalentAmount(fixedCosts[2])).toBe(15_000);
+    expect(summary.monthlyExpense).toBe(744_000);
+    expect(summary.annualExpense).toBe(8_928_000);
+    expect(summary.remainingIncome).toBe(2_256_000);
+    expect(summary.expenseRate).toBe(24.8);
   });
 
   test("updates editable fixed cost fields safely", () => {
@@ -49,6 +53,7 @@ describe("fixed cost dashboard", () => {
 
     const updated = updateFixedCost(item, {
       amount: -5000,
+      periodMonths: 0,
       billingDay: 47,
       categoryId: "insurance",
       paymentMethodId: "credit-card",
@@ -56,6 +61,7 @@ describe("fixed cost dashboard", () => {
     });
 
     expect(updated.amount).toBe(0);
+    expect(updated.periodMonths).toBe(1);
     expect(updated.billingDay).toBe(31);
     expect(updated.categoryId).toBe("insurance");
     expect(updated.paymentMethodId).toBe("credit-card");
@@ -103,13 +109,13 @@ describe("fixed cost dashboard", () => {
     const fixedCosts = [
       createFixedCost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000, billingDay: 25 }),
       createFixedCost({ id: "loan", name: "관리비", categoryId: "housing", amount: 120000, billingDay: 20 }),
-      createFixedCost({ id: "academy", name: "학원비", categoryId: "education", amount: 300000, billingDay: 10 }),
+      createFixedCost({ id: "academy", name: "학원비", categoryId: "education", amount: 300000, periodMonths: 3, billingDay: 10 }),
       createFixedCost({ id: "phone", name: "통신비", categoryId: "telecom", amount: 79000, billingDay: 10 })
     ];
 
     expect(getCategoryBuckets(fixedCosts, categories)).toEqual([
       { categoryId: "housing", label: "주거", amount: 770000 },
-      { categoryId: "education", label: "교육", amount: 300000 },
+      { categoryId: "education", label: "교육", amount: 100000 },
       { categoryId: "telecom", label: "통신", amount: 79000 }
     ]);
   });
@@ -260,6 +266,7 @@ describe("fixed cost dashboard", () => {
         paymentMethodId: "credit-card",
         paymentOptionId: card.id,
         amount: 79000,
+        periodMonths: 3,
         billingDay: 10
       })
     ];
@@ -271,6 +278,7 @@ describe("fixed cost dashboard", () => {
     });
 
     expect(csv).toContain("카테고리ID");
+    expect(csv).toContain("주기");
     expect(csv).toContain("manual-transfer");
     expect(csv).toContain("생활비 카드");
 
@@ -289,6 +297,7 @@ describe("fixed cost dashboard", () => {
     });
     expect(imported.fixedCosts[1].paymentMethodId).toBe("credit-card");
     expect(imported.fixedCosts[1].paymentOptionId).toBe(card.id);
+    expect(imported.fixedCosts[1].periodMonths).toBe(3);
     expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 10 }]);
   });
 
@@ -303,6 +312,7 @@ describe("fixed cost dashboard", () => {
         paymentMethodId: "credit-card",
         paymentOptionId: card.id,
         amount: 99000,
+        periodMonths: 12,
         billingDay: 21
       })
     ];
@@ -324,5 +334,30 @@ describe("fixed cost dashboard", () => {
     expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 21 }]);
     expect(imported.categories.some((category) => category.id === customCategory.id)).toBe(true);
     expect(imported.fixedCosts).toEqual(fixedCosts);
+  });
+
+  test("imports older lcm backups without period months as monthly costs", () => {
+    const backup = [
+      "LCM1",
+      "[income]",
+      "monthlyIncome\t4200000",
+      "[categories]",
+      "id\tlabel",
+      "housing\t주거",
+      "[cards]",
+      "id\tlabel\tbillingDay",
+      "[fixedCosts]",
+      "id\tname\tcategoryId\tpaymentMethodId\tpaymentOptionId\tamount\tbillingDay",
+      "rent\t월세\thousing\tbank-transfer\tauto-transfer\t650000\t25"
+    ].join("\n");
+
+    const imported = parseLivingCostBackup(backup);
+
+    expect(imported.fixedCosts[0]).toMatchObject({
+      id: "rent",
+      amount: 650000,
+      periodMonths: 1,
+      billingDay: 25
+    });
   });
 });

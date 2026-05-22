@@ -40,7 +40,8 @@ const columns = [
   "결제옵션ID",
   "결제옵션",
   "납부일",
-  "금액"
+  "금액",
+  "주기"
 ];
 
 export function buildFixedCostCsvTemplate({ fixedCosts, categories, cards }: ExportInput): string {
@@ -61,7 +62,8 @@ export function buildFixedCostCsvTemplate({ fixedCosts, categories, cards }: Exp
       item.paymentOptionId,
       paymentOption?.label ?? "",
       String(item.billingDay),
-      String(item.amount)
+      String(item.amount),
+      String(item.periodMonths)
     ];
   });
 
@@ -116,7 +118,8 @@ export function parseFixedCostCsvTemplate({ csv, categories, cards }: ImportInpu
         paymentMethodId,
         paymentOptionId,
         billingDay: parseCurrencyAmount(getCell(row, headerMap, "납부일")) || 1,
-        amount
+        amount,
+        periodMonths: parseCurrencyAmount(getCell(row, headerMap, "주기")) || 1
       })
     );
   });
