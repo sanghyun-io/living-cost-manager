@@ -52,10 +52,15 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(rateLimit, {
     global: false,
     max: 120,
-    timeWindow: "1 minute"
+    timeWindow: "1 minute",
+    // Disable limiting under test so suites can hammer auth endpoints freely.
+    enableDraftSpec: false,
+    allowList: env.NODE_ENV === "test" ? () => true : undefined
   });
   await app.register(authPlugin, {
-    secret: env.JWT_SECRET
+    secret: env.JWT_SECRET,
+    accessTtlSeconds: env.ACCESS_TOKEN_TTL,
+    refreshTtlSeconds: env.REFRESH_TOKEN_TTL
   });
 
   const registerApiRoutes = async (api: FastifyInstance) => {

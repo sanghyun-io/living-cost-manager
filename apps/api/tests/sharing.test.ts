@@ -73,7 +73,8 @@ async function registerTestUser(name: string, email?: string): Promise<Registere
 
   expect(response.statusCode).toBe(201);
 
-  return response.json<RegisteredUser>();
+  const body = response.json<{ accessToken: string } & RegisteredUser>();
+  return { ...body, token: body.accessToken };
 }
 
 async function addWorkspaceMember(workspaceId: string, role: WorkspaceRole) {

@@ -22,9 +22,10 @@ export const userDtoSchema = z.object({
 });
 
 export const authResponseSchema = z.object({
-  token: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
   user: userDtoSchema,
-  workspace: workspaceDtoSchema,
+  workspace: workspaceDtoSchema.optional(),
 });
 
 export const forgotPasswordRequestSchema = z.object({
