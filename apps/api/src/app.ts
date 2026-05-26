@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
@@ -12,10 +13,13 @@ import { invitationRoutes } from "./routes/invitations.js";
 import { memberRoutes } from "./routes/members.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
+import { createEmailProvider, type EmailProvider } from "./services/email.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     prisma: PrismaClient;
+    appEnv: Env;
+    email: EmailProvider;
   }
 }
 
@@ -32,6 +36,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
   });
 
   app.decorate("prisma", prisma);
+  app.decorate("appEnv", env);
+  app.decorate("email", createEmailProvider(env, app.log));
   app.addHook("onClose", async () => {
     if (!options.prisma) {
       await prisma.$disconnect();
@@ -42,6 +48,11 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(sensible);
   await app.register(cors, {
     origin: env.CORS_ORIGIN
+  });
+  await app.register(rateLimit, {
+    global: false,
+    max: 120,
+    timeWindow: "1 minute"
   });
   await app.register(authPlugin, {
     secret: env.JWT_SECRET
