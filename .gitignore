@@ -7,3 +7,5 @@ out/
 *.log
 *.tsbuildinfo
 .superpowers/
+tmp-screenshots/
+tmp-debug/

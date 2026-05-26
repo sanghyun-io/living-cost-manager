@@ -151,6 +151,7 @@ export default function Home() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [chartMode, setChartMode] = useState<"bar" | "pie">("bar");
   const [activePieSegment, setActivePieSegment] = useState<CategoryPieSegment | null>(null);
   const [pieTooltipPosition, setPieTooltipPosition] = useState({ x: 0, y: 0 });
@@ -270,7 +271,7 @@ export default function Home() {
   }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, monthlyIncome]);
 
   useEffect(() => {
-    if (!isCategoryModalOpen && !isCardModalOpen && !isDataModalOpen) {
+    if (!isCategoryModalOpen && !isCardModalOpen && !isDataModalOpen && !isAuthModalOpen) {
       return;
     }
 
@@ -279,20 +280,21 @@ export default function Home() {
         setIsCategoryModalOpen(false);
         setIsCardModalOpen(false);
         setIsDataModalOpen(false);
+        setIsAuthModalOpen(false);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCardModalOpen, isCategoryModalOpen, isDataModalOpen]);
+  }, [isCardModalOpen, isCategoryModalOpen, isDataModalOpen, isAuthModalOpen]);
 
   useEffect(() => {
-    if (!isDataModalOpen || !serverSession || !serverApi) {
+    if ((!isDataModalOpen && !isAuthModalOpen) || !serverSession || !serverApi) {
       return;
     }
 
     void refreshSharing(serverSession);
-  }, [isDataModalOpen, serverApi, serverSession]);
+  }, [isDataModalOpen, isAuthModalOpen, serverApi, serverSession]);
 
   useEffect(() => {
     if (!isBootLoaded || !serverSession || !serverApi || serverRestoreCheckedRef.current) {
@@ -535,6 +537,10 @@ export default function Home() {
 
       serverRestoreCheckedRef.current = true;
       setServerPassword("");
+      if (isAuthModalOpen) {
+        setIsAuthModalOpen(false);
+        setIsDataModalOpen(true);
+      }
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
       handleLogin(nextSession.user.name || nextSession.user.email);
@@ -997,9 +1003,20 @@ export default function Home() {
         <span className={saveError ? "save-status save-status-error" : "save-status"}>
           {saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기")}
         </span>
-        <button className={serverSession ? "account-status-pill account-status-connected" : "primary-button"} type="button" onClick={() => setIsDataModalOpen(true)}>
-          {serverSession ? "서버 연결됨 · 동기화 관리" : "클라우드에 저장하기"}
-        </button>
+        {serverSession ? (
+          <button className="account-status-pill account-status-connected" type="button" onClick={() => setIsDataModalOpen(true)}>
+            서버 연결됨 · 동기화 관리
+          </button>
+        ) : (
+          <>
+            <button className="secondary-button" type="button" onClick={() => setIsDataModalOpen(true)}>
+              데이터 관리
+            </button>
+            <button className="primary-button" type="button" onClick={() => setIsAuthModalOpen(true)}>
+              클라우드에 저장하기
+            </button>
+          </>
+        )}
         <strong>{currentUser?.name ?? LOCAL_USER_NAME}</strong>
         {serverSession ? (
           <button
@@ -1472,44 +1489,19 @@ export default function Home() {
                     </div>
                   </div>
                 ) : (
-                  <form
-                    className="server-auth-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void handleServerAuthSubmit();
-                    }}
-                  >
-                    <div className="chart-toggle" aria-label="서버 계정 모드">
-                      <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("login")}>
-                        로그인
-                      </button>
-                      <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("register")}>
-                        가입
-                      </button>
-                    </div>
-                    <div className="form-field">
-                      <label htmlFor="server-email">이메일</label>
-                      <input id="server-email" type="email" value={serverEmail} onChange={(event) => setServerEmail(event.target.value)} />
-                    </div>
-                    {serverAuthMode === "register" ? (
-                      <div className="form-field">
-                        <label htmlFor="server-name">이름</label>
-                        <input id="server-name" type="text" value={serverName} onChange={(event) => setServerName(event.target.value)} />
-                      </div>
-                    ) : null}
-                    <div className="form-field">
-                      <label htmlFor="server-password">비밀번호</label>
-                      <input
-                        id="server-password"
-                        type="password"
-                        value={serverPassword}
-                        onChange={(event) => setServerPassword(event.target.value)}
-                      />
-                    </div>
-                    <button className="primary-button" disabled={isServerBusy} type="submit">
-                      {serverAuthMode === "register" ? "서버 가입" : "서버 로그인"}
+                  <div className="server-auth-cta">
+                    <p>클라우드에 저장하려면 로그인이 필요합니다. 계정이 없으면 가입한 뒤 이어서 사용할 수 있습니다.</p>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => {
+                        setIsDataModalOpen(false);
+                        setIsAuthModalOpen(true);
+                      }}
+                    >
+                      로그인 / 가입하기
                     </button>
-                  </form>
+                  </div>
                 )}
 
                 {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
@@ -1694,6 +1686,96 @@ export default function Home() {
               accept=".lcm,text/plain"
               onChange={(event) => void handleImportBackup(event.target.files?.[0] ?? null)}
             />
+          </section>
+        </div>
+      ) : null}
+
+      {isAuthModalOpen ? (
+        <div className="modal-backdrop" onMouseDown={() => setIsAuthModalOpen(false)}>
+          <section
+            aria-labelledby="auth-modal-title"
+            aria-modal="true"
+            className="category-modal auth-modal"
+            role="dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="section-label">클라우드</p>
+                <h2 id="auth-modal-title">{serverAuthMode === "register" ? "계정 가입" : "로그인"}</h2>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setIsAuthModalOpen(false)}>
+                닫기
+              </button>
+            </div>
+            {serverApi ? (
+              <>
+                <p className="auth-modal-intro">
+                  클라우드에 저장하면 다른 기기에서도 데이터를 이어서 사용할 수 있습니다. 브라우저 로컬 저장은 그대로 유지됩니다.
+                </p>
+                <form
+                  className="server-auth-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleServerAuthSubmit();
+                  }}
+                >
+                  <div className="chart-toggle" aria-label="서버 계정 모드">
+                    <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("login")}>
+                      로그인
+                    </button>
+                    <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("register")}>
+                      가입
+                    </button>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="auth-email">이메일</label>
+                    <input id="auth-email" type="email" value={serverEmail} onChange={(event) => setServerEmail(event.target.value)} />
+                  </div>
+                  {serverAuthMode === "register" ? (
+                    <div className="form-field">
+                      <label htmlFor="auth-name">이름</label>
+                      <input id="auth-name" type="text" value={serverName} onChange={(event) => setServerName(event.target.value)} />
+                    </div>
+                  ) : null}
+                  <div className="form-field">
+                    <label htmlFor="auth-password">비밀번호</label>
+                    <input
+                      id="auth-password"
+                      type="password"
+                      value={serverPassword}
+                      onChange={(event) => setServerPassword(event.target.value)}
+                    />
+                  </div>
+                  <button className="primary-button" disabled={isServerBusy} type="submit">
+                    {serverAuthMode === "register" ? "가입하고 클라우드에 저장" : "로그인"}
+                  </button>
+                </form>
+                <p className="auth-modal-switch">
+                  {serverAuthMode === "login" ? (
+                    <>
+                      계정이 없으신가요?{" "}
+                      <button type="button" className="link-button" onClick={() => setServerAuthMode("register")}>
+                        가입하기
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      이미 계정이 있으신가요?{" "}
+                      <button type="button" className="link-button" onClick={() => setServerAuthMode("login")}>
+                        로그인하기
+                      </button>
+                    </>
+                  )}
+                </p>
+                {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+              </>
+            ) : (
+              <div className="local-mode-warning" role="status">
+                <strong>서버 API URL이 없어 클라우드 저장을 사용할 수 없습니다.</strong>
+                <p>이 브라우저에만 저장됩니다. 데이터 관리에서 전체 Export 백업을 보관하세요.</p>
+              </div>
+            )}
           </section>
         </div>
       ) : null}
