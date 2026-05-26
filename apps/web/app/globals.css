@@ -777,6 +777,60 @@ select:disabled {
   justify-self: start;
 }
 
+.auth-modal {
+  max-width: 420px;
+}
+
+.auth-modal .server-auth-form {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+
+.auth-modal .server-auth-form .chart-toggle,
+.auth-modal .server-auth-form button[type="submit"] {
+  grid-column: auto;
+  justify-self: stretch;
+  width: 100%;
+}
+
+.auth-modal-intro {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 4px;
+}
+
+.auth-modal-switch {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-strong, #134e4a);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.server-auth-cta {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.server-auth-cta p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .form-field {
   display: grid;
   gap: 6px;
