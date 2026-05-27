@@ -114,6 +114,13 @@ export default function Home() {
   const [serverEmail, setServerEmail] = useState("");
   const [serverPassword, setServerPassword] = useState("");
   const [serverName, setServerName] = useState("");
+  // Track which auth fields the user has left (blurred) so we only surface
+  // validation errors after they finish typing a field, not while typing.
+  // Name is optional (falls back to email), so it has no validation entry.
+  const [authTouched, setAuthTouched] = useState<{ email: boolean; password: boolean }>({
+    email: false,
+    password: false,
+  });
   const [serverStatus, setServerStatus] = useState("");
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
@@ -500,9 +507,43 @@ export default function Home() {
     setSelectedDeleteIds([]);
   }
 
+  // Auth form validation. Rules mirror the shared Zod schema
+  // (registerRequestSchema / loginRequestSchema): valid email format and
+  // a password of at least 8 characters. Errors are only shown for fields the
+  // user has already blurred (see authTouched) so we don't nag while typing.
+  const trimmedAuthEmail = serverEmail.trim();
+  const authEmailError =
+    trimmedAuthEmail.length === 0
+      ? "이메일을 입력해 주세요."
+      : !EMAIL_PATTERN.test(trimmedAuthEmail)
+        ? "올바른 이메일 형식이 아닙니다."
+        : null;
+  const authPasswordError =
+    serverPassword.length === 0
+      ? "비밀번호를 입력해 주세요."
+      : serverPassword.length < 8
+        ? "비밀번호는 8자 이상이어야 합니다."
+        : null;
+  // Name is optional at submit time (falls back to email), so it never blocks.
+  const isAuthFormValid = !authEmailError && !authPasswordError;
+
+  function markAuthFieldTouched(field: "email" | "password") {
+    setAuthTouched((current) => (current[field] ? current : { ...current, [field]: true }));
+  }
+
+  function resetAuthTouched() {
+    setAuthTouched({ email: false, password: false });
+  }
+
   async function handleServerAuthSubmit() {
     if (!serverApi) {
       setServerStatus("서버 API URL이 없어 로컬 전용으로 동작합니다.");
+      return;
+    }
+    // Guard against programmatic/Enter submits when the form is invalid, and
+    // reveal any outstanding errors by marking the relevant fields touched.
+    if (!isAuthFormValid) {
+      setAuthTouched({ email: true, password: true });
       return;
     }
 
@@ -1277,10 +1318,18 @@ export default function Home() {
           isServerBusy={isServerBusy}
           serverStatus={serverStatus}
           serverErrorKind={serverErrorKind}
+          authTouched={authTouched}
+          authEmailError={authEmailError}
+          authPasswordError={authPasswordError}
+          isAuthFormValid={isAuthFormValid}
           onEmailChange={setServerEmail}
           onPasswordChange={setServerPassword}
           onNameChange={setServerName}
-          onModeChange={setServerAuthMode}
+          onBlurField={markAuthFieldTouched}
+          onModeChange={(mode) => {
+            setServerAuthMode(mode);
+            resetAuthTouched();
+          }}
           onViewChange={(view) => {
             setAuthView(view);
             if (view === "forgot") {
