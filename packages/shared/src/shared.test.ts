@@ -107,10 +107,27 @@ describe("shared api contracts", () => {
     };
 
     expect(jsonSchema.properties?.periodMonths).toMatchObject({
-      minimum: 1,
+      minimum: 0,
       maximum: 120,
       multipleOf: 0.1,
     });
+  });
+
+  test("fixedCostDtoSchema accepts a zero or sub-monthly period", () => {
+    expect(
+      fixedCostDtoSchema.parse({ ...minimalFixedCost, periodMonths: 0 })
+        .periodMonths,
+    ).toBe(0);
+    expect(
+      fixedCostDtoSchema.parse({ ...minimalFixedCost, periodMonths: 0.5 })
+        .periodMonths,
+    ).toBe(0.5);
+  });
+
+  test("fixedCostDtoSchema rejects a negative period", () => {
+    expect(() =>
+      fixedCostDtoSchema.parse({ ...minimalFixedCost, periodMonths: -1 }),
+    ).toThrow();
   });
 
   test("createInvitationRequestSchema rejects owner and defaults missing role to viewer", () => {
