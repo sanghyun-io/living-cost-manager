@@ -1,45 +1,42 @@
 import type { ReactNode } from "react";
+import { Modal, Stack, Text } from "@mantine/core";
 
 interface ModalShellProps {
-  /** Unique id for the heading, wired to aria-labelledby. */
-  titleId: string;
+  opened: boolean;
   /** Small uppercase label above the title (e.g. "관리", "클라우드"). */
   sectionLabel: string;
   title: string;
-  /** Extra class appended after "category-modal" (e.g. "data-modal", "auth-modal"). */
-  className?: string;
+  /** Wider modals (e.g. data management) pass "lg". Default "md". */
+  size?: string;
   onClose: () => void;
   children: ReactNode;
 }
 
 /**
- * Shared backdrop + dialog + header chrome for all modals.
- *
- * Note: Esc-to-close is intentionally NOT handled here. The Home component owns
- * a single keydown effect that closes all modals at once; adding a listener per
- * shell would double-fire it.
+ * Shared modal chrome built on Mantine <Modal>. Esc / backdrop click / close
+ * button are handled by Mantine itself — the Home component no longer needs a
+ * keydown effect.
  */
-export function ModalShell({ titleId, sectionLabel, title, className, onClose, children }: ModalShellProps) {
+export function ModalShell({ opened, sectionLabel, title, size = "md", onClose, children }: ModalShellProps) {
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className={className ? `category-modal ${className}` : "category-modal"}
-        role="dialog"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <p className="section-label">{sectionLabel}</p>
-            <h2 id={titleId}>{title}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose}>
-            닫기
-          </button>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      size={size}
+      centered
+      radius="md"
+      title={
+        <div>
+          <Text className="section-label" size="xs">
+            {sectionLabel}
+          </Text>
+          <Text fw={700} size="lg">
+            {title}
+          </Text>
         </div>
-        {children}
-      </section>
-    </div>
+      }
+    >
+      <Stack gap="md">{children}</Stack>
+    </Modal>
   );
 }

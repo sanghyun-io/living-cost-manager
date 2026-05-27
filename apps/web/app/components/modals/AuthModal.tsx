@@ -1,6 +1,8 @@
+import { Alert, Anchor, Button, Group, PasswordInput, SegmentedControl, Text, TextInput } from "@mantine/core";
 import { ModalShell } from "./ModalShell";
 
 interface AuthModalProps {
+  opened: boolean;
   hasServerApi: boolean;
   authView: "auth" | "forgot";
   serverAuthMode: "login" | "register";
@@ -27,6 +29,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({
+  opened,
   hasServerApi,
   authView,
   serverAuthMode,
@@ -51,127 +54,120 @@ export function AuthModal({
   onClose
 }: AuthModalProps) {
   const title = serverAuthMode === "register" ? "계정 가입" : "로그인";
-  const statusClassName = serverErrorKind ? "sync-status sync-status-error" : "sync-status";
+  const statusEl = serverStatus ? (
+    <Alert variant="light" color={serverErrorKind ? "rose" : "teal"} p="xs">
+      {serverStatus}
+    </Alert>
+  ) : null;
 
   return (
-    <ModalShell titleId="auth-modal-title" sectionLabel="클라우드" title={title} className="auth-modal" onClose={onClose}>
+    <ModalShell opened={opened} sectionLabel="클라우드" title={title} onClose={onClose}>
       {hasServerApi ? (
         authView === "forgot" ? (
           <>
-            <p className="auth-modal-intro">가입한 이메일로 비밀번호 재설정 링크를 보내드립니다.</p>
+            <Text size="sm" c="dimmed">
+              가입한 이메일로 비밀번호 재설정 링크를 보내드립니다.
+            </Text>
             <form
-              className="server-auth-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 onForgotSubmit();
               }}
             >
-              <div className="form-field">
-                <label htmlFor="forgot-email">이메일</label>
-                <input id="forgot-email" type="email" value={serverEmail} onChange={(event) => onEmailChange(event.target.value)} />
-              </div>
-              <button className="primary-button" disabled={isServerBusy} type="submit">
+              <TextInput
+                label="이메일"
+                type="email"
+                value={serverEmail}
+                onChange={(event) => onEmailChange(event.currentTarget.value)}
+                mb="md"
+              />
+              <Button type="submit" loading={isServerBusy} fullWidth>
                 재설정 링크 보내기
-              </button>
+              </Button>
             </form>
-            <p className="auth-modal-switch">
-              <button type="button" className="link-button" onClick={() => onViewChange("auth")}>
-                로그인으로 돌아가기
-              </button>
-            </p>
-            {serverStatus ? <p className={statusClassName}>{serverStatus}</p> : null}
+            <Anchor component="button" type="button" size="sm" onClick={() => onViewChange("auth")}>
+              로그인으로 돌아가기
+            </Anchor>
+            {statusEl}
           </>
         ) : (
           <>
-            <p className="auth-modal-intro">
+            <Text size="sm" c="dimmed">
               클라우드에 저장하면 다른 기기에서도 데이터를 이어서 사용할 수 있습니다. 브라우저 로컬 저장은 그대로 유지됩니다.
-            </p>
+            </Text>
             <form
-              className="server-auth-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 onSubmit();
               }}
             >
-              <div className="chart-toggle" aria-label="서버 계정 모드">
-                <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => onModeChange("login")}>
-                  로그인
-                </button>
-                <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => onModeChange("register")}>
-                  가입
-                </button>
-              </div>
-              <div className="form-field">
-                <label htmlFor="auth-email">이메일</label>
-                <input
-                  id="auth-email"
-                  type="email"
-                  value={serverEmail}
-                  onChange={(event) => onEmailChange(event.target.value)}
-                  onBlur={() => onBlurField("email")}
-                  aria-invalid={authTouched.email && Boolean(authEmailError)}
-                  aria-describedby={authTouched.email && authEmailError ? "auth-email-error" : undefined}
-                />
-                {authTouched.email && authEmailError ? (
-                  <p className="field-error" id="auth-email-error" role="alert">{authEmailError}</p>
-                ) : null}
-              </div>
+              <SegmentedControl
+                fullWidth
+                mb="sm"
+                value={serverAuthMode}
+                onChange={(value) => onModeChange(value as "login" | "register")}
+                data={[
+                  { value: "login", label: "로그인" },
+                  { value: "register", label: "가입" }
+                ]}
+              />
+              <TextInput
+                label="이메일"
+                type="email"
+                value={serverEmail}
+                onChange={(event) => onEmailChange(event.currentTarget.value)}
+                onBlur={() => onBlurField("email")}
+                error={authTouched.email ? authEmailError : null}
+                mb="sm"
+              />
               {serverAuthMode === "register" ? (
-                <div className="form-field">
-                  <label htmlFor="auth-name">이름</label>
-                  <input id="auth-name" type="text" value={serverName} onChange={(event) => onNameChange(event.target.value)} />
-                </div>
-              ) : null}
-              <div className="form-field">
-                <label htmlFor="auth-password">비밀번호</label>
-                <input
-                  id="auth-password"
-                  type="password"
-                  value={serverPassword}
-                  onChange={(event) => onPasswordChange(event.target.value)}
-                  onBlur={() => onBlurField("password")}
-                  aria-invalid={authTouched.password && Boolean(authPasswordError)}
-                  aria-describedby={authTouched.password && authPasswordError ? "auth-password-error" : undefined}
+                <TextInput
+                  label="이름"
+                  value={serverName}
+                  onChange={(event) => onNameChange(event.currentTarget.value)}
+                  mb="sm"
                 />
-                {authTouched.password && authPasswordError ? (
-                  <p className="field-error" id="auth-password-error" role="alert">{authPasswordError}</p>
-                ) : (
-                  <p className="field-hint">비밀번호는 8자 이상이어야 합니다.</p>
-                )}
-              </div>
-              <button className="primary-button" disabled={isServerBusy || !isAuthFormValid} type="submit">
+              ) : null}
+              <PasswordInput
+                label="비밀번호"
+                value={serverPassword}
+                onChange={(event) => onPasswordChange(event.currentTarget.value)}
+                onBlur={() => onBlurField("password")}
+                error={authTouched.password ? authPasswordError : null}
+                description={authTouched.password && authPasswordError ? undefined : "비밀번호는 8자 이상이어야 합니다."}
+                mb="md"
+              />
+              <Button type="submit" loading={isServerBusy} disabled={!isAuthFormValid} fullWidth>
                 {serverAuthMode === "register" ? "가입하고 클라우드에 저장" : "로그인"}
-              </button>
+              </Button>
             </form>
-            <p className="auth-modal-switch">
+            <Group gap={4}>
               {serverAuthMode === "login" ? (
                 <>
-                  계정이 없으신가요?{" "}
-                  <button type="button" className="link-button" onClick={() => onModeChange("register")}>
+                  <Text size="sm" c="dimmed">계정이 없으신가요?</Text>
+                  <Anchor component="button" type="button" size="sm" onClick={() => onModeChange("register")}>
                     가입하기
-                  </button>
-                  <br />
-                  <button type="button" className="link-button" onClick={() => onViewChange("forgot")}>
+                  </Anchor>
+                  <Anchor component="button" type="button" size="sm" onClick={() => onViewChange("forgot")}>
                     비밀번호를 잊으셨나요?
-                  </button>
+                  </Anchor>
                 </>
               ) : (
                 <>
-                  이미 계정이 있으신가요?{" "}
-                  <button type="button" className="link-button" onClick={() => onModeChange("login")}>
+                  <Text size="sm" c="dimmed">이미 계정이 있으신가요?</Text>
+                  <Anchor component="button" type="button" size="sm" onClick={() => onModeChange("login")}>
                     로그인하기
-                  </button>
+                  </Anchor>
                 </>
               )}
-            </p>
-            {serverStatus ? <p className={statusClassName}>{serverStatus}</p> : null}
+            </Group>
+            {statusEl}
           </>
         )
       ) : (
-        <div className="local-mode-warning" role="status">
-          <strong>서버 API URL이 없어 클라우드 저장을 사용할 수 없습니다.</strong>
-          <p>이 브라우저에만 저장됩니다. 데이터 관리에서 전체 Export 백업을 보관하세요.</p>
-        </div>
+        <Alert variant="light" color="yellow" title="서버 API URL이 없어 클라우드 저장을 사용할 수 없습니다.">
+          이 브라우저에만 저장됩니다. 데이터 관리에서 전체 Export 백업을 보관하세요.
+        </Alert>
       )}
     </ModalShell>
   );

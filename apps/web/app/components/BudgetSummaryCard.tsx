@@ -1,3 +1,4 @@
+import { Card, Text } from "@mantine/core";
 import { formatWon } from "../lib/formatting";
 import type { BudgetSnapshotSummary } from "../lib/syncStatus";
 
@@ -8,12 +9,14 @@ interface BudgetSummaryCardProps {
 
 export function BudgetSummaryCard({ title, summary }: BudgetSummaryCardProps) {
   return (
-    <div className="sync-summary-card">
-      <span>{title}</span>
-      <strong>{formatWon(summary.monthlyExpense)}</strong>
-      <small>
+    <Card withBorder padding="sm" radius="sm">
+      <Text size="sm" c="dimmed">
+        {title}
+      </Text>
+      <Text fw={700}>{formatWon(summary.monthlyExpense)}</Text>
+      <Text size="xs" c="dimmed">
         월 수입 {formatWon(summary.monthlyIncome)} · 항목 {summary.fixedCostCount}개 · 카테고리 {summary.categoryCount}개 · 카드 {summary.cardCount}개
-      </small>
-    </div>
+      </Text>
+    </Card>
   );
 }

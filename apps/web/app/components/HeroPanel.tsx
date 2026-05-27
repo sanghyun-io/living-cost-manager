@@ -1,19 +1,18 @@
-import { formatNumberInput } from "../lib/formatting";
+import { NumberInput, Progress, Text, Title } from "@mantine/core";
 
 interface HeroPanelProps {
   monthlyIncome: number;
   expenseRate: number;
-  progressWidth: string;
   hasServerWorkspace: boolean;
-  onIncomeChange: (value: string) => void;
+  onIncomeChange: (value: number) => void;
 }
 
-export function HeroPanel({ monthlyIncome, expenseRate, progressWidth, hasServerWorkspace, onIncomeChange }: HeroPanelProps) {
+export function HeroPanel({ monthlyIncome, expenseRate, hasServerWorkspace, onIncomeChange }: HeroPanelProps) {
   return (
     <section className="hero">
       <div>
-        <p className="section-label">고정비 대시보드</p>
-        <h1>생활비 고정비를 한 화면에서 정리하세요</h1>
+        <Text className="section-label">고정비 대시보드</Text>
+        <Title order={1}>생활비 고정비를 한 화면에서 정리하세요</Title>
         <p className="hero-copy">
           매월 또는 몇 개월마다 반복되는 지출을 항목, 납부일, 결제수단별로 모아 보고 월 환산 예산 압박을 바로 확인합니다.
         </p>
@@ -24,19 +23,21 @@ export function HeroPanel({ monthlyIncome, expenseRate, progressWidth, hasServer
         </p>
       </div>
       <div className="summary-panel" aria-label="이번 달 고정비 요약">
-        <label htmlFor="monthly-income">월 수입</label>
-        <input
+        <NumberInput
+          label="월 수입"
           id="monthly-income"
-          inputMode="numeric"
-          min="0"
-          type="text"
-          value={formatNumberInput(monthlyIncome)}
-          onChange={(event) => onIncomeChange(event.target.value)}
+          min={0}
+          thousandSeparator=","
+          allowDecimal={false}
+          allowNegative={false}
+          hideControls
+          value={monthlyIncome}
+          onChange={(value) => onIncomeChange(typeof value === "number" ? value : 0)}
         />
-        <p>수입 대비 월 환산 고정비 {expenseRate}%</p>
-        <div className="income-progress" aria-label="수입 대비 월 환산 고정비 비율">
-          <div className="income-progress-fill" style={{ width: progressWidth }} />
-        </div>
+        <Text size="sm" mt="md">
+          수입 대비 월 환산 고정비 {expenseRate}%
+        </Text>
+        <Progress value={Math.min(expenseRate, 100)} color="teal" size="sm" mt="xs" aria-label="수입 대비 월 환산 고정비 비율" />
       </div>
     </section>
   );

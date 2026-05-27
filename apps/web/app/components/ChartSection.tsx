@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import { Group, SegmentedControl, Text, Title } from "@mantine/core";
 import { getCategoryBuckets, type CategoryPieSegment } from "../lib/budget";
 import { chartColors, formatWon } from "../lib/formatting";
 
@@ -31,20 +32,22 @@ export function ChartSection({
 }: ChartSectionProps) {
   return (
     <aside className="diagram" aria-label="카테고리별 고정비 비중">
-      <div className="section-heading">
+      <Group justify="space-between" align="flex-start" mb="md">
         <div>
-          <p className="section-label">도식화</p>
-          <h2>카테고리별 비중</h2>
+          <Text className="section-label" size="xs">도식화</Text>
+          <Title order={2}>카테고리별 비중</Title>
         </div>
-        <div className="chart-toggle" aria-label="도식화 보기 방식">
-          <button className={chartMode === "bar" ? "active" : undefined} type="button" onClick={() => onChartModeChange("bar")}>
-            막대
-          </button>
-          <button className={chartMode === "pie" ? "active" : undefined} type="button" onClick={() => onChartModeChange("pie")}>
-            원형
-          </button>
-        </div>
-      </div>
+        <SegmentedControl
+          size="xs"
+          aria-label="도식화 보기 방식"
+          value={chartMode}
+          onChange={(value) => onChartModeChange(value as "bar" | "pie")}
+          data={[
+            { value: "bar", label: "막대" },
+            { value: "pie", label: "원형" }
+          ]}
+        />
+      </Group>
       {chartMode === "bar" ? (
         <div className="bars">
           {buckets.map((bucket) => (
