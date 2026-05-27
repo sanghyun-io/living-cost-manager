@@ -210,7 +210,8 @@ describe("shared api contracts", () => {
     ).toThrow();
 
     const response = {
-      token: "token-1",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
       user: {
         id: "user-1",
         email: "user@example.com",
