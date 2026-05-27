@@ -38,7 +38,7 @@ export const fixedCostDtoSchema = z.object({
   amount: z.number().int().min(0),
   periodMonths: z
     .number()
-    .min(1)
+    .min(0)
     .max(120)
     .multipleOf(0.1),
   billingDay: billingDaySchema,
