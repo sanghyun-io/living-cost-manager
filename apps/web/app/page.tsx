@@ -1717,7 +1717,7 @@ export default function Home() {
                   </div>
                 ) : null}
 
-                {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+                {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
                 {serverSession && serverWorkspaces.length === 0 ? (
                   <p className="local-note">사용 가능한 서버 워크스페이스가 없습니다. 새 계정을 만들거나 초대를 수락한 뒤 동기화를 사용할 수 있습니다.</p>
                 ) : null}
@@ -1952,7 +1952,7 @@ export default function Home() {
                       로그인으로 돌아가기
                     </button>
                   </p>
-                  {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+                  {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
                 </>
               ) : (
               <>
@@ -2018,7 +2018,7 @@ export default function Home() {
                     </>
                   )}
                 </p>
-                {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+                {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
               </>
               )
             ) : (
@@ -2070,7 +2070,7 @@ export default function Home() {
                 비밀번호 변경
               </button>
             </form>
-            {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+            {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
           </section>
         </div>
       ) : null}
