@@ -60,16 +60,19 @@ describe("auth routes", () => {
 
     expect(response.statusCode).toBe(201);
     const body = response.json<{
-      token: string;
-      user: { id: string; email: string; name: string; passwordHash?: string };
+      accessToken: string;
+      refreshToken: string;
+      user: { id: string; email: string; name: string; emailVerified?: boolean; passwordHash?: string };
       workspace: { id: string; name: string; role: string };
     }>();
 
-    expect(body.token).toEqual(expect.any(String));
+    expect(body.accessToken).toEqual(expect.any(String));
+    expect(body.refreshToken).toEqual(expect.any(String));
     expect(body.user).toEqual({
       id: expect.any(String),
       email: `${runId}-register@example.com`,
-      name: "Mina"
+      name: "Mina",
+      emailVerified: false
     });
     expect(body.user).not.toHaveProperty("passwordHash");
     expect(body.workspace).toEqual({
@@ -120,29 +123,38 @@ describe("auth routes", () => {
     expect(user?.email).toBe(email.toLowerCase());
   });
 
-  test("register token includes expiry, issuer, and audience claims", async () => {
+  test("register access token includes type, version, expiry, issuer, audience", async () => {
     const response = await registerTestUser({
       email: `${runId}-jwt-claims@example.com`,
       name: "Jwt User"
     });
-    const token = response.json<{ token: string }>().token;
+    const { accessToken, refreshToken } = response.json<{
+      accessToken: string;
+      refreshToken: string;
+    }>();
 
     const decoded = app.jwt.verify<{
       sub: string;
+      type: string;
+      tokenVersion: number;
       exp: number;
       iat: number;
       iss: string;
       aud: string;
-    }>(token);
+    }>(accessToken);
 
     expect(decoded).toMatchObject({
       sub: expect.any(String),
-      exp: expect.any(Number),
-      iat: expect.any(Number),
+      type: "access",
+      tokenVersion: 0,
       iss: "living-cost-manager-api",
       aud: "living-cost-manager"
     });
-    expect(decoded.exp - decoded.iat).toBeLessThanOrEqual(7 * 24 * 60 * 60);
+    // Access token is short-lived (<= 1h); refresh carries the long-lived window.
+    expect(decoded.exp - decoded.iat).toBeLessThanOrEqual(60 * 60);
+
+    const decodedRefresh = app.jwt.verify<{ type: string }>(refreshToken);
+    expect(decodedRefresh.type).toBe("refresh");
   });
 
   test("login succeeds and returns a token", async () => {
@@ -160,10 +172,12 @@ describe("auth routes", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json<{
-      token: string;
+      accessToken: string;
+      refreshToken: string;
       user: { id: string; email: string; name: string; passwordHash?: string };
     }>();
-    expect(body.token).toEqual(expect.any(String));
+    expect(body.accessToken).toEqual(expect.any(String));
+    expect(body.refreshToken).toEqual(expect.any(String));
     expect(body.user).toMatchObject({
       id: expect.any(String),
       email,
@@ -197,7 +211,7 @@ describe("auth routes", () => {
   test("/me succeeds with a bearer token", async () => {
     const email = `${runId}-me@example.com`;
     const register = await registerTestUser({ email, name: "Me User" });
-    const token = register.json<{ token: string }>().token;
+    const token = register.json<{ accessToken: string }>().accessToken;
 
     const response = await app.inject({
       method: "GET",
@@ -212,7 +226,8 @@ describe("auth routes", () => {
       user: {
         id: expect.any(String),
         email,
-        name: "Me User"
+        name: "Me User",
+        emailVerified: false
       }
     });
   });

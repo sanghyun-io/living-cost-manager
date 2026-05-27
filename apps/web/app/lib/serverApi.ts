@@ -12,10 +12,13 @@ import type {
   WorkspaceSnapshot
 } from "@living-cost-manager/shared";
 
-export const SERVER_SESSION_STORAGE_KEY = "living-cost-manager:server-session:v1";
+// Bumped to v2 because the session now stores a refresh token alongside the
+// short-lived access token (`token`). Older v1 sessions are simply ignored.
+export const SERVER_SESSION_STORAGE_KEY = "living-cost-manager:server-session:v2";
 
 export type ServerSession = {
   token: string;
+  refreshToken: string;
   user: UserDto;
   workspace: WorkspaceDto | null;
 };
@@ -33,6 +36,13 @@ export type ServerApiClient = {
   readonly baseUrl: string;
   register(input: RegisterRequest): Promise<ServerSession>;
   login(input: LoginRequest): Promise<ServerSession>;
+  refresh(refreshToken: string): Promise<ServerSession>;
+  logout(token: string): Promise<void>;
+  changePassword(currentPassword: string, newPassword: string, token: string): Promise<ServerSession>;
+  forgotPassword(email: string): Promise<void>;
+  resetPassword(token: string, password: string): Promise<void>;
+  verifyEmail(token: string): Promise<void>;
+  resendVerification(token: string): Promise<void>;
   me(token: string): Promise<{ user: UserDto }>;
   listWorkspaces(token: string): Promise<WorkspaceDto[]>;
   getWorkspaceSnapshot(workspaceId: string, token: string): Promise<WorkspaceSnapshot>;
@@ -93,31 +103,56 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
   const request = <T>(path: string, requestOptions: RequestOptions = {}) =>
     requestJson<T>(fetchImpl, baseUrl, path, requestOptions);
 
+  const toSession = (response: AuthResponse): ServerSession => ({
+    token: response.accessToken,
+    refreshToken: response.refreshToken,
+    user: response.user,
+    workspace: response.workspace ?? null
+  });
+
   return {
     baseUrl,
     async register(input) {
-      const response = await request<AuthResponse>("/auth/register", {
-        method: "POST",
-        body: input
-      });
-
-      return {
-        token: response.token,
-        user: response.user,
-        workspace: response.workspace
-      };
+      return toSession(
+        await request<AuthResponse>("/auth/register", { method: "POST", body: input })
+      );
     },
     async login(input) {
-      const response = await request<AuthResponse & { workspace?: WorkspaceDto }>("/auth/login", {
-        method: "POST",
-        body: input
-      });
-
-      return {
-        token: response.token,
-        user: response.user,
-        workspace: response.workspace ?? null
-      };
+      return toSession(
+        await request<AuthResponse>("/auth/login", { method: "POST", body: input })
+      );
+    },
+    async refresh(refreshToken) {
+      return toSession(
+        await request<AuthResponse>("/auth/refresh", {
+          method: "POST",
+          body: { refreshToken }
+        })
+      );
+    },
+    async logout(token) {
+      await request<void>("/auth/logout", { method: "POST", token });
+    },
+    async changePassword(currentPassword, newPassword, token) {
+      return toSession(
+        await request<AuthResponse>("/auth/change-password", {
+          method: "POST",
+          token,
+          body: { currentPassword, newPassword }
+        })
+      );
+    },
+    async forgotPassword(email) {
+      await request<void>("/auth/forgot-password", { method: "POST", body: { email } });
+    },
+    async resetPassword(token, password) {
+      await request<void>("/auth/reset-password", { method: "POST", body: { token, password } });
+    },
+    async verifyEmail(token) {
+      await request<void>("/auth/verify-email", { method: "POST", body: { token } });
+    },
+    async resendVerification(token) {
+      await request<void>("/auth/resend-verification", { method: "POST", token });
     },
     me(token) {
       return request<{ user: UserDto }>("/me", { token });

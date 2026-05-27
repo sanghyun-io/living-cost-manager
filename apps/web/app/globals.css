@@ -831,6 +831,37 @@ select:disabled {
   line-height: 1.5;
 }
 
+.email-verify-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.password-change {
+  margin: 12px 0;
+}
+
+.password-change > summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  margin-bottom: 10px;
+}
+
+.password-change .server-auth-form {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+
 .form-field {
   display: grid;
   gap: 6px;

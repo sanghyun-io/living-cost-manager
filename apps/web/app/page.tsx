@@ -152,6 +152,12 @@ export default function Home() {
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  // "login" | "register" lives in serverAuthMode; this adds the forgot-password view.
+  const [authView, setAuthView] = useState<"auth" | "forgot">("auth");
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [changeCurrentPassword, setChangeCurrentPassword] = useState("");
+  const [changeNewPassword, setChangeNewPassword] = useState("");
   const [chartMode, setChartMode] = useState<"bar" | "pie">("bar");
   const [activePieSegment, setActivePieSegment] = useState<CategoryPieSegment | null>(null);
   const [pieTooltipPosition, setPieTooltipPosition] = useState({ x: 0, y: 0 });
@@ -304,6 +310,45 @@ export default function Home() {
     serverRestoreCheckedRef.current = true;
     void refreshRestoredServerSession(serverSession);
   }, [isBootLoaded, serverApi, serverSession]);
+
+  // Handle auth deep links delivered by email. The app is a static-export SPA
+  // served only at "/", so links use root query params: ?reset_token / ?verify_token.
+  useEffect(() => {
+    if (typeof window === "undefined" || !serverApi) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+
+    const reset = params.get("reset_token");
+    if (reset) {
+      setResetToken(reset);
+      return;
+    }
+
+    const verify = params.get("verify_token");
+    if (verify) {
+      clearAuthQueryParam("verify_token");
+      void serverApi
+        .verifyEmail(verify)
+        .then(() => {
+          setServerStatus("이메일 인증이 완료되었습니다.");
+          setServerSession((current) => {
+            if (!current) {
+              return current;
+            }
+            const updated = { ...current, user: { ...current.user, emailVerified: true } };
+            saveServerSession(updated);
+            return updated;
+          });
+        })
+        .catch(() => {
+          setServerStatus("이메일 인증 링크가 유효하지 않거나 만료되었습니다.");
+        })
+        .finally(() => {
+          setIsDataModalOpen(true);
+        });
+    }
+  }, [serverApi]);
 
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
   const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
@@ -553,6 +598,10 @@ export default function Home() {
   }
 
   function handleServerLogout() {
+    // Best-effort server-side logout (invalidates refresh tokens); ignore failures.
+    if (serverApi && serverSession) {
+      void serverApi.logout(serverSession.token).catch(() => undefined);
+    }
     window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
     setServerSession(null);
     setServerSnapshot(null);
@@ -565,6 +614,97 @@ export default function Home() {
     setLastSyncedSnapshotKey("");
     clearWorkspaceScopedSharingDrafts();
     setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
+  }
+
+  async function handleForgotPassword() {
+    if (!serverApi) {
+      return;
+    }
+    setIsServerBusy(true);
+    setServerStatus("");
+    setServerErrorKind(null);
+    try {
+      await serverApi.forgotPassword(serverEmail);
+      setServerStatus("입력하신 이메일이 가입되어 있다면 재설정 링크를 보냈습니다. 메일함을 확인하세요.");
+    } catch (error) {
+      setServerErrorKind("request");
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleResetPassword() {
+    if (!serverApi || !resetToken) {
+      return;
+    }
+    setIsServerBusy(true);
+    setServerStatus("");
+    setServerErrorKind(null);
+    try {
+      await serverApi.resetPassword(resetToken, resetPasswordValue);
+      setResetPasswordValue("");
+      setResetToken(null);
+      clearAuthQueryParam("reset_token");
+      setServerAuthMode("login");
+      setAuthView("auth");
+      setIsAuthModalOpen(true);
+      setServerStatus("비밀번호를 재설정했습니다. 새 비밀번호로 로그인하세요.");
+    } catch (error) {
+      setServerErrorKind("request");
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleChangePassword() {
+    if (!serverApi || !serverSession) {
+      return;
+    }
+    setIsServerBusy(true);
+    setServerStatus("");
+    setServerErrorKind(null);
+    try {
+      const updated = await serverApi.changePassword(
+        changeCurrentPassword,
+        changeNewPassword,
+        serverSession.token
+      );
+      // change-password bumps tokenVersion and returns fresh tokens; keep workspace.
+      const nextSession = await resolveAndStoreServerSession({
+        ...updated,
+        workspace: updated.workspace ?? serverSession.workspace ?? null
+      });
+      setServerSession(nextSession);
+      setChangeCurrentPassword("");
+      setChangeNewPassword("");
+      setServerStatus("비밀번호를 변경했습니다.");
+    } catch (error) {
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(
+        isServerAuthFailure(error) ? "현재 비밀번호가 올바르지 않습니다." : getErrorMessage(error)
+      );
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleResendVerification() {
+    if (!serverApi || !serverSession) {
+      return;
+    }
+    setIsServerBusy(true);
+    setServerStatus("");
+    try {
+      await serverApi.resendVerification(serverSession.token);
+      setServerStatus("인증 메일을 다시 보냈습니다. 메일함을 확인하세요.");
+    } catch (error) {
+      setServerErrorKind("request");
+      setServerStatus(getErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
   }
 
   async function prepareServerSyncDecision(session: ServerSession) {
@@ -611,10 +751,28 @@ export default function Home() {
       return;
     }
 
+    // The stored access token is short-lived; if it has expired, transparently
+    // exchange the refresh token for a new pair before restoring the session.
+    let activeSession = session;
+    try {
+      await serverApi.me(session.token);
+    } catch (probeError) {
+      if (isServerAuthFailure(probeError)) {
+        try {
+          const refreshed = await serverApi.refresh(session.refreshToken);
+          activeSession = { ...refreshed, workspace: refreshed.workspace ?? session.workspace };
+          saveServerSession(activeSession);
+          setServerSession(activeSession);
+        } catch {
+          // refresh token also invalid -> fall through to the catch below via me()
+        }
+      }
+    }
+
     try {
       const [{ user }, nextSession] = await Promise.all([
-        serverApi.me(session.token),
-        resolveServerSessionWorkspace(serverApi, session)
+        serverApi.me(activeSession.token),
+        resolveServerSessionWorkspace(serverApi, activeSession)
       ]);
       const restoredSession = {
         ...nextSession,
@@ -1488,7 +1646,62 @@ export default function Home() {
                       ) : null}
                     </div>
                   </div>
-                ) : (
+                ) : null}
+
+                {serverSession && serverSession.user.emailVerified === false ? (
+                  <div className="email-verify-badge" role="status">
+                    <span>이메일 미인증</span>
+                    <button
+                      className="link-button"
+                      type="button"
+                      disabled={isServerBusy}
+                      onClick={() => void handleResendVerification()}
+                    >
+                      인증 메일 재발송
+                    </button>
+                  </div>
+                ) : null}
+
+                {serverSession ? (
+                  <details className="password-change">
+                    <summary>비밀번호 변경</summary>
+                    <form
+                      className="server-auth-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void handleChangePassword();
+                      }}
+                    >
+                      <div className="form-field">
+                        <label htmlFor="change-current">현재 비밀번호</label>
+                        <input
+                          id="change-current"
+                          type="password"
+                          value={changeCurrentPassword}
+                          onChange={(event) => setChangeCurrentPassword(event.target.value)}
+                        />
+                      </div>
+                      <div className="form-field">
+                        <label htmlFor="change-new">새 비밀번호</label>
+                        <input
+                          id="change-new"
+                          type="password"
+                          value={changeNewPassword}
+                          onChange={(event) => setChangeNewPassword(event.target.value)}
+                        />
+                      </div>
+                      <button
+                        className="secondary-button"
+                        type="submit"
+                        disabled={isServerBusy || changeCurrentPassword.length < 8 || changeNewPassword.length < 8}
+                      >
+                        비밀번호 변경
+                      </button>
+                    </form>
+                  </details>
+                ) : null}
+
+                {!serverSession ? (
                   <div className="server-auth-cta">
                     <p>클라우드에 저장하려면 로그인이 필요합니다. 계정이 없으면 가입한 뒤 이어서 사용할 수 있습니다.</p>
                     <button
@@ -1502,7 +1715,7 @@ export default function Home() {
                       로그인 / 가입하기
                     </button>
                   </div>
-                )}
+                ) : null}
 
                 {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
                 {serverSession && serverWorkspaces.length === 0 ? (
@@ -1709,6 +1922,39 @@ export default function Home() {
               </button>
             </div>
             {serverApi ? (
+              authView === "forgot" ? (
+                <>
+                  <p className="auth-modal-intro">
+                    가입한 이메일로 비밀번호 재설정 링크를 보내드립니다.
+                  </p>
+                  <form
+                    className="server-auth-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleForgotPassword();
+                    }}
+                  >
+                    <div className="form-field">
+                      <label htmlFor="forgot-email">이메일</label>
+                      <input
+                        id="forgot-email"
+                        type="email"
+                        value={serverEmail}
+                        onChange={(event) => setServerEmail(event.target.value)}
+                      />
+                    </div>
+                    <button className="primary-button" disabled={isServerBusy} type="submit">
+                      재설정 링크 보내기
+                    </button>
+                  </form>
+                  <p className="auth-modal-switch">
+                    <button type="button" className="link-button" onClick={() => setAuthView("auth")}>
+                      로그인으로 돌아가기
+                    </button>
+                  </p>
+                  {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
+                </>
+              ) : (
               <>
                 <p className="auth-modal-intro">
                   클라우드에 저장하면 다른 기기에서도 데이터를 이어서 사용할 수 있습니다. 브라우저 로컬 저장은 그대로 유지됩니다.
@@ -1758,6 +2004,10 @@ export default function Home() {
                       <button type="button" className="link-button" onClick={() => setServerAuthMode("register")}>
                         가입하기
                       </button>
+                      <br />
+                      <button type="button" className="link-button" onClick={() => { setAuthView("forgot"); setServerStatus(""); }}>
+                        비밀번호를 잊으셨나요?
+                      </button>
                     </>
                   ) : (
                     <>
@@ -1770,12 +2020,57 @@ export default function Home() {
                 </p>
                 {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
               </>
+              )
             ) : (
               <div className="local-mode-warning" role="status">
                 <strong>서버 API URL이 없어 클라우드 저장을 사용할 수 없습니다.</strong>
                 <p>이 브라우저에만 저장됩니다. 데이터 관리에서 전체 Export 백업을 보관하세요.</p>
               </div>
             )}
+          </section>
+        </div>
+      ) : null}
+
+      {resetToken ? (
+        <div className="modal-backdrop" onMouseDown={() => { setResetToken(null); clearAuthQueryParam("reset_token"); }}>
+          <section
+            aria-labelledby="reset-modal-title"
+            aria-modal="true"
+            className="category-modal auth-modal"
+            role="dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <p className="section-label">클라우드</p>
+                <h2 id="reset-modal-title">비밀번호 재설정</h2>
+              </div>
+              <button className="icon-button" type="button" onClick={() => { setResetToken(null); clearAuthQueryParam("reset_token"); }}>
+                닫기
+              </button>
+            </div>
+            <p className="auth-modal-intro">새 비밀번호를 입력하세요. (최소 8자)</p>
+            <form
+              className="server-auth-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleResetPassword();
+              }}
+            >
+              <div className="form-field">
+                <label htmlFor="reset-password">새 비밀번호</label>
+                <input
+                  id="reset-password"
+                  type="password"
+                  value={resetPasswordValue}
+                  onChange={(event) => setResetPasswordValue(event.target.value)}
+                />
+              </div>
+              <button className="primary-button" disabled={isServerBusy || resetPasswordValue.length < 8} type="submit">
+                비밀번호 변경
+              </button>
+            </form>
+            {serverStatus ? <p className="sync-status">{serverStatus}</p> : null}
           </section>
         </div>
       ) : null}
@@ -2130,10 +2425,21 @@ function isServerSession(value: ServerSession | null): value is ServerSession {
     !!value &&
     typeof value.token === "string" &&
     value.token.length > 0 &&
+    typeof value.refreshToken === "string" &&
+    value.refreshToken.length > 0 &&
     typeof value.user?.id === "string" &&
     typeof value.user?.email === "string" &&
     typeof value.user?.name === "string"
   );
+}
+
+function clearAuthQueryParam(key: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.delete(key);
+  window.history.replaceState({}, "", url.pathname + url.search + url.hash);
 }
 
 function getErrorMessage(error: unknown) {
