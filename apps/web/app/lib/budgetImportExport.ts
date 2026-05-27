@@ -61,7 +61,7 @@ export function buildFixedCostCsvTemplate({ fixedCosts, categories, cards }: Exp
       paymentMethod?.label ?? "",
       item.paymentOptionId,
       paymentOption?.label ?? "",
-      String(item.billingDay),
+      item.isEndOfMonth ? "말일" : String(item.billingDay),
       String(item.amount),
       String(item.periodMonths)
     ];
@@ -102,11 +102,14 @@ export function parseFixedCostCsvTemplate({ csv, categories, cards }: ImportInpu
       id: getCell(row, headerMap, "결제수단ID"),
       label: getCell(row, headerMap, "결제수단")
     });
+    const billingDayCell = getCell(row, headerMap, "납부일");
+    const isEndOfMonth = billingDayCell.trim() === "말일";
+    const billingDay = parseCurrencyAmount(billingDayCell) || 1;
     const paymentOptionId = resolvePaymentOptionId({
       id: getCell(row, headerMap, "결제옵션ID"),
       label: getCell(row, headerMap, "결제옵션"),
       paymentMethodId,
-      billingDay: parseCurrencyAmount(getCell(row, headerMap, "납부일")) || 1,
+      billingDay,
       cards: nextCards
     });
 
@@ -117,7 +120,8 @@ export function parseFixedCostCsvTemplate({ csv, categories, cards }: ImportInpu
         categoryId,
         paymentMethodId,
         paymentOptionId,
-        billingDay: parseCurrencyAmount(getCell(row, headerMap, "납부일")) || 1,
+        billingDay,
+        isEndOfMonth,
         amount,
         periodMonths: parsePeriodMonths(getCell(row, headerMap, "주기"))
       })

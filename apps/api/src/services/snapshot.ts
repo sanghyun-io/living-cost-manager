@@ -12,6 +12,7 @@ function toFixedCostDto(fixedCost: {
   amount: number;
   periodMonths: number;
   billingDay: number;
+  isEndOfMonth: boolean;
 }): FixedCostDto {
   return {
     id: fixedCost.id,
@@ -25,7 +26,8 @@ function toFixedCostDto(fixedCost: {
         : fixedCost.paymentOptionKey ?? "",
     amount: fixedCost.amount,
     periodMonths: fixedCost.periodMonths,
-    billingDay: fixedCost.billingDay
+    billingDay: fixedCost.billingDay,
+    isEndOfMonth: fixedCost.isEndOfMonth
   };
 }
 
@@ -42,7 +44,8 @@ function toFixedCostCreateData(fixedCost: FixedCostDto) {
     paymentOptionKey: isCreditCard ? null : fixedCost.paymentOptionId || null,
     amount: fixedCost.amount,
     periodMonths: fixedCost.periodMonths,
-    billingDay: fixedCost.billingDay
+    billingDay: fixedCost.billingDay,
+    isEndOfMonth: fixedCost.isEndOfMonth
   };
 }
 
@@ -82,7 +85,8 @@ export async function getWorkspaceSnapshot(
           id: true,
           workspaceId: true,
           label: true,
-          billingDay: true
+          billingDay: true,
+          isEndOfMonth: true
         }
       },
       fixedCosts: {
@@ -99,7 +103,8 @@ export async function getWorkspaceSnapshot(
           paymentOptionKey: true,
           amount: true,
           periodMonths: true,
-          billingDay: true
+          billingDay: true,
+          isEndOfMonth: true
         }
       }
     }

@@ -269,7 +269,8 @@ describe("fixed cost dashboard", () => {
     expect(renamed.find((item) => item.id === card.id)).toEqual({
       id: card.id,
       label: "우리 생활카드",
-      billingDay: 14
+      billingDay: 14,
+      isEndOfMonth: false
     });
   });
 
@@ -280,7 +281,8 @@ describe("fixed cost dashboard", () => {
     expect(updated[0]).toEqual({
       id: card.id,
       label: "생활비 카드",
-      billingDay: 31
+      billingDay: 31,
+      isEndOfMonth: false
     });
   });
 
@@ -371,7 +373,7 @@ describe("fixed cost dashboard", () => {
     expect(imported.fixedCosts[1].paymentMethodId).toBe("credit-card");
     expect(imported.fixedCosts[1].paymentOptionId).toBe(card.id);
     expect(imported.fixedCosts[1].periodMonths).toBe(2.5);
-    expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 10 }]);
+    expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 10, isEndOfMonth: false }]);
   });
 
   test("exports and imports the full app state with the lcm backup format", () => {
@@ -404,7 +406,7 @@ describe("fixed cost dashboard", () => {
     const imported = parseLivingCostBackup(backup);
 
     expect(imported.monthlyIncome).toBe(4_200_000);
-    expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 21 }]);
+    expect(imported.cards).toEqual([{ id: card.id, label: "생활비 카드", billingDay: 21, isEndOfMonth: false }]);
     expect(imported.categories.some((category) => category.id === customCategory.id)).toBe(true);
     expect(imported.fixedCosts).toEqual(fixedCosts);
   });
@@ -472,7 +474,7 @@ describe("server snapshot mapping", () => {
       workspaceId: "workspace-1",
       monthlyIncome: 3_500_000,
       categories: [{ id: "fitness", workspaceId: "workspace-1", label: "운동" }],
-      cards: [{ id: "card-living", workspaceId: "workspace-1", label: "생활비 카드", billingDay: 21 }],
+      cards: [{ id: "card-living", workspaceId: "workspace-1", label: "생활비 카드", billingDay: 21, isEndOfMonth: false }],
       fixedCosts: [
         {
           id: "gym",
@@ -483,14 +485,15 @@ describe("server snapshot mapping", () => {
           paymentOptionId: "card-living",
           amount: 99000,
           periodMonths: 12.5,
-          billingDay: 21
+          billingDay: 21,
+          isEndOfMonth: false
         }
       ]
     });
 
     expect(hydrated.monthlyIncome).toBe(3_500_000);
     expect(hydrated.categories).toEqual([{ id: "fitness", label: "운동" }]);
-    expect(hydrated.cards).toEqual([{ id: "card-living", label: "생활비 카드", billingDay: 21 }]);
+    expect(hydrated.cards).toEqual([{ id: "card-living", label: "생활비 카드", billingDay: 21, isEndOfMonth: false }]);
     expect(hydrated.fixedCosts[0]).toMatchObject({
       id: "gym",
       periodMonths: 12.5,

@@ -118,10 +118,11 @@ model Category {
 }
 
 model PaymentCard {
-  id          String
-  workspaceId String
-  label       String
-  billingDay  Int
+  id           String
+  workspaceId  String
+  label        String
+  billingDay   Int
+  isEndOfMonth Boolean @default(false)
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   fixedCosts  FixedCost[] @relation("FixedCostPaymentCard")
 
@@ -139,6 +140,7 @@ model FixedCost {
   amount          Int
   periodMonths    Float     @default(1)
   billingDay      Int
+  isEndOfMonth    Boolean   @default(false)
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   category        Category  @relation("FixedCostCategory", fields: [workspaceId, categoryId], references: [workspaceId, id])
   paymentCard     PaymentCard? @relation("FixedCostPaymentCard", fields: [workspaceId, paymentCardId], references: [workspaceId, id], onDelete: NoAction)

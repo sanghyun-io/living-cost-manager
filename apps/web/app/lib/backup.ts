@@ -24,10 +24,10 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
     writeRow(["id", "label"]),
     ...categories.map((category) => writeRow([category.id, category.label])),
     "[cards]",
-    writeRow(["id", "label", "billingDay"]),
-    ...cards.map((card) => writeRow([card.id, card.label, String(card.billingDay)])),
+    writeRow(["id", "label", "billingDay", "isEndOfMonth"]),
+    ...cards.map((card) => writeRow([card.id, card.label, String(card.billingDay), String(card.isEndOfMonth)])),
     "[fixedCosts]",
-    writeRow(["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay", "periodMonths"]),
+    writeRow(["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay", "periodMonths", "isEndOfMonth"]),
     ...fixedCosts.map((item) =>
       writeRow([
         item.id,
@@ -37,7 +37,8 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
         item.paymentOptionId,
         String(item.amount),
         String(item.billingDay),
-        String(item.periodMonths)
+        String(item.periodMonths),
+        String(item.isEndOfMonth)
       ])
     )
   ].join("\n");
@@ -109,7 +110,8 @@ function parseCards(rows: string[][]): PaymentCard[] {
       normalizePaymentCard({
         id: sanitizeId(row[0], "card-imported"),
         label: sanitizeText(row[1], "새 카드"),
-        billingDay: sanitizeNumber(Number(row[2]), 1)
+        billingDay: sanitizeNumber(Number(row[2]), 1),
+        isEndOfMonth: row[3] === "true"
       })
     );
 }
@@ -127,7 +129,8 @@ function parseFixedCosts(rows: string[][]): FixedCost[] {
         paymentOptionId: row[4] ?? "",
         amount: sanitizeNumber(Number(row[5]), 0),
         billingDay: sanitizeNumber(Number(row[6]), 1),
-        periodMonths: sanitizePeriodMonths(Number(row[7]))
+        periodMonths: sanitizePeriodMonths(Number(row[7])),
+        isEndOfMonth: row[8] === "true"
       })
     );
 }

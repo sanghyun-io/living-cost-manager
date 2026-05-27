@@ -172,9 +172,17 @@ export function FixedCostTable({
                   max={31}
                   hideControls
                   clampBehavior="strict"
-                  disabled={item.paymentMethodId === "credit-card" && item.paymentOptionId.length > 0}
+                  disabled={item.isEndOfMonth || (item.paymentMethodId === "credit-card" && item.paymentOptionId.length > 0)}
                   value={item.billingDay}
                   onChange={(value) => onItemChange(item.id, { billingDay: toNumber(value, item.billingDay) })}
+                />
+                <Checkbox
+                  aria-label="말일"
+                  label="말일"
+                  size="xs"
+                  mt={4}
+                  checked={item.isEndOfMonth}
+                  onChange={(event) => onItemChange(item.id, { isEndOfMonth: event.currentTarget.checked })}
                 />
               </span>
               <span>

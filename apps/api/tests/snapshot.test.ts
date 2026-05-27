@@ -95,7 +95,8 @@ function buildSnapshot(workspaceId: string): WorkspaceSnapshot {
         id: "main-card",
         workspaceId,
         label: "Main Card",
-        billingDay: 15
+        billingDay: 15,
+        isEndOfMonth: false
       }
     ],
     fixedCosts: [
@@ -108,7 +109,8 @@ function buildSnapshot(workspaceId: string): WorkspaceSnapshot {
         paymentOptionId: "main-card",
         amount: 300000,
         periodMonths: 2.5,
-        billingDay: 15
+        billingDay: 15,
+        isEndOfMonth: false
       },
       {
         id: "rent",
@@ -119,7 +121,8 @@ function buildSnapshot(workspaceId: string): WorkspaceSnapshot {
         paymentOptionId: "auto-transfer",
         amount: 1200000,
         periodMonths: 1,
-        billingDay: 25
+        billingDay: 25,
+        isEndOfMonth: true
       }
     ]
   };

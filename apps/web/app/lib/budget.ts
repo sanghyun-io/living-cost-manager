@@ -12,6 +12,7 @@ export type FixedCost = {
   amount: number;
   periodMonths: number;
   billingDay: number;
+  isEndOfMonth: boolean;
 };
 
 export type PaymentMethodId = "cash" | "bank-transfer" | "debit-card" | "credit-card" | "other";
@@ -59,6 +60,7 @@ type FixedCostInput = {
   amount: number;
   periodMonths?: number;
   billingDay: number;
+  isEndOfMonth?: boolean;
   paymentMethod?: string;
 };
 
@@ -115,7 +117,8 @@ export function createFixedCost(input: FixedCostInput): FixedCost {
       paymentOptionId: "auto-transfer",
       amount: 0,
       periodMonths: 1,
-      billingDay: 1
+      billingDay: 1,
+      isEndOfMonth: false
     },
     {
       name: input.name,
@@ -124,7 +127,8 @@ export function createFixedCost(input: FixedCostInput): FixedCost {
       paymentOptionId: input.paymentOptionId ?? input.cardId ?? paymentOptionIdFromLegacyPaymentMethod(input.paymentMethod),
       amount: input.amount,
       periodMonths: input.periodMonths ?? 1,
-      billingDay: input.billingDay
+      billingDay: input.billingDay,
+      isEndOfMonth: input.isEndOfMonth ?? false
     }
   );
 }
@@ -141,7 +145,8 @@ export function updateFixedCost(item: FixedCost, patch: Partial<Omit<FixedCost, 
     paymentOptionId: sanitizePaymentOptionId(paymentMethodId, patch.paymentOptionId ?? item.paymentOptionId),
     amount: clampNumber(patch.amount ?? item.amount, 0, Number.MAX_SAFE_INTEGER),
     periodMonths: clampPeriodMonths(patch.periodMonths ?? item.periodMonths ?? 1),
-    billingDay: clampNumber(patch.billingDay ?? item.billingDay, 1, 31)
+    billingDay: clampNumber(patch.billingDay ?? item.billingDay, 1, 31),
+    isEndOfMonth: patch.isEndOfMonth ?? item.isEndOfMonth ?? false
   };
 }
 

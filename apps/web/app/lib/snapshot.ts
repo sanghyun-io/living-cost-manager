@@ -33,7 +33,7 @@ export function hydrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): LocalBudg
   return {
     monthlyIncome: Math.max(0, Math.round(snapshot.monthlyIncome)),
     categories: snapshot.categories.map(({ id, label }) => ({ id, label })),
-    cards: snapshot.cards.map(({ id, label, billingDay }) => normalizePaymentCard({ id, label, billingDay })),
+    cards: snapshot.cards.map(({ id, label, billingDay, isEndOfMonth }) => normalizePaymentCard({ id, label, billingDay, isEndOfMonth })),
     fixedCosts: snapshot.fixedCosts.map(({ workspaceId: _workspaceId, ...fixedCost }) => createFixedCost(fixedCost))
   };
 }

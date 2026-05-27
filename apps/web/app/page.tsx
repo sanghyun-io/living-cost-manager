@@ -88,6 +88,7 @@ export default function Home() {
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [newCardLabel, setNewCardLabel] = useState("");
   const [newCardBillingDay, setNewCardBillingDay] = useState(1);
+  const [newCardIsEndOfMonth, setNewCardIsEndOfMonth] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
@@ -341,7 +342,8 @@ export default function Home() {
     const selectedCard = paymentMethodId === "credit-card" ? cards.find((card) => card.id === item.paymentOptionId) : null;
     handleItemChange(item.id, {
       paymentMethodId,
-      billingDay: selectedCard?.billingDay ?? item.billingDay
+      billingDay: selectedCard?.billingDay ?? item.billingDay,
+      isEndOfMonth: selectedCard?.isEndOfMonth ?? item.isEndOfMonth
     });
   }
 
@@ -349,7 +351,8 @@ export default function Home() {
     const selectedCard = item.paymentMethodId === "credit-card" ? cards.find((card) => card.id === paymentOptionId) : null;
     handleItemChange(item.id, {
       paymentOptionId,
-      billingDay: selectedCard?.billingDay ?? item.billingDay
+      billingDay: selectedCard?.billingDay ?? item.billingDay,
+      isEndOfMonth: selectedCard?.isEndOfMonth ?? item.isEndOfMonth
     });
   }
 
@@ -424,14 +427,27 @@ export default function Home() {
   }
 
   function handleAddCard() {
-    const nextCard = createPaymentCard(newCardLabel, newCardBillingDay);
+    const nextCard = createPaymentCard(newCardLabel, newCardBillingDay, newCardIsEndOfMonth);
     setCards((currentCards) => mergeCards(currentCards, [nextCard]));
     setNewCardLabel("");
     setNewCardBillingDay(1);
+    setNewCardIsEndOfMonth(false);
   }
 
   function handleRenameCard(cardId: string, label: string) {
     setCards((currentCards) => renamePaymentCard(currentCards, cardId, label));
+  }
+
+  function handleUpdateCardEndOfMonth(cardId: string, isEndOfMonth: boolean) {
+    setCards((currentCards) => updatePaymentCard(currentCards, cardId, { isEndOfMonth }));
+    // Propagate to fixed costs paying via this card so their billing date stays in sync.
+    setFixedCosts((items) =>
+      items.map((item) =>
+        item.paymentMethodId === "credit-card" && item.paymentOptionId === cardId
+          ? updateFixedCost(item, { isEndOfMonth })
+          : item
+      )
+    );
   }
 
   function handleUpdateCardBillingDay(cardId: string, billingDay: number) {
@@ -1351,11 +1367,14 @@ export default function Home() {
           cards={cards}
           newCardLabel={newCardLabel}
           newCardBillingDay={newCardBillingDay}
+          newCardIsEndOfMonth={newCardIsEndOfMonth}
           onLabelChange={setNewCardLabel}
           onBillingDayChange={setNewCardBillingDay}
+          onNewCardEndOfMonthChange={setNewCardIsEndOfMonth}
           onAdd={handleAddCard}
           onRename={handleRenameCard}
           onUpdateBillingDay={handleUpdateCardBillingDay}
+          onUpdateEndOfMonth={handleUpdateCardEndOfMonth}
           onDelete={handleDeleteCard}
           onClose={() => setIsCardModalOpen(false)}
         />
