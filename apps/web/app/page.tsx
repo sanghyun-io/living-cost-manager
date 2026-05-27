@@ -74,6 +74,9 @@ import {
 import type { BudgetSnapshot } from "./lib/pageTypes";
 import { emptyBudgetSnapshot, sampleBudgetSnapshot, seedFixedCosts } from "./lib/seedData";
 import { BudgetSummaryCard } from "./components/BudgetSummaryCard";
+import { AppHeader } from "./components/AppHeader";
+import { HeroPanel } from "./components/HeroPanel";
+import { MetricGrid } from "./components/MetricGrid";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -1133,95 +1136,27 @@ export default function Home() {
 
   return (
     <main className="page-shell">
-      <header className="app-header">
-        <span className={saveError ? "save-status save-status-error" : "save-status"}>
-          {saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기")}
-        </span>
-        {serverSession ? (
-          <button className="account-status-pill account-status-connected" type="button" onClick={() => setIsDataModalOpen(true)}>
-            서버 연결됨 · 동기화 관리
-          </button>
-        ) : (
-          <>
-            <button className="secondary-button" type="button" onClick={() => setIsDataModalOpen(true)}>
-              데이터 관리
-            </button>
-            <button className="primary-button" type="button" onClick={() => setIsAuthModalOpen(true)}>
-              클라우드에 저장하기
-            </button>
-          </>
-        )}
-        <strong>{currentUser?.name ?? LOCAL_USER_NAME}</strong>
-        {serverSession ? (
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => {
-              handleServerLogout();
-              handleLogout();
-            }}
-          >
-            서버 로그아웃
-          </button>
-        ) : null}
-      </header>
-      <section className="hero">
-        <div>
-          <p className="section-label">고정비 대시보드</p>
-          <h1>생활비 고정비를 한 화면에서 정리하세요</h1>
-          <p className="hero-copy">
-            매월 또는 몇 개월마다 반복되는 지출을 항목, 납부일, 결제수단별로 모아 보고 월 환산 예산 압박을 바로 확인합니다.
-          </p>
-          <p className="local-note inline-note">
-            {serverSession?.workspace
-              ? "서버 계정이 연결되어 있습니다. 변경 후 데이터 관리에서 서버 동기화를 실행하세요."
-              : "현재 로그인 없이 로컬 저장 중입니다. 로그인해서 클라우드에 저장하면 기기를 바꿔도 데이터를 이어서 사용할 수 있습니다."}
-          </p>
-        </div>
-        <div className="summary-panel" aria-label="이번 달 고정비 요약">
-          <label htmlFor="monthly-income">월 수입</label>
-          <input
-            id="monthly-income"
-            inputMode="numeric"
-            min="0"
-            type="text"
-            value={formatNumberInput(monthlyIncome)}
-            onChange={(event) => handleIncomeChange(event.target.value)}
-          />
-          <p>수입 대비 월 환산 고정비 {summary.expenseRate}%</p>
-          <div className="income-progress" aria-label="수입 대비 월 환산 고정비 비율">
-            <div className="income-progress-fill" style={{ width: progressWidth }} />
-          </div>
-        </div>
-      </section>
+      <AppHeader
+        saveError={saveError}
+        lastSavedAt={lastSavedAt}
+        serverSession={serverSession}
+        currentUserName={currentUser?.name}
+        onOpenData={() => setIsDataModalOpen(true)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onServerLogout={() => {
+          handleServerLogout();
+          handleLogout();
+        }}
+      />
+      <HeroPanel
+        monthlyIncome={monthlyIncome}
+        expenseRate={summary.expenseRate}
+        progressWidth={progressWidth}
+        hasServerWorkspace={Boolean(serverSession?.workspace)}
+        onIncomeChange={handleIncomeChange}
+      />
 
-      <section className="metric-grid" aria-label="핵심 지표">
-        <article>
-          <span>월 환산 고정비</span>
-          <strong>{formatWon(summary.monthlyExpense)}</strong>
-          <small>연 환산 {formatWon(summary.annualExpense)}</small>
-        </article>
-        <article>
-          <span>남는 금액</span>
-          <strong className={summary.remainingIncome < 0 ? "danger-text" : undefined}>
-            {formatWon(summary.remainingIncome)}
-          </strong>
-          <small>{summary.remainingIncome < 0 ? "수입보다 고정비가 큽니다" : "고정비 차감 후"}</small>
-        </article>
-        <article>
-          <span>등록 항목</span>
-          <strong>{fixedCosts.length}개</strong>
-        </article>
-        <article>
-          <span>가장 큰 항목</span>
-          <strong>{summary.highestCost?.name ?? "없음"}</strong>
-          <small>{summary.highestCost ? "월 환산 " + formatWon(getMonthlyEquivalentAmount(summary.highestCost)) : "항목을 추가하세요"}</small>
-        </article>
-        <article>
-          <span>평균 고정비</span>
-          <strong>{formatWon(summary.averageExpense)}</strong>
-        </article>
-      </section>
+      <MetricGrid summary={summary} fixedCostCount={fixedCosts.length} />
 
       <section className="workspace">
         <div className="cost-list">
