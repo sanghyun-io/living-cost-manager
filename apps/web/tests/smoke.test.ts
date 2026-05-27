@@ -596,7 +596,8 @@ describe("server api client", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            token: "token-1",
+            accessToken: "token-1",
+            refreshToken: "refresh-1",
             user: { id: "user-1", email: "mina@example.com", name: "Mina" }
           }),
           {

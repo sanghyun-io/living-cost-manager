@@ -5,7 +5,17 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
-  CORS_ORIGIN: z.url().default("https://sanghyun-io.github.io"),
+  // Comma-separated list of allowed origins (supports running github.io and the
+  // gamja.top domain side by side during the migration).
+  CORS_ORIGIN: z
+    .string()
+    .default("https://living-cost-manager.gamja.top,https://sanghyun-io.github.io")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0)
+    ),
   API_BASE_PATH: z
     .string()
     .trim()
