@@ -79,6 +79,8 @@ import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
 import { ChartSection } from "./components/ChartSection";
 import { FixedCostTable } from "./components/FixedCostTable";
+import { CategoryModal } from "./components/modals/CategoryModal";
+import { CardModal } from "./components/modals/CardModal";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -1757,167 +1759,30 @@ export default function Home() {
       ) : null}
 
       {isCategoryModalOpen ? (
-        <div className="modal-backdrop" onMouseDown={() => setIsCategoryModalOpen(false)}>
-          <section
-            aria-labelledby="category-modal-title"
-            aria-modal="true"
-            className="category-modal"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <p className="section-label">관리</p>
-                <h2 id="category-modal-title">카테고리 관리</h2>
-              </div>
-              <button className="icon-button" type="button" onClick={() => setIsCategoryModalOpen(false)}>
-                닫기
-              </button>
-            </div>
-            <div className="category-create">
-              <label htmlFor="new-category">새 카테고리</label>
-              <input
-                id="new-category"
-                type="text"
-                value={newCategoryLabel}
-                onChange={(event) => setNewCategoryLabel(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleAddCategory();
-                  }
-                }}
-              />
-              <button className="secondary-button" type="button" onClick={handleAddCategory}>
-                추가
-              </button>
-            </div>
-            <div className="category-list">
-              {categories.map((category) => {
-                const isDefault = isDefaultCategory(category.id);
-
-                return (
-                  <div className="category-row" key={category.id}>
-                    <div>
-                      <label className="sr-only" htmlFor={category.id + "-category-label"}>
-                        카테고리명
-                      </label>
-                      <input
-                        id={category.id + "-category-label"}
-                        disabled={isDefault}
-                        type="text"
-                        value={category.label}
-                        onChange={(event) => handleRenameCategory(category.id, event.target.value)}
-                      />
-                      <small>{category.id}</small>
-                    </div>
-                    <button
-                      className="ghost-button"
-                      disabled={isDefault}
-                      type="button"
-                      onClick={() => handleDeleteCategory(category.id)}
-                    >
-                      삭제
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+        <CategoryModal
+          categories={categories}
+          newCategoryLabel={newCategoryLabel}
+          onLabelChange={setNewCategoryLabel}
+          onAdd={handleAddCategory}
+          onRename={handleRenameCategory}
+          onDelete={handleDeleteCategory}
+          onClose={() => setIsCategoryModalOpen(false)}
+        />
       ) : null}
 
       {isCardModalOpen ? (
-        <div className="modal-backdrop" onMouseDown={() => setIsCardModalOpen(false)}>
-          <section
-            aria-labelledby="card-modal-title"
-            aria-modal="true"
-            className="category-modal"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <p className="section-label">관리</p>
-                <h2 id="card-modal-title">카드 관리</h2>
-              </div>
-              <button className="icon-button" type="button" onClick={() => setIsCardModalOpen(false)}>
-                닫기
-              </button>
-            </div>
-            <div className="card-create">
-              <label htmlFor="new-card">카드 이름</label>
-              <label htmlFor="new-card-billing-day">결제일</label>
-              <input
-                id="new-card"
-                type="text"
-                value={newCardLabel}
-                onChange={(event) => setNewCardLabel(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleAddCard();
-                  }
-                }}
-              />
-              <input
-                id="new-card-billing-day"
-                max="31"
-                min="1"
-                type="number"
-                value={newCardBillingDay}
-                onChange={(event) => setNewCardBillingDay(clampBillingDay(parseCurrencyInput(event.target.value)))}
-              />
-              <button className="secondary-button" type="button" onClick={handleAddCard}>
-                추가
-              </button>
-            </div>
-            <div className="category-list">
-              {cards.map((card) => {
-                const isDefault = isDefaultCard(card.id);
-
-                return (
-                  <div className="category-row" key={card.id}>
-                    <div>
-                      <label className="sr-only" htmlFor={card.id + "-card-label"}>
-                        카드명
-                      </label>
-                      <input
-                        id={card.id + "-card-label"}
-                        disabled={isDefault}
-                        type="text"
-                        value={card.label}
-                        onChange={(event) => handleRenameCard(card.id, event.target.value)}
-                      />
-                      <small>{card.id}</small>
-                    </div>
-                    <div>
-                      <label className="sr-only" htmlFor={card.id + "-card-billing-day"}>
-                        카드 결제일
-                      </label>
-                      <input
-                        id={card.id + "-card-billing-day"}
-                        disabled={isDefault}
-                        max="31"
-                        min="1"
-                        type="number"
-                        value={card.billingDay}
-                        onChange={(event) => handleUpdateCardBillingDay(card.id, parseCurrencyInput(event.target.value))}
-                      />
-                      <small>결제일</small>
-                    </div>
-                    <button
-                      className="ghost-button"
-                      disabled={isDefault}
-                      type="button"
-                      onClick={() => handleDeleteCard(card.id)}
-                    >
-                      삭제
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+        <CardModal
+          cards={cards}
+          newCardLabel={newCardLabel}
+          newCardBillingDay={newCardBillingDay}
+          onLabelChange={setNewCardLabel}
+          onBillingDayChange={setNewCardBillingDay}
+          onAdd={handleAddCard}
+          onRename={handleRenameCard}
+          onUpdateBillingDay={handleUpdateCardBillingDay}
+          onDelete={handleDeleteCard}
+          onClose={() => setIsCardModalOpen(false)}
+        />
       ) : null}
     </main>
   );
