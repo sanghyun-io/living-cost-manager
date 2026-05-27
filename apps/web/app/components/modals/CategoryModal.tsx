@@ -1,7 +1,9 @@
+import { Button, Group, Stack, Text, TextInput } from "@mantine/core";
 import { isDefaultCategory, type Category } from "../../lib/budget";
 import { ModalShell } from "./ModalShell";
 
 interface CategoryModalProps {
+  opened: boolean;
   categories: Category[];
   newCategoryLabel: string;
   onLabelChange: (value: string) => void;
@@ -12,6 +14,7 @@ interface CategoryModalProps {
 }
 
 export function CategoryModal({
+  opened,
   categories,
   newCategoryLabel,
   onLabelChange,
@@ -21,50 +24,43 @@ export function CategoryModal({
   onClose
 }: CategoryModalProps) {
   return (
-    <ModalShell titleId="category-modal-title" sectionLabel="관리" title="카테고리 관리" onClose={onClose}>
-      <div className="category-create">
-        <label htmlFor="new-category">새 카테고리</label>
-        <input
-          id="new-category"
-          type="text"
+    <ModalShell opened={opened} sectionLabel="관리" title="카테고리 관리" onClose={onClose}>
+      <Group align="flex-end" gap="xs">
+        <TextInput
+          label="새 카테고리"
+          style={{ flex: 1 }}
           value={newCategoryLabel}
-          onChange={(event) => onLabelChange(event.target.value)}
+          onChange={(event) => onLabelChange(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               onAdd();
             }
           }}
         />
-        <button className="secondary-button" type="button" onClick={onAdd}>
+        <Button variant="default" onClick={onAdd}>
           추가
-        </button>
-      </div>
-      <div className="category-list">
+        </Button>
+      </Group>
+      <Stack gap="xs">
         {categories.map((category) => {
           const isDefault = isDefaultCategory(category.id);
-
           return (
-            <div className="category-row" key={category.id}>
-              <div>
-                <label className="sr-only" htmlFor={category.id + "-category-label"}>
-                  카테고리명
-                </label>
-                <input
-                  id={category.id + "-category-label"}
-                  disabled={isDefault}
-                  type="text"
-                  value={category.label}
-                  onChange={(event) => onRename(category.id, event.target.value)}
-                />
-                <small>{category.id}</small>
-              </div>
-              <button className="ghost-button" disabled={isDefault} type="button" onClick={() => onDelete(category.id)}>
+            <Group key={category.id} gap="xs" align="flex-end" wrap="nowrap">
+              <TextInput
+                aria-label="카테고리명"
+                style={{ flex: 1 }}
+                disabled={isDefault}
+                value={category.label}
+                onChange={(event) => onRename(category.id, event.currentTarget.value)}
+                description={category.id}
+              />
+              <Button variant="subtle" color="rose" disabled={isDefault} onClick={() => onDelete(category.id)}>
                 삭제
-              </button>
-            </div>
+              </Button>
+            </Group>
           );
         })}
-      </div>
+      </Stack>
     </ModalShell>
   );
 }

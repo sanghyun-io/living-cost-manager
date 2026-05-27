@@ -78,6 +78,7 @@ export interface SyncProps {
 
 // Props for the DataModal container (import/export + server sync + sharing).
 export interface DataModalProps {
+  opened: boolean;
   hasServerApi: boolean;
   importFileRef: RefObject<HTMLInputElement | null>;
   backupFileRef: RefObject<HTMLInputElement | null>;

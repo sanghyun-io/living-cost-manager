@@ -223,23 +223,6 @@ export default function Home() {
     }
   }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, monthlyIncome]);
 
-  useEffect(() => {
-    if (!isCategoryModalOpen && !isCardModalOpen && !isDataModalOpen && !isAuthModalOpen) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsCategoryModalOpen(false);
-        setIsCardModalOpen(false);
-        setIsDataModalOpen(false);
-        setIsAuthModalOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCardModalOpen, isCategoryModalOpen, isDataModalOpen, isAuthModalOpen]);
 
   useEffect(() => {
     if ((!isDataModalOpen && !isAuthModalOpen) || !serverSession || !serverApi) {
@@ -1232,8 +1215,8 @@ export default function Home() {
         />
       </section>
 
-      {isDataModalOpen ? (
-        <DataModal
+      <DataModal
+          opened={isDataModalOpen}
           hasServerApi={Boolean(serverApi)}
           importFileRef={importFileRef}
           backupFileRef={backupFileRef}
@@ -1303,10 +1286,9 @@ export default function Home() {
             onDeleteMember: (memberId) => void handleDeleteMember(memberId)
           }}
         />
-      ) : null}
 
-      {isAuthModalOpen ? (
-        <AuthModal
+      <AuthModal
+          opened={isAuthModalOpen}
           hasServerApi={Boolean(serverApi)}
           authView={authView}
           serverAuthMode={serverAuthMode}
@@ -1338,10 +1320,9 @@ export default function Home() {
           onForgotSubmit={() => void handleForgotPassword()}
           onClose={() => setIsAuthModalOpen(false)}
         />
-      ) : null}
 
-      {resetToken ? (
-        <ResetPasswordModal
+      <ResetPasswordModal
+          opened={resetToken !== null}
           resetPasswordValue={resetPasswordValue}
           isServerBusy={isServerBusy}
           serverStatus={serverStatus}
@@ -1353,10 +1334,9 @@ export default function Home() {
             clearAuthQueryParam("reset_token");
           }}
         />
-      ) : null}
 
-      {isCategoryModalOpen ? (
-        <CategoryModal
+      <CategoryModal
+          opened={isCategoryModalOpen}
           categories={categories}
           newCategoryLabel={newCategoryLabel}
           onLabelChange={setNewCategoryLabel}
@@ -1365,10 +1345,9 @@ export default function Home() {
           onDelete={handleDeleteCategory}
           onClose={() => setIsCategoryModalOpen(false)}
         />
-      ) : null}
 
-      {isCardModalOpen ? (
-        <CardModal
+      <CardModal
+          opened={isCardModalOpen}
           cards={cards}
           newCardLabel={newCardLabel}
           newCardBillingDay={newCardBillingDay}
@@ -1380,7 +1359,6 @@ export default function Home() {
           onDelete={handleDeleteCard}
           onClose={() => setIsCardModalOpen(false)}
         />
-      ) : null}
     </main>
   );
 }

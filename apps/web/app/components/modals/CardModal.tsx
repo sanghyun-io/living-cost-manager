@@ -1,8 +1,9 @@
+import { Button, Group, NumberInput, Stack, TextInput } from "@mantine/core";
 import { isDefaultCard, type PaymentCard } from "../../lib/cards";
-import { clampBillingDay, parseCurrencyInput } from "../../lib/formatting";
 import { ModalShell } from "./ModalShell";
 
 interface CardModalProps {
+  opened: boolean;
   cards: PaymentCard[];
   newCardLabel: string;
   newCardBillingDay: number;
@@ -15,7 +16,12 @@ interface CardModalProps {
   onClose: () => void;
 }
 
+function toNumber(value: number | string, fallback: number): number {
+  return typeof value === "number" ? value : fallback;
+}
+
 export function CardModal({
+  opened,
   cards,
   newCardLabel,
   newCardBillingDay,
@@ -28,74 +34,65 @@ export function CardModal({
   onClose
 }: CardModalProps) {
   return (
-    <ModalShell titleId="card-modal-title" sectionLabel="관리" title="카드 관리" onClose={onClose}>
-      <div className="card-create">
-        <label htmlFor="new-card">카드 이름</label>
-        <label htmlFor="new-card-billing-day">결제일</label>
-        <input
-          id="new-card"
-          type="text"
+    <ModalShell opened={opened} sectionLabel="관리" title="카드 관리" onClose={onClose}>
+      <Group align="flex-end" gap="xs">
+        <TextInput
+          label="카드 이름"
+          style={{ flex: 1 }}
           value={newCardLabel}
-          onChange={(event) => onLabelChange(event.target.value)}
+          onChange={(event) => onLabelChange(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               onAdd();
             }
           }}
         />
-        <input
-          id="new-card-billing-day"
-          max="31"
-          min="1"
-          type="number"
+        <NumberInput
+          label="결제일"
+          w={96}
+          min={1}
+          max={31}
+          hideControls
+          clampBehavior="strict"
           value={newCardBillingDay}
-          onChange={(event) => onBillingDayChange(clampBillingDay(parseCurrencyInput(event.target.value)))}
+          onChange={(value) => onBillingDayChange(toNumber(value, 1))}
         />
-        <button className="secondary-button" type="button" onClick={onAdd}>
+        <Button variant="default" onClick={onAdd}>
           추가
-        </button>
-      </div>
-      <div className="category-list">
+        </Button>
+      </Group>
+      <Stack gap="xs">
         {cards.map((card) => {
           const isDefault = isDefaultCard(card.id);
-
           return (
-            <div className="category-row" key={card.id}>
-              <div>
-                <label className="sr-only" htmlFor={card.id + "-card-label"}>
-                  카드명
-                </label>
-                <input
-                  id={card.id + "-card-label"}
-                  disabled={isDefault}
-                  type="text"
-                  value={card.label}
-                  onChange={(event) => onRename(card.id, event.target.value)}
-                />
-                <small>{card.id}</small>
-              </div>
-              <div>
-                <label className="sr-only" htmlFor={card.id + "-card-billing-day"}>
-                  카드 결제일
-                </label>
-                <input
-                  id={card.id + "-card-billing-day"}
-                  disabled={isDefault}
-                  max="31"
-                  min="1"
-                  type="number"
-                  value={card.billingDay}
-                  onChange={(event) => onUpdateBillingDay(card.id, parseCurrencyInput(event.target.value))}
-                />
-                <small>결제일</small>
-              </div>
-              <button className="ghost-button" disabled={isDefault} type="button" onClick={() => onDelete(card.id)}>
+            <Group key={card.id} gap="xs" align="flex-end" wrap="nowrap">
+              <TextInput
+                aria-label="카드명"
+                style={{ flex: 1 }}
+                disabled={isDefault}
+                value={card.label}
+                onChange={(event) => onRename(card.id, event.currentTarget.value)}
+                description={card.id}
+              />
+              <NumberInput
+                aria-label="카드 결제일"
+                w={96}
+                min={1}
+                max={31}
+                hideControls
+                clampBehavior="strict"
+                disabled={isDefault}
+                value={card.billingDay}
+                onChange={(value) => onUpdateBillingDay(card.id, toNumber(value, card.billingDay))}
+                description="결제일"
+              />
+              <Button variant="subtle" color="rose" disabled={isDefault} onClick={() => onDelete(card.id)}>
                 삭제
-              </button>
-            </div>
+              </Button>
+            </Group>
           );
         })}
-      </div>
+      </Stack>
     </ModalShell>
   );
 }
