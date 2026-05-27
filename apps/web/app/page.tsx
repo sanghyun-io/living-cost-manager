@@ -77,6 +77,7 @@ import { BudgetSummaryCard } from "./components/BudgetSummaryCard";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
+import { ChartSection } from "./components/ChartSection";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -1359,76 +1360,18 @@ export default function Home() {
           </div>
         </div>
 
-        <aside className="diagram" aria-label="카테고리별 고정비 비중">
-          <div className="section-heading">
-            <div>
-              <p className="section-label">도식화</p>
-              <h2>카테고리별 비중</h2>
-            </div>
-            <div className="chart-toggle" aria-label="도식화 보기 방식">
-              <button className={chartMode === "bar" ? "active" : undefined} type="button" onClick={() => setChartMode("bar")}>
-                막대
-              </button>
-              <button className={chartMode === "pie" ? "active" : undefined} type="button" onClick={() => setChartMode("pie")}>
-                원형
-              </button>
-            </div>
-          </div>
-          {chartMode === "bar" ? (
-            <div className="bars">
-              {buckets.map((bucket) => (
-                <div className="bar-row" key={bucket.categoryId}>
-                  <div className="bar-meta">
-                    <span>{bucket.label}</span>
-                    <strong>{formatWon(bucket.amount)}</strong>
-                  </div>
-                  <div className="bar-track">
-                    <div
-                      className="bar-fill"
-                      style={{ width: summary.monthlyExpense > 0 ? String((bucket.amount / summary.monthlyExpense) * 100) + "%" : "0%" }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="pie-layout">
-              <div
-                className="pie-chart"
-                style={{ background: pieBackground }}
-                aria-label="카테고리별 원형 차트"
-                onMouseLeave={() => setActivePieSegment(null)}
-                onMouseMove={handlePieMove}
-              >
-                <span>{summary.monthlyExpense > 0 ? "100%" : "0%"}</span>
-                {activePieSegment ? (
-                  <div
-                    className="pie-tooltip"
-                    style={{ left: pieTooltipPosition.x, top: pieTooltipPosition.y }}
-                    role="tooltip"
-                  >
-                    <strong>{activePieSegment.label}</strong>
-                    <span>{formatWon(activePieSegment.amount)}</span>
-                    <small>{activePieSegment.percent}%</small>
-                  </div>
-                ) : null}
-              </div>
-              <div className="pie-legend">
-                {pieSegments.map((segment, index) => (
-                  <div
-                    className={activePieSegment?.categoryId === segment.categoryId ? "pie-legend-row active" : "pie-legend-row"}
-                    key={segment.categoryId}
-                  >
-                    <span className="legend-color" style={{ background: chartColors[index % chartColors.length] }} />
-                    <span>{segment.label}</span>
-                    <strong>{segment.percent}%</strong>
-                    <small>{formatWon(segment.amount)}</small>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </aside>
+        <ChartSection
+          chartMode={chartMode}
+          buckets={buckets}
+          pieSegments={pieSegments}
+          monthlyExpense={summary.monthlyExpense}
+          pieBackground={pieBackground}
+          activePieSegment={activePieSegment}
+          pieTooltipPosition={pieTooltipPosition}
+          onChartModeChange={setChartMode}
+          onPieMove={handlePieMove}
+          onPieLeave={() => setActivePieSegment(null)}
+        />
       </section>
 
       {isDataModalOpen ? (
