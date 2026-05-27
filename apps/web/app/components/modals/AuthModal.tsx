@@ -10,9 +10,15 @@ interface AuthModalProps {
   isServerBusy: boolean;
   serverStatus: string;
   serverErrorKind: "auth" | "request" | null;
+  // Inline (blur-time) validation surfaced for the login/register form.
+  authTouched: { email: boolean; password: boolean };
+  authEmailError: string | null;
+  authPasswordError: string | null;
+  isAuthFormValid: boolean;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onNameChange: (value: string) => void;
+  onBlurField: (field: "email" | "password") => void;
   onModeChange: (mode: "login" | "register") => void;
   onViewChange: (view: "auth" | "forgot") => void;
   onSubmit: () => void;
@@ -30,9 +36,14 @@ export function AuthModal({
   isServerBusy,
   serverStatus,
   serverErrorKind,
+  authTouched,
+  authEmailError,
+  authPasswordError,
+  isAuthFormValid,
   onEmailChange,
   onPasswordChange,
   onNameChange,
+  onBlurField,
   onModeChange,
   onViewChange,
   onSubmit,
@@ -92,7 +103,18 @@ export function AuthModal({
               </div>
               <div className="form-field">
                 <label htmlFor="auth-email">이메일</label>
-                <input id="auth-email" type="email" value={serverEmail} onChange={(event) => onEmailChange(event.target.value)} />
+                <input
+                  id="auth-email"
+                  type="email"
+                  value={serverEmail}
+                  onChange={(event) => onEmailChange(event.target.value)}
+                  onBlur={() => onBlurField("email")}
+                  aria-invalid={authTouched.email && Boolean(authEmailError)}
+                  aria-describedby={authTouched.email && authEmailError ? "auth-email-error" : undefined}
+                />
+                {authTouched.email && authEmailError ? (
+                  <p className="field-error" id="auth-email-error" role="alert">{authEmailError}</p>
+                ) : null}
               </div>
               {serverAuthMode === "register" ? (
                 <div className="form-field">
@@ -107,9 +129,17 @@ export function AuthModal({
                   type="password"
                   value={serverPassword}
                   onChange={(event) => onPasswordChange(event.target.value)}
+                  onBlur={() => onBlurField("password")}
+                  aria-invalid={authTouched.password && Boolean(authPasswordError)}
+                  aria-describedby={authTouched.password && authPasswordError ? "auth-password-error" : undefined}
                 />
+                {authTouched.password && authPasswordError ? (
+                  <p className="field-error" id="auth-password-error" role="alert">{authPasswordError}</p>
+                ) : (
+                  <p className="field-hint">비밀번호는 8자 이상이어야 합니다.</p>
+                )}
               </div>
-              <button className="primary-button" disabled={isServerBusy} type="submit">
+              <button className="primary-button" disabled={isServerBusy || !isAuthFormValid} type="submit">
                 {serverAuthMode === "register" ? "가입하고 클라우드에 저장" : "로그인"}
               </button>
             </form>
