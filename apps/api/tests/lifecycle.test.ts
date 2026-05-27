@@ -19,7 +19,7 @@ test("loadEnv validates supplied configuration without reading process.env", () 
   expect(loaded).toMatchObject({
     NODE_ENV: "development",
     PORT: 4000,
-    CORS_ORIGIN: "https://sanghyun-io.github.io"
+    CORS_ORIGIN: ["https://living-cost-manager.gamja.top", "https://sanghyun-io.github.io"]
   });
 });
 

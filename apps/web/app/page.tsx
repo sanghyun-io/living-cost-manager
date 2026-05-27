@@ -311,18 +311,44 @@ export default function Home() {
     void refreshRestoredServerSession(serverSession);
   }, [isBootLoaded, serverApi, serverSession]);
 
-  // Detect a password-reset link (?token=... on /reset-password) and open the
-  // reset view. Runs once on mount.
+  // Handle auth deep links delivered by email. The app is a static-export SPA
+  // served only at "/", so links use root query params: ?reset_token / ?verify_token.
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !serverApi) {
       return;
     }
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
-    if (token && window.location.pathname.includes("reset-password")) {
-      setResetToken(token);
+
+    const reset = params.get("reset_token");
+    if (reset) {
+      setResetToken(reset);
+      return;
     }
-  }, []);
+
+    const verify = params.get("verify_token");
+    if (verify) {
+      clearAuthQueryParam("verify_token");
+      void serverApi
+        .verifyEmail(verify)
+        .then(() => {
+          setServerStatus("이메일 인증이 완료되었습니다.");
+          setServerSession((current) => {
+            if (!current) {
+              return current;
+            }
+            const updated = { ...current, user: { ...current.user, emailVerified: true } };
+            saveServerSession(updated);
+            return updated;
+          });
+        })
+        .catch(() => {
+          setServerStatus("이메일 인증 링크가 유효하지 않거나 만료되었습니다.");
+        })
+        .finally(() => {
+          setIsDataModalOpen(true);
+        });
+    }
+  }, [serverApi]);
 
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
   const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
@@ -619,7 +645,7 @@ export default function Home() {
       await serverApi.resetPassword(resetToken, resetPasswordValue);
       setResetPasswordValue("");
       setResetToken(null);
-      clearAuthQueryParam("token");
+      clearAuthQueryParam("reset_token");
       setServerAuthMode("login");
       setAuthView("auth");
       setIsAuthModalOpen(true);
@@ -2006,7 +2032,7 @@ export default function Home() {
       ) : null}
 
       {resetToken ? (
-        <div className="modal-backdrop" onMouseDown={() => { setResetToken(null); clearAuthQueryParam("token"); }}>
+        <div className="modal-backdrop" onMouseDown={() => { setResetToken(null); clearAuthQueryParam("reset_token"); }}>
           <section
             aria-labelledby="reset-modal-title"
             aria-modal="true"
@@ -2019,7 +2045,7 @@ export default function Home() {
                 <p className="section-label">클라우드</p>
                 <h2 id="reset-modal-title">비밀번호 재설정</h2>
               </div>
-              <button className="icon-button" type="button" onClick={() => { setResetToken(null); clearAuthQueryParam("token"); }}>
+              <button className="icon-button" type="button" onClick={() => { setResetToken(null); clearAuthQueryParam("reset_token"); }}>
                 닫기
               </button>
             </div>

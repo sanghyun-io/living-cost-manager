@@ -84,7 +84,8 @@ async function issueVerificationEmail(app: FastifyInstance, user: { id: string; 
       expiresAt: expiryFromNow(app.appEnv.EMAIL_VERIFICATION_TTL)
     }
   });
-  const link = `${app.appEnv.APP_BASE_URL}/verify-email?token=${encodeURIComponent(raw)}`;
+  // Root path + query param so the static-export SPA (single / route) can handle it.
+  const link = `${app.appEnv.APP_BASE_URL}/?verify_token=${encodeURIComponent(raw)}`;
   await app.email.sendVerification(user.email, link);
 }
 
@@ -250,7 +251,7 @@ export async function authRoutes(app: FastifyInstance) {
             expiresAt: expiryFromNow(app.appEnv.PASSWORD_RESET_TTL)
           }
         });
-        const link = `${app.appEnv.APP_BASE_URL}/reset-password?token=${encodeURIComponent(raw)}`;
+        const link = `${app.appEnv.APP_BASE_URL}/?reset_token=${encodeURIComponent(raw)}`;
         try {
           await app.email.sendPasswordReset(user.email, link);
         } catch (mailError) {
