@@ -414,7 +414,7 @@ small {
 
 .table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 72px 112px;
+  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 92px 112px;
   gap: 10px;
   align-items: center;
   min-height: 62px;
@@ -426,7 +426,7 @@ small {
 }
 
 .table-row.delete-mode {
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 72px 112px 64px;
+  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 92px 112px 64px;
 }
 
 .table-row:not(.table-head):hover {
@@ -461,7 +461,17 @@ small {
 }
 
 .period-input {
-  padding-right: 44px;
+  padding-right: 40px;
+  /* Hide number spinners so the value isn't pushed out of the narrow cell;
+     the "개월" suffix label sits over the right padding instead. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.period-input::-webkit-outer-spin-button,
+.period-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .input-suffix {
