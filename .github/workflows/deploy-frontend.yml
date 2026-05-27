@@ -53,4 +53,8 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Force npm so the action installs wrangler itself instead of trying
+          # `pnpm exec wrangler` (wrangler is not a project dependency).
+          packageManager: npm
+          wranglerVersion: "4.42.0"
           command: pages deploy apps/web/out --project-name=living-cost-manager --branch=main
