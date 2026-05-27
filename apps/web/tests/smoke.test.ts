@@ -81,7 +81,9 @@ describe("fixed cost dashboard", () => {
     });
 
     expect(updated.amount).toBe(0);
-    expect(updated.periodMonths).toBe(1);
+    // periodMonths now allows 0 (any non-negative, one decimal place); only
+    // negatives are floored to 0.
+    expect(updated.periodMonths).toBe(0);
     expect(updated.billingDay).toBe(31);
     expect(updated.categoryId).toBe("insurance");
     expect(updated.paymentMethodId).toBe("credit-card");
@@ -93,6 +95,23 @@ describe("fixed cost dashboard", () => {
 
     expect(item.periodMonths).toBe(2.6);
     expect(updateFixedCost(item, { periodMonths: 1.24 }).periodMonths).toBe(1.2);
+  });
+
+  test("supports sub-monthly periods and guards zero-month division", () => {
+    const base = createFixedCost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000, billingDay: 25 });
+
+    // 0.5-month period -> doubled monthly equivalent
+    const half = updateFixedCost(base, { periodMonths: 0.5 });
+    expect(half.periodMonths).toBe(0.5);
+    expect(getMonthlyEquivalentAmount(half)).toBe(1300000);
+
+    // 0-month period is allowed but yields a 0 monthly equivalent (no divide-by-zero)
+    const zero = updateFixedCost(base, { periodMonths: 0 });
+    expect(zero.periodMonths).toBe(0);
+    expect(getMonthlyEquivalentAmount(zero)).toBe(0);
+
+    // negatives floor to 0
+    expect(updateFixedCost(base, { periodMonths: -3 }).periodMonths).toBe(0);
   });
 
   test("keeps payment option empty except for supported payment methods", () => {
