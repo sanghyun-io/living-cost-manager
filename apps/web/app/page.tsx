@@ -308,7 +308,6 @@ export default function Home() {
     () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
     [visibleFixedCosts]
   );
-  const progressWidth = String(Math.min(summary.expenseRate, 100)) + "%";
   const pieBackground = buildPieBackground(pieSegments);
   const currentServerMember = useMemo(
     () => findCurrentMember(members, serverSession?.user.id),
@@ -347,8 +346,8 @@ export default function Home() {
     accountSyncState === "signed-in" && lastServerSyncedAt && isServerSyncCurrent ? "synced" : accountSyncState;
   const syncStateView = getSyncStateView(displayedSyncState);
 
-  function handleIncomeChange(value: string) {
-    setMonthlyIncome(parseCurrencyInput(value));
+  function handleIncomeChange(value: number) {
+    setMonthlyIncome(Math.max(0, Math.round(value)));
   }
 
   function handleItemChange(id: string, patch: Partial<Omit<FixedCost, "id">>) {
@@ -1186,7 +1185,6 @@ export default function Home() {
       <HeroPanel
         monthlyIncome={monthlyIncome}
         expenseRate={summary.expenseRate}
-        progressWidth={progressWidth}
         hasServerWorkspace={Boolean(serverSession?.workspace)}
         onIncomeChange={handleIncomeChange}
       />

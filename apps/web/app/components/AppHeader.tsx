@@ -1,3 +1,4 @@
+import { Badge, Button, Group, Text } from "@mantine/core";
 import { LOCAL_USER_NAME } from "../lib/users";
 import { formatSaveTime } from "../lib/formatting";
 import type { ServerSession } from "../lib/serverApi";
@@ -22,31 +23,31 @@ export function AppHeader({
   onOpenAuth,
   onServerLogout
 }: AppHeaderProps) {
+  const saveLabel = saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
+
   return (
-    <header className="app-header">
-      <span className={saveError ? "save-status save-status-error" : "save-status"}>
-        {saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기")}
-      </span>
+    <Group component="header" className="app-header" justify="flex-end" gap="sm" wrap="wrap">
+      <Badge variant="light" color={saveError ? "rose" : "gray"} size="lg" radius="sm">
+        {saveLabel}
+      </Badge>
       {serverSession ? (
-        <button className="account-status-pill account-status-connected" type="button" onClick={onOpenData}>
+        <Button variant="light" color="teal" onClick={onOpenData}>
           서버 연결됨 · 동기화 관리
-        </button>
+        </Button>
       ) : (
         <>
-          <button className="secondary-button" type="button" onClick={onOpenData}>
+          <Button variant="default" onClick={onOpenData}>
             데이터 관리
-          </button>
-          <button className="primary-button" type="button" onClick={onOpenAuth}>
-            클라우드에 저장하기
-          </button>
+          </Button>
+          <Button onClick={onOpenAuth}>클라우드에 저장하기</Button>
         </>
       )}
-      <strong>{currentUserName ?? LOCAL_USER_NAME}</strong>
+      <Text fw={700}>{currentUserName ?? LOCAL_USER_NAME}</Text>
       {serverSession ? (
-        <button className="secondary-button" type="button" onClick={onServerLogout}>
+        <Button variant="default" onClick={onServerLogout}>
           서버 로그아웃
-        </button>
+        </Button>
       ) : null}
-    </header>
+    </Group>
   );
 }

@@ -1,6 +1,7 @@
+import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
-import { formatNumberInput, formatWon, getPaymentOptions, parseCurrencyInput, parsePeriodInput } from "../lib/formatting";
+import { formatWon, getPaymentOptions } from "../lib/formatting";
 
 interface FixedCostTableProps {
   categories: Category[];
@@ -25,6 +26,10 @@ interface FixedCostTableProps {
   onOpenData: () => void;
 }
 
+function toNumber(value: number | string, fallback: number): number {
+  return typeof value === "number" ? value : fallback;
+}
+
 export function FixedCostTable({
   categories,
   cards,
@@ -47,56 +52,61 @@ export function FixedCostTable({
   onOpenCard,
   onOpenData
 }: FixedCostTableProps) {
+  const categoryData = categories.map((c) => ({ value: c.id, label: c.label }));
+  const filterData = [{ value: "all", label: "전체" }, ...categoryData];
+  const methodData = PAYMENT_METHODS.map((m) => ({ value: m.id, label: m.label }));
+
   return (
     <div className="cost-list">
       <div className="section-heading">
         <div>
-          <p className="section-label">납부 일정</p>
-          <h2>고정비 항목</h2>
+          <Text className="section-label">납부 일정</Text>
+          <Title order={2}>고정비 항목</Title>
         </div>
         {isDeleteMode ? (
-          <div className="action-group delete-actions">
-            <span className="selection-count">{selectedDeleteIds.length}개 선택</span>
-            <button className="secondary-button" type="button" onClick={onCancelDeleteMode}>
+          <Group className="action-group delete-actions" gap="xs">
+            <Text size="sm" c="dimmed">{selectedDeleteIds.length}개 선택</Text>
+            <Button variant="default" onClick={onCancelDeleteMode}>
               취소
-            </button>
-            <button className="danger-button" type="button" onClick={onConfirmDeleteItems}>
+            </Button>
+            <Button color="rose" onClick={onConfirmDeleteItems}>
               선택 삭제
-            </button>
-          </div>
+            </Button>
+          </Group>
         ) : (
-          <div className="action-group">
-            <button className="secondary-button" type="button" onClick={onOpenCategory}>
+          <Group className="action-group" gap="xs">
+            <Button variant="default" onClick={onOpenCategory}>
               카테고리 관리
-            </button>
-            <button className="secondary-button" type="button" onClick={onOpenCard}>
+            </Button>
+            <Button variant="default" onClick={onOpenCard}>
               카드 관리
-            </button>
-            <button className="secondary-button" type="button" onClick={onOpenData}>
+            </Button>
+            <Button variant="default" onClick={onOpenData}>
               데이터 관리
-            </button>
-            <button className="warning-button" type="button" onClick={onEnterDeleteMode}>
+            </Button>
+            <Button color="orange" variant="light" onClick={onEnterDeleteMode}>
               삭제 모드
-            </button>
-            <button className="primary-button" type="button" onClick={onAddItem}>
-              항목 추가
-            </button>
-          </div>
+            </Button>
+            <Button onClick={onAddItem}>항목 추가</Button>
+          </Group>
         )}
       </div>
-      {importMessage ? <p className="import-status">{importMessage}</p> : null}
+      {importMessage ? (
+        <Alert color="teal" variant="light" mb="sm">
+          {importMessage}
+        </Alert>
+      ) : null}
       <div className="filter-bar" aria-label="카테고리 필터">
-        <label htmlFor="category-filter">카테고리 보기</label>
-        <select id="category-filter" value={categoryFilterId} onChange={(event) => onFilterChange(event.target.value)}>
-          <option value="all">전체</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.label}
-            </option>
-          ))}
-        </select>
-        <span>{visibleFixedCosts.length}개 항목</span>
-        <strong>월 환산 {formatWon(visibleFixedCostTotal)}</strong>
+        <Select
+          label="카테고리 보기"
+          data={filterData}
+          value={categoryFilterId}
+          onChange={(value) => onFilterChange(value ?? "all")}
+          allowDeselect={false}
+          size="sm"
+        />
+        <Text size="sm">{visibleFixedCosts.length}개 항목</Text>
+        <Text size="sm" fw={700}>월 환산 {formatWon(visibleFixedCostTotal)}</Text>
       </div>
       <div className="table" role="table" aria-label="고정비 목록">
         <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} role="row">
@@ -110,132 +120,108 @@ export function FixedCostTable({
           <span>월 환산</span>
           {isDeleteMode ? <span>선택</span> : null}
         </div>
-        {visibleFixedCosts.map((item) => (
-          <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="row" key={item.id}>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-name"}>
-                항목명
-              </label>
-              <input
-                id={item.id + "-name"}
-                type="text"
-                value={item.name}
-                onChange={(event) => onItemChange(item.id, { name: event.target.value })}
-              />
-            </span>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-category"}>
-                카테고리
-              </label>
-              <select
-                id={item.id + "-category"}
-                value={item.categoryId}
-                onChange={(event) => onItemChange(item.id, { categoryId: event.target.value })}
-              >
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </span>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-payment-method"}>
-                결제수단
-              </label>
-              <select
-                id={item.id + "-payment-method"}
-                value={item.paymentMethodId}
-                onChange={(event) => onPaymentMethodChange(item, event.target.value as FixedCost["paymentMethodId"])}
-              >
-                {PAYMENT_METHODS.map((method) => (
-                  <option key={method.id} value={method.id}>
-                    {method.label}
-                  </option>
-                ))}
-              </select>
-            </span>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-payment"}>
-                결제 옵션
-              </label>
-              <select
-                id={item.id + "-payment"}
-                value={item.paymentOptionId}
-                onChange={(event) => onPaymentOptionChange(item, event.target.value)}
-                disabled={getPaymentOptions(item.paymentMethodId, cards).length === 0}
-              >
-                {getPaymentOptions(item.paymentMethodId, cards).length === 0 ? <option value=""></option> : null}
-                {getPaymentOptions(item.paymentMethodId, cards).map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </span>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-billing-day"}>
-                납부일
-              </label>
-              <input
-                id={item.id + "-billing-day"}
-                disabled={item.paymentMethodId === "credit-card" && item.paymentOptionId.length > 0}
-                max="31"
-                min="1"
-                type="number"
-                value={item.billingDay}
-                onChange={(event) => onItemChange(item.id, { billingDay: parseCurrencyInput(event.target.value) })}
-              />
-            </span>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-amount"}>
-                금액
-              </label>
-              <input
-                id={item.id + "-amount"}
-                inputMode="numeric"
-                min="0"
-                type="text"
-                value={formatNumberInput(item.amount)}
-                onChange={(event) => onItemChange(item.id, { amount: parseCurrencyInput(event.target.value) })}
-              />
-            </span>
-            <span>
-              <label className="sr-only" htmlFor={item.id + "-period"}>
-                주기
-              </label>
-              <input
-                id={item.id + "-period"}
-                className="period-input"
-                inputMode="numeric"
-                max="120"
-                min="1"
-                step="0.1"
-                type="number"
-                value={item.periodMonths}
-                onChange={(event) => onItemChange(item.id, { periodMonths: parsePeriodInput(event.target.value) })}
-              />
-              <small className="input-suffix">개월</small>
-            </span>
-            <span className="monthly-equivalent-cell">
-              <strong>{formatWon(getMonthlyEquivalentAmount(item))}</strong>
-              <small>{item.periodMonths}개월 기준</small>
-            </span>
-            {isDeleteMode ? (
-              <span className="delete-select-cell">
-                <label className="delete-checkbox" htmlFor={item.id + "-delete"}>
-                  <input
+        {visibleFixedCosts.map((item) => {
+          const options = getPaymentOptions(item.paymentMethodId, cards);
+          const optionData = options.map((o) => ({ value: o.id, label: o.label }));
+          return (
+            <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="row" key={item.id}>
+              <span>
+                <TextInput
+                  aria-label="항목명"
+                  size="xs"
+                  value={item.name}
+                  onChange={(event) => onItemChange(item.id, { name: event.currentTarget.value })}
+                />
+              </span>
+              <span>
+                <Select
+                  aria-label="카테고리"
+                  size="xs"
+                  data={categoryData}
+                  value={item.categoryId}
+                  onChange={(value) => onItemChange(item.id, { categoryId: value ?? item.categoryId })}
+                  allowDeselect={false}
+                />
+              </span>
+              <span>
+                <Select
+                  aria-label="결제수단"
+                  size="xs"
+                  data={methodData}
+                  value={item.paymentMethodId}
+                  onChange={(value) => onPaymentMethodChange(item, (value ?? item.paymentMethodId) as FixedCost["paymentMethodId"])}
+                  allowDeselect={false}
+                />
+              </span>
+              <span>
+                <Select
+                  aria-label="결제 옵션"
+                  size="xs"
+                  data={optionData}
+                  value={item.paymentOptionId || null}
+                  onChange={(value) => onPaymentOptionChange(item, value ?? "")}
+                  disabled={optionData.length === 0}
+                  placeholder=""
+                />
+              </span>
+              <span>
+                <NumberInput
+                  aria-label="납부일"
+                  size="xs"
+                  min={1}
+                  max={31}
+                  hideControls
+                  clampBehavior="strict"
+                  disabled={item.paymentMethodId === "credit-card" && item.paymentOptionId.length > 0}
+                  value={item.billingDay}
+                  onChange={(value) => onItemChange(item.id, { billingDay: toNumber(value, item.billingDay) })}
+                />
+              </span>
+              <span>
+                <NumberInput
+                  aria-label="금액"
+                  size="xs"
+                  min={0}
+                  thousandSeparator=","
+                  allowDecimal={false}
+                  allowNegative={false}
+                  hideControls
+                  value={item.amount}
+                  onChange={(value) => onItemChange(item.id, { amount: toNumber(value, 0) })}
+                />
+              </span>
+              <span>
+                <NumberInput
+                  aria-label="주기"
+                  size="xs"
+                  min={1}
+                  max={120}
+                  step={0.1}
+                  decimalScale={1}
+                  suffix=" 개월"
+                  hideControls
+                  clampBehavior="strict"
+                  value={item.periodMonths}
+                  onChange={(value) => onItemChange(item.id, { periodMonths: toNumber(value, item.periodMonths) })}
+                />
+              </span>
+              <span className="monthly-equivalent-cell">
+                <Text fw={700} size="sm">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
+                <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
+              </span>
+              {isDeleteMode ? (
+                <span className="delete-select-cell">
+                  <Checkbox
+                    aria-label="삭제 선택"
+                    color="rose"
                     checked={selectedDeleteIds.includes(item.id)}
-                    id={item.id + "-delete"}
-                    type="checkbox"
                     onChange={() => onToggleDeleteSelection(item.id)}
                   />
-                  <span className="sr-only">삭제 선택</span>
-                </label>
-              </span>
-            ) : null}
-          </div>
-        ))}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
