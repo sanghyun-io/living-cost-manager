@@ -178,7 +178,12 @@ export function getCategoryBuckets(items: FixedCost[], categories: Category[]): 
 }
 
 export function getMonthlyEquivalentAmount(item: FixedCost): number {
-  return Math.round(item.amount / Math.max(1, item.periodMonths));
+  // A period of 0 months has no meaningful monthly equivalent; treat as 0
+  // to avoid divide-by-zero (Infinity/NaN).
+  if (item.periodMonths <= 0) {
+    return 0;
+  }
+  return Math.round(item.amount / item.periodMonths);
 }
 
 export function getCategoryLabel(categories: Category[], categoryId: string): string {
@@ -299,8 +304,10 @@ function clampPeriodMonths(value: number): number {
     return 1;
   }
 
+  // Allow any non-negative value rounded to one decimal place (0 is permitted;
+  // monthly-equivalent guards against the resulting divide-by-zero).
   const rounded = Math.round(value * 10) / 10;
-  return Math.min(120, Math.max(1, rounded));
+  return Math.min(120, Math.max(0, rounded));
 }
 
 function sanitizeCategoryId(value: string): string {

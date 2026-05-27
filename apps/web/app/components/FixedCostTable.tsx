@@ -194,13 +194,13 @@ export function FixedCostTable({
                 <NumberInput
                   aria-label="주기"
                   size="xs"
-                  min={1}
+                  min={0}
                   max={120}
-                  step={0.1}
+                  step={0.5}
                   decimalScale={1}
                   suffix=" 개월"
                   hideControls
-                  clampBehavior="strict"
+                  allowNegative={false}
                   value={item.periodMonths}
                   onChange={(value) => onItemChange(item.id, { periodMonths: toNumber(value, item.periodMonths) })}
                 />
