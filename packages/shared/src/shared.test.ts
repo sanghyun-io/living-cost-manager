@@ -23,6 +23,7 @@ const minimalFixedCost = {
   amount: 1000000,
   periodMonths: 2.5,
   billingDay: 1,
+  isEndOfMonth: false,
 };
 
 describe("shared api contracts", () => {
@@ -74,6 +75,7 @@ describe("shared api contracts", () => {
           workspaceId: "workspace-1",
           label: "Main Card",
           billingDay: 15,
+          isEndOfMonth: false,
         },
       ],
       fixedCosts: [
