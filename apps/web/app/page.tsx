@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { InvitationRole, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
 import {
-  BANK_TRANSFER_OPTIONS,
   buildBudgetSummary,
   createCategory,
   createFixedCost,
@@ -13,8 +12,6 @@ import {
   getMonthlyEquivalentAmount,
   getCategoryPieSegments,
   getPieSegmentAtPercent,
-  isDefaultCategory,
-  PAYMENT_METHODS,
   renameCategory,
   updateFixedCost,
   type Category,
@@ -27,8 +24,6 @@ import {
   createPaymentCard,
   DEFAULT_CARDS,
   deletePaymentCard,
-  isDefaultCard,
-  normalizePaymentCard,
   renamePaymentCard,
   updatePaymentCard,
   type PaymentCard
@@ -50,26 +45,19 @@ import {
   isWorkspaceSnapshotEmpty,
   type LocalBudgetSnapshot
 } from "./lib/snapshot";
-import { canManageSharing, canSyncWorkspace, findCurrentMember, invitationRoleLabels, workspaceRoleLabels } from "./lib/sharing";
+import { canManageSharing, canSyncWorkspace, findCurrentMember } from "./lib/sharing";
 import {
   getAccountSyncState,
   getSyncStateView,
   summarizeBudgetSnapshot,
-  type AccountSyncState,
-  type BudgetSnapshotSummary
+  type AccountSyncState
 } from "./lib/syncStatus";
 import {
   buildPieBackground,
-  chartColors,
   clampBillingDay,
-  formatNumberInput,
-  formatSaveTime,
-  formatWon,
-  getPaymentOptions,
   mergeCards,
   mergeCategories,
-  parseCurrencyInput,
-  parsePeriodInput
+  parseCurrencyInput
 } from "./lib/formatting";
 import type { BudgetSnapshot } from "./lib/pageTypes";
 import { emptyBudgetSnapshot, sampleBudgetSnapshot, seedFixedCosts } from "./lib/seedData";
@@ -1278,6 +1266,7 @@ export default function Home() {
         />
       ) : null}
 
+      {isAuthModalOpen ? (
         <AuthModal
           hasServerApi={Boolean(serverApi)}
           authView={authView}
