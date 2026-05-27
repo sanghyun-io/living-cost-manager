@@ -1,4 +1,4 @@
-import { Button, Group, NumberInput, Stack, TextInput } from "@mantine/core";
+import { Button, Checkbox, Group, NumberInput, Stack, TextInput } from "@mantine/core";
 import { isDefaultCard, type PaymentCard } from "../../lib/cards";
 import { ModalShell } from "./ModalShell";
 
@@ -7,11 +7,14 @@ interface CardModalProps {
   cards: PaymentCard[];
   newCardLabel: string;
   newCardBillingDay: number;
+  newCardIsEndOfMonth: boolean;
   onLabelChange: (value: string) => void;
   onBillingDayChange: (value: number) => void;
+  onNewCardEndOfMonthChange: (value: boolean) => void;
   onAdd: () => void;
   onRename: (id: string, label: string) => void;
   onUpdateBillingDay: (id: string, billingDay: number) => void;
+  onUpdateEndOfMonth: (id: string, value: boolean) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 }
@@ -25,11 +28,14 @@ export function CardModal({
   cards,
   newCardLabel,
   newCardBillingDay,
+  newCardIsEndOfMonth,
   onLabelChange,
   onBillingDayChange,
+  onNewCardEndOfMonthChange,
   onAdd,
   onRename,
   onUpdateBillingDay,
+  onUpdateEndOfMonth,
   onDelete,
   onClose
 }: CardModalProps) {
@@ -54,8 +60,15 @@ export function CardModal({
           max={31}
           hideControls
           clampBehavior="strict"
+          disabled={newCardIsEndOfMonth}
           value={newCardBillingDay}
           onChange={(value) => onBillingDayChange(toNumber(value, 1))}
+        />
+        <Checkbox
+          label="말일"
+          size="sm"
+          checked={newCardIsEndOfMonth}
+          onChange={(event) => onNewCardEndOfMonthChange(event.currentTarget.checked)}
         />
         <Button variant="default" onClick={onAdd}>
           추가
@@ -81,10 +94,18 @@ export function CardModal({
                 max={31}
                 hideControls
                 clampBehavior="strict"
-                disabled={isDefault}
+                disabled={isDefault || card.isEndOfMonth}
                 value={card.billingDay}
                 onChange={(value) => onUpdateBillingDay(card.id, toNumber(value, card.billingDay))}
                 description="결제일"
+              />
+              <Checkbox
+                aria-label="말일"
+                label="말일"
+                size="sm"
+                disabled={isDefault}
+                checked={card.isEndOfMonth}
+                onChange={(event) => onUpdateEndOfMonth(card.id, event.currentTarget.checked)}
               />
               <Button variant="subtle" color="rose" disabled={isDefault} onClick={() => onDelete(card.id)}>
                 삭제

@@ -4,17 +4,19 @@ export type PaymentCard = {
   id: string;
   label: string;
   billingDay: number;
+  isEndOfMonth: boolean;
 };
 
 export const DEFAULT_CARDS: PaymentCard[] = [];
 
-export function createPaymentCard(label: string, billingDay = 1): PaymentCard {
+export function createPaymentCard(label: string, billingDay = 1, isEndOfMonth = false): PaymentCard {
   const cleanLabel = sanitizeText(label, "새 카드");
 
   return {
     id: legacyCardIdMap[cleanLabel] ?? "card-" + slugifyLabel(cleanLabel),
     label: cleanLabel,
-    billingDay: sanitizeBillingDay(billingDay)
+    billingDay: sanitizeBillingDay(billingDay),
+    isEndOfMonth
   };
 }
 
@@ -36,7 +38,8 @@ export function updatePaymentCard(cards: PaymentCard[], cardId: string, patch: P
       ? {
           ...card,
           label: patch.label === undefined ? card.label : sanitizeText(patch.label, card.label),
-          billingDay: patch.billingDay === undefined ? card.billingDay : sanitizeBillingDay(patch.billingDay)
+          billingDay: patch.billingDay === undefined ? card.billingDay : sanitizeBillingDay(patch.billingDay),
+          isEndOfMonth: patch.isEndOfMonth === undefined ? card.isEndOfMonth : patch.isEndOfMonth
         }
       : card
   );
@@ -78,7 +81,8 @@ export function normalizePaymentCard(card: PaymentCard): PaymentCard {
   return {
     ...card,
     label: sanitizeText(card.label, "새 카드"),
-    billingDay: sanitizeBillingDay(card.billingDay)
+    billingDay: sanitizeBillingDay(card.billingDay),
+    isEndOfMonth: card.isEndOfMonth ?? false
   };
 }
 

@@ -25,6 +25,7 @@ export const paymentCardDtoSchema = z.object({
   workspaceId: idSchema,
   label: z.string().min(1),
   billingDay: billingDaySchema,
+  isEndOfMonth: z.boolean(),
 });
 
 export const fixedCostDtoSchema = z.object({
@@ -41,6 +42,7 @@ export const fixedCostDtoSchema = z.object({
     .max(120)
     .multipleOf(0.1),
   billingDay: billingDaySchema,
+  isEndOfMonth: z.boolean(),
 });
 
 export type PaymentMethodId = z.infer<typeof paymentMethodIdSchema>;
