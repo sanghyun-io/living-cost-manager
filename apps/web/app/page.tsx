@@ -38,6 +38,7 @@ import {
   createServerApiClient,
   isServerAuthFailure,
   resolveServerSessionWorkspace,
+  ServerApiError,
   SERVER_SESSION_STORAGE_KEY,
   type CreatedInvitation,
   type ServerSession
@@ -566,6 +567,16 @@ export default function Home() {
       return;
     }
 
+    const validationError =
+      validateEmail(serverEmail) ??
+      validatePassword(serverPassword) ??
+      (serverAuthMode === "register" ? validateName(serverName) : null);
+    if (validationError) {
+      setServerErrorKind("request");
+      setServerStatus(validationError);
+      return;
+    }
+
     setIsServerBusy(true);
     setServerStatus("");
     setServerErrorKind(null);
@@ -620,6 +631,12 @@ export default function Home() {
     if (!serverApi) {
       return;
     }
+    const validationError = validateEmail(serverEmail);
+    if (validationError) {
+      setServerErrorKind("request");
+      setServerStatus(validationError);
+      return;
+    }
     setIsServerBusy(true);
     setServerStatus("");
     setServerErrorKind(null);
@@ -636,6 +653,12 @@ export default function Home() {
 
   async function handleResetPassword() {
     if (!serverApi || !resetToken) {
+      return;
+    }
+    const validationError = validatePassword(resetPasswordValue);
+    if (validationError) {
+      setServerErrorKind("request");
+      setServerStatus(validationError);
       return;
     }
     setIsServerBusy(true);
@@ -660,6 +683,17 @@ export default function Home() {
 
   async function handleChangePassword() {
     if (!serverApi || !serverSession) {
+      return;
+    }
+    if (!changeCurrentPassword) {
+      setServerErrorKind("request");
+      setServerStatus("현재 비밀번호를 입력해주세요.");
+      return;
+    }
+    const newPasswordError = validatePassword(changeNewPassword);
+    if (newPasswordError) {
+      setServerErrorKind("request");
+      setServerStatus(newPasswordError === "비밀번호를 입력해주세요." ? "새 비밀번호를 입력해주세요." : "새 " + newPasswordError);
       return;
     }
     setIsServerBusy(true);
@@ -2443,7 +2477,31 @@ function clearAuthQueryParam(key: string) {
 }
 
 function getErrorMessage(error: unknown) {
+  if (error instanceof ServerApiError) {
+    const mapped = mapServerErrorMessage(error);
+    if (mapped) {
+      return mapped;
+    }
+  }
   return error instanceof Error ? error.message : "서버 요청에 실패했습니다.";
+}
+
+// Map server-side English/technical messages (and bare status codes) to friendly
+// Korean copy so developer messages like "Invalid request body" never surface to users.
+function mapServerErrorMessage(error: ServerApiError): string | null {
+  if (error.status === 400) {
+    return "입력값을 확인해주세요.";
+  }
+  if (error.status === 409) {
+    return "이미 가입된 이메일입니다.";
+  }
+  if (error.status === 429) {
+    return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (error.status >= 500) {
+    return "서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  }
+  return null;
 }
 
 function getServerSyncErrorMessage(error: unknown) {
@@ -2452,4 +2510,36 @@ function getServerSyncErrorMessage(error: unknown) {
   }
 
   return getErrorMessage(error);
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Client-side pre-submit validation mirroring the shared Zod schemas
+// (registerRequestSchema etc.): email format, password min 8, name min 1.
+// Returns a friendly Korean message, or null when the input is valid.
+function validateEmail(email: string): string | null {
+  if (!email.trim()) {
+    return "이메일을 입력해주세요.";
+  }
+  if (!EMAIL_PATTERN.test(email.trim())) {
+    return "올바른 이메일 형식이 아닙니다.";
+  }
+  return null;
+}
+
+function validatePassword(password: string): string | null {
+  if (!password) {
+    return "비밀번호를 입력해주세요.";
+  }
+  if (password.length < 8) {
+    return "비밀번호는 8자 이상이어야 합니다.";
+  }
+  return null;
+}
+
+function validateName(name: string): string | null {
+  if (!name.trim()) {
+    return "이름을 입력해주세요.";
+  }
+  return null;
 }
