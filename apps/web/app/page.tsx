@@ -73,6 +73,7 @@ import {
 } from "./lib/formatting";
 import type { BudgetSnapshot } from "./lib/pageTypes";
 import { emptyBudgetSnapshot, sampleBudgetSnapshot, seedFixedCosts } from "./lib/seedData";
+import { BudgetSummaryCard } from "./components/BudgetSummaryCard";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -2214,18 +2215,6 @@ export default function Home() {
         </div>
       ) : null}
     </main>
-  );
-}
-
-function BudgetSummaryCard({ title, summary }: { title: string; summary: BudgetSnapshotSummary }) {
-  return (
-    <div className="sync-summary-card">
-      <span>{title}</span>
-      <strong>{formatWon(summary.monthlyExpense)}</strong>
-      <small>
-        월 수입 {formatWon(summary.monthlyIncome)} · 항목 {summary.fixedCostCount}개 · 카테고리 {summary.categoryCount}개 · 카드 {summary.cardCount}개
-      </small>
-    </div>
   );
 }
 
