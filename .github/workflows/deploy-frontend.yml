@@ -48,13 +48,15 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
         run: pnpm --filter @living-cost-manager/web... build
 
+      # Run wrangler from an isolated dir via npx. Running it inside the repo
+      # makes npm choke on the pnpm workspace ("Cannot read properties of null").
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Force npm so the action installs wrangler itself instead of trying
-          # `pnpm exec wrangler` (wrangler is not a project dependency).
-          packageManager: npm
-          wranglerVersion: "4.42.0"
-          command: pages deploy apps/web/out --project-name=living-cost-manager --branch=main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          OUT_DIR="$(mktemp -d)/out"
+          cp -r apps/web/out "$OUT_DIR"
+          cd "$(dirname "$OUT_DIR")"
+          npx --yes wrangler@4.42.0 pages deploy out \
+            --project-name=living-cost-manager --branch=main
