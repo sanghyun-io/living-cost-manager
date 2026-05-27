@@ -81,6 +81,8 @@ import { ChartSection } from "./components/ChartSection";
 import { FixedCostTable } from "./components/FixedCostTable";
 import { CategoryModal } from "./components/modals/CategoryModal";
 import { CardModal } from "./components/modals/CardModal";
+import { AuthModal } from "./components/modals/AuthModal";
+import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -1586,176 +1588,45 @@ export default function Home() {
         </div>
       ) : null}
 
-      {isAuthModalOpen ? (
-        <div className="modal-backdrop" onMouseDown={() => setIsAuthModalOpen(false)}>
-          <section
-            aria-labelledby="auth-modal-title"
-            aria-modal="true"
-            className="category-modal auth-modal"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <p className="section-label">클라우드</p>
-                <h2 id="auth-modal-title">{serverAuthMode === "register" ? "계정 가입" : "로그인"}</h2>
-              </div>
-              <button className="icon-button" type="button" onClick={() => setIsAuthModalOpen(false)}>
-                닫기
-              </button>
-            </div>
-            {serverApi ? (
-              authView === "forgot" ? (
-                <>
-                  <p className="auth-modal-intro">
-                    가입한 이메일로 비밀번호 재설정 링크를 보내드립니다.
-                  </p>
-                  <form
-                    className="server-auth-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void handleForgotPassword();
-                    }}
-                  >
-                    <div className="form-field">
-                      <label htmlFor="forgot-email">이메일</label>
-                      <input
-                        id="forgot-email"
-                        type="email"
-                        value={serverEmail}
-                        onChange={(event) => setServerEmail(event.target.value)}
-                      />
-                    </div>
-                    <button className="primary-button" disabled={isServerBusy} type="submit">
-                      재설정 링크 보내기
-                    </button>
-                  </form>
-                  <p className="auth-modal-switch">
-                    <button type="button" className="link-button" onClick={() => setAuthView("auth")}>
-                      로그인으로 돌아가기
-                    </button>
-                  </p>
-                  {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
-                </>
-              ) : (
-              <>
-                <p className="auth-modal-intro">
-                  클라우드에 저장하면 다른 기기에서도 데이터를 이어서 사용할 수 있습니다. 브라우저 로컬 저장은 그대로 유지됩니다.
-                </p>
-                <form
-                  className="server-auth-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void handleServerAuthSubmit();
-                  }}
-                >
-                  <div className="chart-toggle" aria-label="서버 계정 모드">
-                    <button className={serverAuthMode === "login" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("login")}>
-                      로그인
-                    </button>
-                    <button className={serverAuthMode === "register" ? "active" : undefined} type="button" onClick={() => setServerAuthMode("register")}>
-                      가입
-                    </button>
-                  </div>
-                  <div className="form-field">
-                    <label htmlFor="auth-email">이메일</label>
-                    <input id="auth-email" type="email" value={serverEmail} onChange={(event) => setServerEmail(event.target.value)} />
-                  </div>
-                  {serverAuthMode === "register" ? (
-                    <div className="form-field">
-                      <label htmlFor="auth-name">이름</label>
-                      <input id="auth-name" type="text" value={serverName} onChange={(event) => setServerName(event.target.value)} />
-                    </div>
-                  ) : null}
-                  <div className="form-field">
-                    <label htmlFor="auth-password">비밀번호</label>
-                    <input
-                      id="auth-password"
-                      type="password"
-                      value={serverPassword}
-                      onChange={(event) => setServerPassword(event.target.value)}
-                    />
-                  </div>
-                  <button className="primary-button" disabled={isServerBusy} type="submit">
-                    {serverAuthMode === "register" ? "가입하고 클라우드에 저장" : "로그인"}
-                  </button>
-                </form>
-                <p className="auth-modal-switch">
-                  {serverAuthMode === "login" ? (
-                    <>
-                      계정이 없으신가요?{" "}
-                      <button type="button" className="link-button" onClick={() => setServerAuthMode("register")}>
-                        가입하기
-                      </button>
-                      <br />
-                      <button type="button" className="link-button" onClick={() => { setAuthView("forgot"); setServerStatus(""); }}>
-                        비밀번호를 잊으셨나요?
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      이미 계정이 있으신가요?{" "}
-                      <button type="button" className="link-button" onClick={() => setServerAuthMode("login")}>
-                        로그인하기
-                      </button>
-                    </>
-                  )}
-                </p>
-                {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
-              </>
-              )
-            ) : (
-              <div className="local-mode-warning" role="status">
-                <strong>서버 API URL이 없어 클라우드 저장을 사용할 수 없습니다.</strong>
-                <p>이 브라우저에만 저장됩니다. 데이터 관리에서 전체 Export 백업을 보관하세요.</p>
-              </div>
-            )}
-          </section>
-        </div>
+        <AuthModal
+          hasServerApi={Boolean(serverApi)}
+          authView={authView}
+          serverAuthMode={serverAuthMode}
+          serverEmail={serverEmail}
+          serverPassword={serverPassword}
+          serverName={serverName}
+          isServerBusy={isServerBusy}
+          serverStatus={serverStatus}
+          serverErrorKind={serverErrorKind}
+          onEmailChange={setServerEmail}
+          onPasswordChange={setServerPassword}
+          onNameChange={setServerName}
+          onModeChange={setServerAuthMode}
+          onViewChange={(view) => {
+            setAuthView(view);
+            if (view === "forgot") {
+              setServerStatus("");
+            }
+          }}
+          onSubmit={() => void handleServerAuthSubmit()}
+          onForgotSubmit={() => void handleForgotPassword()}
+          onClose={() => setIsAuthModalOpen(false)}
+        />
       ) : null}
 
       {resetToken ? (
-        <div className="modal-backdrop" onMouseDown={() => { setResetToken(null); clearAuthQueryParam("reset_token"); }}>
-          <section
-            aria-labelledby="reset-modal-title"
-            aria-modal="true"
-            className="category-modal auth-modal"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <p className="section-label">클라우드</p>
-                <h2 id="reset-modal-title">비밀번호 재설정</h2>
-              </div>
-              <button className="icon-button" type="button" onClick={() => { setResetToken(null); clearAuthQueryParam("reset_token"); }}>
-                닫기
-              </button>
-            </div>
-            <p className="auth-modal-intro">새 비밀번호를 입력하세요. (최소 8자)</p>
-            <form
-              className="server-auth-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleResetPassword();
-              }}
-            >
-              <div className="form-field">
-                <label htmlFor="reset-password">새 비밀번호</label>
-                <input
-                  id="reset-password"
-                  type="password"
-                  value={resetPasswordValue}
-                  onChange={(event) => setResetPasswordValue(event.target.value)}
-                />
-              </div>
-              <button className="primary-button" disabled={isServerBusy || resetPasswordValue.length < 8} type="submit">
-                비밀번호 변경
-              </button>
-            </form>
-            {serverStatus ? <p className={serverErrorKind ? "sync-status sync-status-error" : "sync-status"}>{serverStatus}</p> : null}
-          </section>
-        </div>
+        <ResetPasswordModal
+          resetPasswordValue={resetPasswordValue}
+          isServerBusy={isServerBusy}
+          serverStatus={serverStatus}
+          serverErrorKind={serverErrorKind}
+          onPasswordChange={setResetPasswordValue}
+          onSubmit={() => void handleResetPassword()}
+          onClose={() => {
+            setResetToken(null);
+            clearAuthQueryParam("reset_token");
+          }}
+        />
       ) : null}
 
       {isCategoryModalOpen ? (
