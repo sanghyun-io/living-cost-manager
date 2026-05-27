@@ -1,4 +1,4 @@
-import { Badge, Button, Group, Text } from "@mantine/core";
+import { ActionIcon, Badge, Button, Group, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { LOCAL_USER_NAME } from "../lib/users";
 import { formatSaveTime } from "../lib/formatting";
 import type { ServerSession } from "../lib/serverApi";
@@ -24,9 +24,19 @@ export function AppHeader({
   onServerLogout
 }: AppHeaderProps) {
   const saveLabel = saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
+  const { setColorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme("light", { getInitialValueInEffect: true });
 
   return (
     <Group component="header" className="app-header" justify="flex-end" gap="sm" wrap="wrap">
+      <ActionIcon
+        variant="default"
+        size="lg"
+        aria-label="색상 모드 전환"
+        onClick={() => setColorScheme(computed === "dark" ? "light" : "dark")}
+      >
+        {computed === "dark" ? "☀️" : "🌙"}
+      </ActionIcon>
       <Badge variant="light" color={saveError ? "rose" : "gray"} size="lg" radius="sm">
         {saveLabel}
       </Badge>
