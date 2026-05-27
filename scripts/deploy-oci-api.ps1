@@ -21,14 +21,25 @@ if ($WriteEnv) {
   if ([string]::IsNullOrWhiteSpace($env:LCM_DATABASE_URL) -or [string]::IsNullOrWhiteSpace($env:LCM_JWT_SECRET)) {
     throw "Set LCM_DATABASE_URL and LCM_JWT_SECRET in the local shell before using -WriteEnv. Values are not printed."
   }
+  if ([string]::IsNullOrWhiteSpace($env:LCM_RESEND_API_KEY)) {
+    throw "Set LCM_RESEND_API_KEY in the local shell before using -WriteEnv. Values are not printed."
+  }
+
+  $appBaseUrl = if ($env:LCM_APP_BASE_URL) { $env:LCM_APP_BASE_URL } else { "https://living-cost-manager.gamja.top" }
+  $emailFrom = if ($env:LCM_EMAIL_FROM) { $env:LCM_EMAIL_FROM } else { "Living Cost Manager <noreply@gamja.top>" }
+  $corsOrigin = if ($env:LCM_CORS_ORIGIN) { $env:LCM_CORS_ORIGIN } else { "https://living-cost-manager.gamja.top,https://sanghyun-io.github.io" }
 
   $envContent = @(
     "NODE_ENV=production"
     "PORT=$Port"
     "API_BASE_PATH=$ApiBasePath"
-    "CORS_ORIGIN=https://sanghyun-io.github.io"
+    "CORS_ORIGIN=$corsOrigin"
     "DATABASE_URL=$($env:LCM_DATABASE_URL)"
     "JWT_SECRET=$($env:LCM_JWT_SECRET)"
+    "APP_BASE_URL=$appBaseUrl"
+    "EMAIL_PROVIDER=resend"
+    "EMAIL_FROM=$emailFrom"
+    "RESEND_API_KEY=$($env:LCM_RESEND_API_KEY)"
   ) -join "`n"
 
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($envContent)
