@@ -73,7 +73,6 @@ import {
 } from "./lib/formatting";
 import type { BudgetSnapshot } from "./lib/pageTypes";
 import { emptyBudgetSnapshot, sampleBudgetSnapshot, seedFixedCosts } from "./lib/seedData";
-import { BudgetSummaryCard } from "./components/BudgetSummaryCard";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
@@ -83,8 +82,7 @@ import { CategoryModal } from "./components/modals/CategoryModal";
 import { CardModal } from "./components/modals/CardModal";
 import { AuthModal } from "./components/modals/AuthModal";
 import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
-import { SharingPanel } from "./components/modals/SharingPanel";
-import { ServerSyncPanel } from "./components/modals/ServerSyncPanel";
+import { DataModal } from "./components/modals/DataModal";
 
 const USERS_KEY = "living-cost-manager:users:v1";
 const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
@@ -1208,144 +1206,76 @@ export default function Home() {
       </section>
 
       {isDataModalOpen ? (
-        <div className="modal-backdrop" onMouseDown={() => setIsDataModalOpen(false)}>
-          <section
-            aria-labelledby="data-modal-title"
-            aria-modal="true"
-            className="category-modal data-modal"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div>
-                <p className="section-label">관리</p>
-                <h2 id="data-modal-title">데이터 관리</h2>
-              </div>
-              <button className="icon-button" type="button" onClick={() => setIsDataModalOpen(false)}>
-                닫기
-              </button>
-            </div>
-            <div className="data-action-grid">
-              <section className="data-action-panel">
-                <div>
-                  <p className="section-label">엑셀 템플릿</p>
-                  <h3>항목 일괄 편집</h3>
-                  <small>고정비 항목만 CSV로 편집합니다.</small>
-                </div>
-                <div className="data-action-buttons">
-                  <button className="secondary-button" type="button" onClick={handleExportTemplate}>
-                    템플릿 Export
-                  </button>
-                  <button className="secondary-button" type="button" onClick={() => importFileRef.current?.click()}>
-                    Import
-                  </button>
-                </div>
-              </section>
-              <section className="data-action-panel">
-                <div>
-                  <p className="section-label">LCM 백업</p>
-                  <h3>전체 백업</h3>
-                  <small>수입, 카테고리, 카드, 고정비를 모두 저장합니다.</small>
-                </div>
-                <div className="data-action-buttons">
-                  <button className="secondary-button" type="button" onClick={handleExportBackup}>
-                    전체 Export
-                  </button>
-                  <button className="secondary-button" type="button" onClick={() => backupFileRef.current?.click()}>
-                    전체 Import
-                  </button>
-                </div>
-              </section>
-            </div>
-            {serverApi ? (
-              <ServerSyncPanel
-                sync={{
-                  serverSession,
-                  syncStateView,
-                  displayedSyncState,
-                  lastServerSyncedAt,
-                  localSnapshotSummary,
-                  serverSnapshotSummary,
-                  serverSnapshot,
-                  serverWorkspaces,
-                  currentWorkspaceRole,
-                  canUploadServerSnapshot,
-                  isServerBusy,
-                  serverStatus,
-                  serverErrorKind,
-                  changeCurrentPassword,
-                  changeNewPassword,
-                  showUploadButton: Boolean(
-                    serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())
-                  ),
-                  showLoadButton: Boolean(serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot)),
-                  onServerLogout: handleServerLogout,
-                  onResendVerification: () => void handleResendVerification(),
-                  onChangePassword: () => void handleChangePassword(),
-                  onChangeCurrentPassword: setChangeCurrentPassword,
-                  onChangeNewPassword: setChangeNewPassword,
-                  onSelectWorkspace: (workspaceId) => void handleSelectServerWorkspace(workspaceId),
-                  onCheckServer: () => {
-                    if (serverSession) {
-                      void prepareServerSyncDecision(serverSession);
-                    }
-                  },
-                  onSyncNow: () => void handleSyncNow(),
-                  onLoadSnapshot: () => void handleLoadServerSnapshot(),
-                  onStayLocal: handleStayLocalOnly,
-                  onOpenAuth: () => {
-                    setIsDataModalOpen(false);
-                    setIsAuthModalOpen(true);
-                  },
-                  onExportBackup: handleExportBackup
-                }}
-                sharing={{
-                  serverSession,
-                  members,
-                  invitations,
-                  acceptTokens,
-                  inviteEmail,
-                  inviteRole,
-                  visibleCreatedInvitation,
-                  canManageCurrentWorkspace,
-                  isServerBusy,
-                  onAcceptTokenChange: (invitationId, value) =>
-                    setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: value })),
-                  onAcceptInvitation: (invitationId) => void handleAcceptInvitation(invitationId),
-                  onRefreshSharing: () => void refreshSharing(),
-                  onCreateInvitation: () => void handleCreateInvitation(),
-                  onInviteEmailChange: setInviteEmail,
-                  onInviteRoleChange: setInviteRole,
-                  onUpdateMemberRole: (memberId, role) => void handleUpdateMemberRole(memberId, role),
-                  onDeleteMember: (memberId) => void handleDeleteMember(memberId)
-                }}
-              />
-            ) : (
-              <div className="local-mode-warning" role="status">
-                <strong>서버 API URL이 없어 로컬 전용으로 동작합니다.</strong>
-                <p>이 브라우저에만 저장되며, 브라우저 데이터 삭제나 기기 교체 시 복구할 수 없습니다. 전체 Export 백업을 보관하세요.</p>
-                <button className="secondary-button" type="button" onClick={handleExportBackup}>
-                  전체 Export 백업
-                </button>
-              </div>
-            )}
-            <p className="local-note">브라우저 저장은 항상 유지됩니다. 서버 동기화와 별도로 기기를 바꾸기 전에는 전체 Export로 백업하세요.</p>
-            <input
-              ref={importFileRef}
-              className="sr-only"
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => void handleImportTemplate(event.target.files?.[0] ?? null)}
-            />
-            <input
-              ref={backupFileRef}
-              className="sr-only"
-              type="file"
-              accept=".lcm,text/plain"
-              onChange={(event) => void handleImportBackup(event.target.files?.[0] ?? null)}
-            />
-          </section>
-        </div>
+        <DataModal
+          hasServerApi={Boolean(serverApi)}
+          importFileRef={importFileRef}
+          backupFileRef={backupFileRef}
+          onClose={() => setIsDataModalOpen(false)}
+          onExportTemplate={handleExportTemplate}
+          onImportTemplate={(file) => void handleImportTemplate(file)}
+          onExportBackup={handleExportBackup}
+          onImportBackup={(file) => void handleImportBackup(file)}
+          sync={{
+            serverSession,
+            syncStateView,
+            displayedSyncState,
+            lastServerSyncedAt,
+            localSnapshotSummary,
+            serverSnapshotSummary,
+            serverSnapshot,
+            serverWorkspaces,
+            currentWorkspaceRole,
+            canUploadServerSnapshot,
+            isServerBusy,
+            serverStatus,
+            serverErrorKind,
+            changeCurrentPassword,
+            changeNewPassword,
+            showUploadButton: Boolean(
+              serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())
+            ),
+            showLoadButton: Boolean(serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot)),
+            onServerLogout: handleServerLogout,
+            onResendVerification: () => void handleResendVerification(),
+            onChangePassword: () => void handleChangePassword(),
+            onChangeCurrentPassword: setChangeCurrentPassword,
+            onChangeNewPassword: setChangeNewPassword,
+            onSelectWorkspace: (workspaceId) => void handleSelectServerWorkspace(workspaceId),
+            onCheckServer: () => {
+              if (serverSession) {
+                void prepareServerSyncDecision(serverSession);
+              }
+            },
+            onSyncNow: () => void handleSyncNow(),
+            onLoadSnapshot: () => void handleLoadServerSnapshot(),
+            onStayLocal: handleStayLocalOnly,
+            onOpenAuth: () => {
+              setIsDataModalOpen(false);
+              setIsAuthModalOpen(true);
+            },
+            onExportBackup: handleExportBackup
+          }}
+          sharing={{
+            serverSession,
+            members,
+            invitations,
+            acceptTokens,
+            inviteEmail,
+            inviteRole,
+            visibleCreatedInvitation,
+            canManageCurrentWorkspace,
+            isServerBusy,
+            onAcceptTokenChange: (invitationId, value) =>
+              setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: value })),
+            onAcceptInvitation: (invitationId) => void handleAcceptInvitation(invitationId),
+            onRefreshSharing: () => void refreshSharing(),
+            onCreateInvitation: () => void handleCreateInvitation(),
+            onInviteEmailChange: setInviteEmail,
+            onInviteRoleChange: setInviteRole,
+            onUpdateMemberRole: (memberId, role) => void handleUpdateMemberRole(memberId, role),
+            onDeleteMember: (memberId) => void handleDeleteMember(memberId)
+          }}
+        />
       ) : null}
 
         <AuthModal

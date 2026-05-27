@@ -1,6 +1,7 @@
 // Shared types for page.tsx and its extracted components.
 // Grouped prop bundles (SyncProps, SharingProps, DataModalProps) are added here
 // as those components are extracted (Tasks 7-9).
+import type { RefObject } from "react";
 import type { InvitationRole, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
 import type { Category, FixedCost } from "./budget";
 import type { PaymentCard } from "./cards";
@@ -73,4 +74,18 @@ export interface SyncProps {
   onStayLocal: () => void;
   onOpenAuth: () => void;
   onExportBackup: () => void;
+}
+
+// Props for the DataModal container (import/export + server sync + sharing).
+export interface DataModalProps {
+  hasServerApi: boolean;
+  importFileRef: RefObject<HTMLInputElement | null>;
+  backupFileRef: RefObject<HTMLInputElement | null>;
+  onClose: () => void;
+  onExportTemplate: () => void;
+  onImportTemplate: (file: File | null) => void;
+  onExportBackup: () => void;
+  onImportBackup: (file: File | null) => void;
+  sync: SyncProps;
+  sharing: SharingProps;
 }
