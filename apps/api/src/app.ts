@@ -47,7 +47,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   await app.register(sensible);
   await app.register(cors, {
-    origin: env.CORS_ORIGIN
+    origin: env.CORS_ORIGIN,
+    // @fastify/cors defaults to "GET,HEAD,POST", which rejects the snapshot PUT
+    // and member/invitation PATCH/DELETE preflight requests from the browser.
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
   });
   await app.register(rateLimit, {
     global: false,
