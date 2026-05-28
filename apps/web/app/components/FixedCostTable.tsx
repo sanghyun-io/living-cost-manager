@@ -1,4 +1,5 @@
 import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
+import { suggestCategoryId } from "@living-cost-manager/shared";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
 import { formatWon, getPaymentOptions } from "../lib/formatting";
@@ -123,6 +124,12 @@ export function FixedCostTable({
         {visibleFixedCosts.map((item) => {
           const options = getPaymentOptions(item.paymentMethodId, cards);
           const optionData = options.map((o) => ({ value: o.id, label: o.label }));
+          // 이름 기반 카테고리 추천. 존재하는 카테고리이고 현재 선택과 다를 때만 제안한다.
+          const suggestedCategoryId = suggestCategoryId(item.name, { categories });
+          const suggestedCategory =
+            suggestedCategoryId && suggestedCategoryId !== item.categoryId
+              ? categories.find((c) => c.id === suggestedCategoryId) ?? null
+              : null;
           return (
             <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="row" key={item.id}>
               <span>
@@ -142,6 +149,17 @@ export function FixedCostTable({
                   onChange={(value) => onItemChange(item.id, { categoryId: value ?? item.categoryId })}
                   allowDeselect={false}
                 />
+                {!isDeleteMode && suggestedCategory ? (
+                  <Button
+                    variant="subtle"
+                    size="compact-xs"
+                    mt={4}
+                    aria-label={`카테고리를 ${suggestedCategory.label}(으)로 변경`}
+                    onClick={() => onItemChange(item.id, { categoryId: suggestedCategory.id })}
+                  >
+                    {suggestedCategory.label}로 변경
+                  </Button>
+                ) : null}
               </span>
               <span>
                 <Select
