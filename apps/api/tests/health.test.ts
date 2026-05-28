@@ -28,6 +28,36 @@ test("GET /health returns ok", async () => {
   expect(response.json()).toEqual({ ok: true });
 });
 
+test("응답에 helmet 보안 헤더가 포함된다", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/health"
+  });
+
+  // helmet 이 적용한 핵심 보안 헤더들.
+  expect(response.headers["content-security-policy"]).toContain("default-src 'none'");
+  expect(response.headers["x-content-type-options"]).toBe("nosniff");
+  expect(response.headers["x-frame-options"]).toBe("SAMEORIGIN");
+  // 비-운영(test)에서는 HSTS 를 끈다.
+  expect(response.headers["strict-transport-security"]).toBeUndefined();
+});
+
+test("운영 환경에서는 HSTS 헤더를 켠다", async () => {
+  const prodEnv = loadEnv({
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+    JWT_SECRET: "test-secret-with-at-least-32-characters"
+  });
+  const prodApp = await buildApp({ env: prodEnv, prisma });
+
+  try {
+    const response = await prodApp.inject({ method: "GET", url: "/health" });
+    expect(response.headers["strict-transport-security"]).toContain("max-age=");
+  } finally {
+    await prodApp.close();
+  }
+});
+
 test("serves health under configured API base path", async () => {
   const prefixedEnv = loadEnv({
     NODE_ENV: "test",
