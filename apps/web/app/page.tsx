@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { InvitationRole, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
+import { parseFixedCostInput } from "@living-cost-manager/shared";
 import {
   buildBudgetSummary,
   createCategory,
@@ -368,6 +369,25 @@ export default function Home() {
         paymentOptionId: "auto-transfer",
         amount: 0,
         periodMonths: 1,
+        billingDay: 1
+      })
+    ]);
+  }
+
+  // 자연어 한 줄("넷플릭스 17000원 매달")을 파싱해 고정비를 추가한다.
+  // 추출 실패한 필드는 handleAddItem 과 동일한 기본값으로 폴백한다.
+  function handleQuickAdd(text: string) {
+    const parsed = parseFixedCostInput(text);
+    setFixedCosts((items) => [
+      ...items,
+      createFixedCost({
+        id: "cost-" + Date.now().toString(36),
+        name: parsed.name ?? "새 고정비",
+        categoryId: categories[0]?.id ?? "other",
+        paymentMethodId: "bank-transfer",
+        paymentOptionId: "auto-transfer",
+        amount: parsed.amount ?? 0,
+        periodMonths: parsed.periodMonths ?? 1,
         billingDay: 1
       })
     ]);
@@ -1238,6 +1258,7 @@ export default function Home() {
           onPaymentMethodChange={handlePaymentMethodChange}
           onPaymentOptionChange={handlePaymentOptionChange}
           onAddItem={handleAddItem}
+          onQuickAdd={handleQuickAdd}
           onEnterDeleteMode={handleEnterDeleteMode}
           onCancelDeleteMode={handleCancelDeleteMode}
           onConfirmDeleteItems={handleConfirmDeleteItems}
