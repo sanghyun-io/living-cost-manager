@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireWorkspaceRole } from "../services/membership.js";
 import {
   getWorkspaceSnapshot,
+  isSnapshotVersionConflictError,
   isSnapshotWriteValidationError,
   replaceWorkspaceSnapshot
 } from "../services/snapshot.js";
@@ -75,6 +76,14 @@ export async function snapshotRoutes(app: FastifyInstance) {
       try {
         return await replaceWorkspaceSnapshot(app.prisma, parsedBody.data);
       } catch (error) {
+        if (isSnapshotVersionConflictError(error)) {
+          // 동시 편집 충돌: 클라이언트가 보낸 syncVersion 이 서버보다 뒤처짐.
+          // 409 + 현재 버전을 실어 클라이언트가 최신을 다시 받아가게 한다.
+          throw app.httpErrors.conflict(
+            `Snapshot version conflict (current: ${error.currentVersion})`
+          );
+        }
+
         if (isSnapshotWriteValidationError(error)) {
           throw app.httpErrors.badRequest("Invalid snapshot");
         }

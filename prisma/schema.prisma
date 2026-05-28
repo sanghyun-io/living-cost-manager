@@ -49,6 +49,7 @@ model Workspace {
   id            String                @id @default(cuid())
   name          String
   monthlyIncome Int                   @default(0)
+  syncVersion   Int                   @default(0)
   members       WorkspaceMember[]
   invitations   WorkspaceInvitation[]
   categories    Category[]

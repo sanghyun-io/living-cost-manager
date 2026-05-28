@@ -904,7 +904,13 @@ export default function Home() {
 
     setIsServerBusy(true);
     try {
-      const nextSnapshot = buildWorkspaceSnapshot(serverSession.workspace.id, getCurrentBudgetSnapshot());
+      // 마지막으로 읽은 서버 버전을 실어 보낸다. 서버가 이 값과 현재 DB 값을
+      // 비교해 동시 편집 충돌(409)을 판정한다.
+      const nextSnapshot = buildWorkspaceSnapshot(
+        serverSession.workspace.id,
+        getCurrentBudgetSnapshot(),
+        serverSnapshot?.syncVersion ?? 0
+      );
       const savedSnapshot = await serverApi.putWorkspaceSnapshot(serverSession.workspace.id, nextSnapshot, serverSession.token);
       setServerSnapshot(savedSnapshot);
       setLastServerSyncedAt(new Date());
@@ -912,6 +918,19 @@ export default function Home() {
       setServerErrorKind(null);
       setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
     } catch (error) {
+      // 충돌(409): 다른 기기/멤버가 먼저 저장함. 서버 최신본을 다시 받아와
+      // serverSnapshot 을 갱신하고, 사용자에게 다시 불러온 뒤 동기화하도록 안내.
+      if (error instanceof ServerApiError && error.status === 409) {
+        try {
+          const latest = await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token);
+          setServerSnapshot(latest);
+        } catch {
+          // 최신본 재조회 실패는 무시 — 아래 충돌 안내는 그대로 표시한다.
+        }
+        setServerErrorKind("request");
+        setServerStatus("다른 기기나 멤버가 먼저 저장해 충돌이 났습니다. 서버 데이터를 다시 불러온 뒤 동기화하세요. 로컬 저장은 계속 유지됩니다.");
+        return;
+      }
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getServerSyncErrorMessage(error) + " 로컬 저장은 계속 유지됩니다.");
     } finally {
