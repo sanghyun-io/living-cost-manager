@@ -10,6 +10,7 @@ import {
 } from "./test-database.js";
 import {
   createWorkspaceInvitation,
+  revokeWorkspaceInvitation,
   WorkspaceInvitationAuthorizationError
 } from "../src/services/invitations.js";
 import {
@@ -488,6 +489,7 @@ describe("workspace sharing routes", () => {
         workspaceId: owner.workspace.id,
         email: currentUser.user.email,
         role: "viewer",
+        status: "pending",
         expiresAt: currentInvitation.expiresAt,
         acceptedAt: null
       }
@@ -920,5 +922,159 @@ describe("workspace sharing routes", () => {
         owner.user.id
       )
     ).rejects.toBeInstanceOf(WorkspaceMemberAuthorizationError);
+  });
+
+  test("GET workspace invitations lists only the workspace's pending invitations to the owner", async () => {
+    const owner = await registerTestUser("Sent Owner");
+    const pending = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      "sharing-test-pending-target@example.com"
+    );
+    expect(pending.statusCode).toBe(201);
+
+    // An accepted invitation must not appear in the pending list.
+    await createAcceptedMember(owner, "editor");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/workspaces/${owner.workspace.id}/invitations`,
+      headers: authHeaders(owner.token)
+    });
+    expect(response.statusCode).toBe(200);
+
+    const invitations = response.json<
+      Array<{ email: string; status: string; role: string }>
+    >();
+    expect(invitations).toHaveLength(1);
+    expect(invitations[0]).toMatchObject({
+      email: "sharing-test-pending-target@example.com",
+      status: "pending",
+      role: "viewer"
+    });
+  });
+
+  test("non-owner cannot list workspace invitations", async () => {
+    const owner = await registerTestUser("List Forbid Owner");
+    const editor = await addWorkspaceMember(owner.workspace.id, "editor");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/workspaces/${owner.workspace.id}/invitations`,
+      headers: authHeaders(editor.token)
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  test("owner can revoke a pending invitation (soft, status=revoked)", async () => {
+    const owner = await registerTestUser("Revoke Owner");
+    const invitationResponse = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      "sharing-test-revoke-target@example.com"
+    );
+    expect(invitationResponse.statusCode).toBe(201);
+    const invitation = invitationResponse.json<InvitationCreateResponse>();
+
+    const revokeResponse = await app.inject({
+      method: "DELETE",
+      url: `/workspaces/${owner.workspace.id}/invitations/${invitation.id}`,
+      headers: authHeaders(owner.token)
+    });
+    expect(revokeResponse.statusCode).toBe(204);
+
+    // Row is preserved with status=revoked (soft revoke).
+    const stored = await prisma.workspaceInvitation.findUnique({
+      where: { id: invitation.id },
+      select: { status: true }
+    });
+    expect(stored?.status).toBe("revoked");
+
+    // No longer surfaced in the workspace pending list.
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/workspaces/${owner.workspace.id}/invitations`,
+      headers: authHeaders(owner.token)
+    });
+    expect(listResponse.json()).toHaveLength(0);
+  });
+
+  test("a revoked invitation token can no longer be accepted", async () => {
+    const owner = await registerTestUser("Revoke Accept Owner");
+    const invitee = await registerTestUser("Revoke Accept Invitee");
+    const invitationResponse = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      invitee.user.email
+    );
+    const invitation = invitationResponse.json<InvitationCreateResponse>();
+
+    const revokeResponse = await app.inject({
+      method: "DELETE",
+      url: `/workspaces/${owner.workspace.id}/invitations/${invitation.id}`,
+      headers: authHeaders(owner.token)
+    });
+    expect(revokeResponse.statusCode).toBe(204);
+
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/invitations/${invitation.id}/accept`,
+      headers: authHeaders(invitee.token),
+      payload: { token: invitation.token }
+    });
+    expect(acceptResponse.statusCode).toBe(404);
+  });
+
+  test("revoking a non-existent or already-revoked invitation returns 404", async () => {
+    const owner = await registerTestUser("Revoke Missing Owner");
+    const invitationResponse = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      "sharing-test-revoke-twice@example.com"
+    );
+    const invitation = invitationResponse.json<InvitationCreateResponse>();
+
+    const first = await app.inject({
+      method: "DELETE",
+      url: `/workspaces/${owner.workspace.id}/invitations/${invitation.id}`,
+      headers: authHeaders(owner.token)
+    });
+    expect(first.statusCode).toBe(204);
+
+    // Second revoke: already revoked => not pending => 404.
+    const second = await app.inject({
+      method: "DELETE",
+      url: `/workspaces/${owner.workspace.id}/invitations/${invitation.id}`,
+      headers: authHeaders(owner.token)
+    });
+    expect(second.statusCode).toBe(404);
+  });
+
+  test("non-owner cannot revoke an invitation", async () => {
+    const owner = await registerTestUser("Revoke Forbid Owner");
+    const editor = await addWorkspaceMember(owner.workspace.id, "editor");
+    const invitationResponse = await createInvitation(
+      owner.token,
+      owner.workspace.id,
+      "sharing-test-revoke-forbid@example.com"
+    );
+    const invitation = invitationResponse.json<InvitationCreateResponse>();
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/workspaces/${owner.workspace.id}/invitations/${invitation.id}`,
+      headers: authHeaders(editor.token)
+    });
+    expect(response.statusCode).toBe(403);
+
+    // Service-level re-check: even if the actor lost owner role mid-flight.
+    await expect(
+      revokeWorkspaceInvitation(
+        prisma,
+        owner.workspace.id,
+        invitation.id,
+        editor.user.id
+      )
+    ).rejects.toBeInstanceOf(WorkspaceInvitationAuthorizationError);
   });
 });

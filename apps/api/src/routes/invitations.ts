@@ -14,6 +14,8 @@ import {
   isTransactionConflictError,
   isUniqueConstraintError,
   listPendingInvitationsForEmail,
+  listPendingInvitationsForWorkspace,
+  revokeWorkspaceInvitation,
   WorkspaceInvitationAuthorizationError
 } from "../services/invitations.js";
 import { normalizeEmail } from "../services/email.js";
@@ -27,12 +29,24 @@ const invitationParamsSchema = z.object({
   invitationId: z.string().min(1)
 });
 
+const workspaceInvitationParamsSchema = z.object({
+  workspaceId: z.string().min(1),
+  invitationId: z.string().min(1)
+});
+
 function parseWorkspaceId(params: unknown): string {
   return workspaceParamsSchema.parse(params).workspaceId;
 }
 
 function parseInvitationId(params: unknown): string {
   return invitationParamsSchema.parse(params).invitationId;
+}
+
+function parseWorkspaceInvitationParams(params: unknown): {
+  workspaceId: string;
+  invitationId: string;
+} {
+  return workspaceInvitationParamsSchema.parse(params);
 }
 
 function normalizeCreateInvitationBody(body: unknown): unknown {
@@ -94,6 +108,51 @@ export async function invitationRoutes(app: FastifyInstance) {
 
         throw error;
       }
+    }
+  );
+
+  app.get(
+    "/workspaces/:workspaceId/invitations",
+    { preHandler: app.authenticate },
+    async (request) => {
+      const workspaceId = parseWorkspaceId(request.params);
+
+      await requireWorkspaceOwner(app, request.user.sub, workspaceId);
+
+      return listPendingInvitationsForWorkspace(app.prisma, workspaceId);
+    }
+  );
+
+  app.delete(
+    "/workspaces/:workspaceId/invitations/:invitationId",
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const { workspaceId, invitationId } = parseWorkspaceInvitationParams(
+        request.params
+      );
+
+      await requireWorkspaceOwner(app, request.user.sub, workspaceId);
+
+      try {
+        await revokeWorkspaceInvitation(
+          app.prisma,
+          workspaceId,
+          invitationId,
+          request.user.sub
+        );
+      } catch (error) {
+        if (error instanceof WorkspaceInvitationAuthorizationError) {
+          throw app.httpErrors.forbidden("Forbidden");
+        }
+
+        if (error instanceof InvalidInvitationError) {
+          throw app.httpErrors.notFound("Invitation not found");
+        }
+
+        throw error;
+      }
+
+      return reply.code(204).send();
     }
   );
 

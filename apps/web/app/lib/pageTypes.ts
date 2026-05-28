@@ -26,6 +26,7 @@ export interface SharingProps {
   serverSession: ServerSession | null;
   members: WorkspaceMemberDto[];
   invitations: WorkspaceInvitationDto[];
+  sentInvitations: WorkspaceInvitationDto[];
   acceptTokens: Record<string, string>;
   inviteEmail: string;
   inviteRole: InvitationRole;
@@ -40,6 +41,7 @@ export interface SharingProps {
   onInviteRoleChange: (role: InvitationRole) => void;
   onUpdateMemberRole: (memberId: string, role: WorkspaceMemberDto["role"]) => void;
   onDeleteMember: (memberId: string) => void;
+  onRevokeInvitation: (invitationId: string) => void;
 }
 
 // Grouped props for the server-sync section of DataModal.

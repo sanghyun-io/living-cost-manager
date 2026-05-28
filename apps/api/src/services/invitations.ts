@@ -60,6 +60,7 @@ export function toWorkspaceInvitationDto(
     workspaceId: invitation.workspaceId,
     email: invitation.email,
     role: invitation.role,
+    status: invitation.status,
     expiresAt: invitation.expiresAt.toISOString(),
     acceptedAt: invitation.acceptedAt?.toISOString() ?? null
   };
@@ -203,6 +204,74 @@ export async function listPendingInvitationsForEmail(
   });
 
   return invitations.map(toWorkspaceInvitationDto);
+}
+
+export async function listPendingInvitationsForWorkspace(
+  prisma: PrismaClient,
+  workspaceId: string
+): Promise<WorkspaceInvitationDto[]> {
+  const invitations = await prisma.workspaceInvitation.findMany({
+    where: {
+      workspaceId,
+      status: "pending",
+      expiresAt: {
+        gt: new Date()
+      }
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  return invitations.map(toWorkspaceInvitationDto);
+}
+
+export async function revokeWorkspaceInvitation(
+  prisma: PrismaClient,
+  workspaceId: string,
+  invitationId: string,
+  actorUserId: string
+): Promise<void> {
+  await prisma.$transaction(
+    async (tx) => {
+      const actorMembership = await tx.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: {
+            workspaceId,
+            userId: actorUserId
+          }
+        },
+        select: {
+          role: true
+        }
+      });
+
+      if (actorMembership?.role !== "owner") {
+        throw new WorkspaceInvitationAuthorizationError();
+      }
+
+      // Only pending invitations belonging to this workspace can be revoked.
+      // Conditioning the update on status=pending makes the revoke idempotent
+      // and safe against a concurrent accept (which flips status to accepted).
+      const revoked = await tx.workspaceInvitation.updateMany({
+        where: {
+          id: invitationId,
+          workspaceId,
+          status: "pending"
+        },
+        data: {
+          status: "revoked"
+        }
+      });
+
+      if (revoked.count !== 1) {
+        throw new InvalidInvitationError();
+      }
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+    }
+  );
 }
 
 export async function acceptWorkspaceInvitation(
