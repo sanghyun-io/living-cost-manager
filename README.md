@@ -112,6 +112,38 @@ https://api.gamja.top/living-cost-manager/v1
 
 OCI나 VM에서는 Docker Compose로 API와 Postgres를 실행하고, 외부 공개는 Nginx, Caddy, OCI Load Balancer 같은 HTTPS reverse proxy 뒤에 두는 구성을 권장합니다. Reverse proxy에서 TLS를 종료하고 API origin을 고정한 뒤, API의 `CORS_ORIGIN`을 GitHub Pages 프론트엔드 URL 또는 허용할 정확한 웹 origin으로 설정하세요.
 
+## 워크스페이스 공유
+
+로그인 후 데이터 관리 패널의 "공유 관리"에서 워크스페이스를 다른 사용자와 공유합니다. 멤버에게는 `owner`, `editor`, `viewer` 권한을 줄 수 있습니다.
+
+| 작업 | 권한 | API |
+|------|------|-----|
+| 멤버 목록 조회 | owner / editor / viewer | `GET /workspaces/:workspaceId/members` |
+| 멤버 권한 변경 | owner | `PATCH /workspaces/:workspaceId/members/:memberId` |
+| 멤버 제거 | owner | `DELETE /workspaces/:workspaceId/members/:memberId` |
+| 초대 생성 | owner | `POST /workspaces/:workspaceId/invitations` |
+| 보낸 초대 목록 조회 | owner | `GET /workspaces/:workspaceId/invitations` |
+| **초대 취소** | owner | `DELETE /workspaces/:workspaceId/invitations/:invitationId` |
+| 받은 초대 목록 조회 | 본인 | `GET /invitations` |
+| 초대 수락 | 본인 | `POST /invitations/:invitationId/accept` |
+
+### 초대 흐름
+
+1. owner가 이메일과 권한(`viewer`/`editor`)으로 초대를 생성하면, 초대 링크 토큰이 발급됩니다.
+2. 초대받은 사용자는 같은 이메일로 로그인한 뒤 "받은 초대"에서 토큰으로 수락합니다.
+3. owner는 "공유 관리 > 보낸 초대"에서 아직 수락되지 않은(pending) 초대를 확인하고 "취소"할 수 있습니다.
+
+### 초대 취소(revoke)
+
+owner는 아직 수락되지 않은 초대를 언제든 취소할 수 있습니다.
+
+- 취소는 **soft delete**입니다. 초대 행을 지우지 않고 상태(`status`)를 `revoked`로 바꿔 감사 이력을 남깁니다.
+- 취소된 초대의 토큰은 **더 이상 수락할 수 없습니다.** 수락 요청은 `404`로 거부됩니다(수락은 `pending` 상태만 허용).
+- 취소는 멱등합니다. 이미 취소된(또는 존재하지 않는) 초대를 다시 취소하면 `404`를 반환합니다.
+- 같은 이메일로 다시 초대하면 새 초대 행이 생성되며, 이전에 취소/수락된 이력은 재초대를 막지 않습니다.
+
+초대의 `status`는 `pending`, `accepted`, `revoked`, `expired` 중 하나이며 `WorkspaceInvitationDto`에 포함됩니다.
+
 ## 공개 배포 smoke
 
 공개 API와 Pages 연결은 아래 명령으로 확인합니다.
