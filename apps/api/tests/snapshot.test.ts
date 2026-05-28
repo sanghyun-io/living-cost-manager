@@ -74,9 +74,10 @@ function authHeaders(token: string) {
   };
 }
 
-function buildSnapshot(workspaceId: string): WorkspaceSnapshot {
+function buildSnapshot(workspaceId: string, syncVersion = 0): WorkspaceSnapshot {
   return {
     workspaceId,
+    syncVersion,
     monthlyIncome: 4200000,
     categories: [
       {
@@ -181,13 +182,33 @@ describe("workspace snapshot routes", () => {
     const owner = await registerTestUser("Owner");
     const snapshot = buildSnapshot(owner.workspace.id);
 
+    // PUT 성공 시 서버가 syncVersion 을 1 올려 돌려준다. 나머지는 그대로.
+    const expected = { ...snapshot, syncVersion: 1 };
+
     const putResponse = await putSnapshot(owner.token, snapshot);
     expect(putResponse.statusCode).toBe(200);
-    expect(putResponse.json()).toEqual(snapshot);
+    expect(putResponse.json()).toEqual(expected);
 
     const getResponse = await getSnapshot(owner.token, owner.workspace.id);
     expect(getResponse.statusCode).toBe(200);
-    expect(getResponse.json()).toEqual(snapshot);
+    expect(getResponse.json()).toEqual(expected);
+  });
+
+  test("stale syncVersion is rejected with 409 and the second writer can retry with the latest version", async () => {
+    const owner = await registerTestUser("Conflict Owner");
+    const base = buildSnapshot(owner.workspace.id); // syncVersion 0
+
+    // 첫 PUT 성공 → 서버 버전 1.
+    expect((await putSnapshot(owner.token, base)).statusCode).toBe(200);
+
+    // 같은(낡은) 버전 0 으로 다시 PUT → 충돌 409.
+    const conflict = await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 0));
+    expect(conflict.statusCode).toBe(409);
+
+    // 최신 버전(1)으로 재시도하면 성공하고 버전이 2 가 된다.
+    const retry = await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 1));
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json<WorkspaceSnapshot>().syncVersion).toBe(2);
   });
 
   test("credit-card payment option is stored as paymentCardId and round-trips", async () => {
@@ -255,7 +276,8 @@ describe("workspace snapshot routes", () => {
 
     const getResponse = await getSnapshot(viewer.token, owner.workspace.id);
     expect(getResponse.statusCode).toBe(200);
-    expect(getResponse.json()).toEqual(snapshot);
+    // owner 의 PUT 으로 서버 버전이 1 이 되었다.
+    expect(getResponse.json()).toEqual({ ...snapshot, syncVersion: 1 });
 
     const putResponse = await putSnapshot(viewer.token, snapshot);
     expect(putResponse.statusCode).toBe(403);
@@ -434,8 +456,11 @@ describe("workspace snapshot routes", () => {
 
     expect((await putSnapshot(owner.token, snapshot)).statusCode).toBe(200);
 
+    // 첫 PUT 으로 서버 버전이 1 이 되었으므로, FK 검증 경로에 도달하려면
+    // 낙관적 잠금 충돌(409)이 아닌 최신 버전(1)로 보내야 한다.
     const invalidReplacement: WorkspaceSnapshot = {
       ...snapshot,
+      syncVersion: 1,
       monthlyIncome: 9900000,
       fixedCosts: [
         {
@@ -451,8 +476,9 @@ describe("workspace snapshot routes", () => {
       message: "Invalid snapshot"
     });
 
+    // 롤백되어 첫 PUT 결과(버전 1)가 유지되어야 한다.
     const afterRollback = await getSnapshot(owner.token, owner.workspace.id);
     expect(afterRollback.statusCode).toBe(200);
-    expect(afterRollback.json()).toEqual(snapshot);
+    expect(afterRollback.json()).toEqual({ ...snapshot, syncVersion: 1 });
   });
 });

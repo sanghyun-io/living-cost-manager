@@ -10,9 +10,16 @@ export type LocalBudgetSnapshot = {
   fixedCosts: FixedCost[];
 };
 
-export function buildWorkspaceSnapshot(workspaceId: string, snapshot: LocalBudgetSnapshot): WorkspaceSnapshot {
+export function buildWorkspaceSnapshot(
+  workspaceId: string,
+  snapshot: LocalBudgetSnapshot,
+  // 마지막으로 서버에서 읽은 syncVersion. PUT 시 서버가 이 값과 현재 DB 값을
+  // 비교해 충돌(409)을 판정한다. 서버 스냅샷을 받은 적 없으면 0.
+  syncVersion = 0
+): WorkspaceSnapshot {
   return {
     workspaceId,
+    syncVersion,
     monthlyIncome: Math.max(0, Math.round(snapshot.monthlyIncome)),
     categories: snapshot.categories.map((category) => ({
       ...category,

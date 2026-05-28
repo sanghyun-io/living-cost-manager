@@ -61,6 +61,7 @@ describe("shared api contracts", () => {
   test("workspaceSnapshotSchema accepts a complete minimal snapshot", () => {
     const snapshot = {
       workspaceId: "workspace-1",
+      syncVersion: 0,
       monthlyIncome: 3000000,
       categories: [
         {
