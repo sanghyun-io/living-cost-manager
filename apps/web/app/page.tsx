@@ -175,6 +175,13 @@ export default function Home() {
       void navigator.serviceWorker.register("./sw.js").catch(() => undefined);
     };
 
+    // useEffect 는 보통 load 이벤트 이후 실행되므로, 이미 로드가 끝났으면
+    // load 리스너만 걸 경우 영영 등록되지 않는다. readyState 로 분기한다.
+    if (document.readyState === "complete") {
+      registerWorker();
+      return;
+    }
+
     window.addEventListener("load", registerWorker);
     return () => window.removeEventListener("load", registerWorker);
   }, []);

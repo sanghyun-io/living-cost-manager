@@ -18,7 +18,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko" {...mantineHtmlProps}>
       <head>
-        <meta name="theme-color" content="#f8fafc" />
+        {/* 라이트/다크 색상 스킴에 맞춰 상태바 색을 분리한다(Mantine 기본 body 색 기준). */}
+        <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#242424" media="(prefers-color-scheme: dark)" />
         <link rel="manifest" href="./manifest.webmanifest" />
         <link rel="icon" href="./icon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="./icon.svg" />
