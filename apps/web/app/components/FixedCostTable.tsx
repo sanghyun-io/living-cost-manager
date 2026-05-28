@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
 import { suggestCategoryId } from "@living-cost-manager/shared";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
@@ -17,6 +18,7 @@ interface FixedCostTableProps {
   onPaymentMethodChange: (item: FixedCost, methodId: FixedCost["paymentMethodId"]) => void;
   onPaymentOptionChange: (item: FixedCost, optionId: string) => void;
   onAddItem: () => void;
+  onQuickAdd?: (text: string) => void;
   onEnterDeleteMode: () => void;
   onCancelDeleteMode: () => void;
   onConfirmDeleteItems: () => void;
@@ -44,6 +46,7 @@ export function FixedCostTable({
   onPaymentMethodChange,
   onPaymentOptionChange,
   onAddItem,
+  onQuickAdd,
   onEnterDeleteMode,
   onCancelDeleteMode,
   onConfirmDeleteItems,
@@ -56,6 +59,16 @@ export function FixedCostTable({
   const categoryData = categories.map((c) => ({ value: c.id, label: c.label }));
   const filterData = [{ value: "all", label: "전체" }, ...categoryData];
   const methodData = PAYMENT_METHODS.map((m) => ({ value: m.id, label: m.label }));
+  const [quickAddText, setQuickAddText] = useState("");
+
+  function submitQuickAdd() {
+    const text = quickAddText.trim();
+    if (text.length === 0 || !onQuickAdd) {
+      return;
+    }
+    onQuickAdd(text);
+    setQuickAddText("");
+  }
 
   return (
     <div className="cost-list">
@@ -96,6 +109,27 @@ export function FixedCostTable({
         <Alert color="teal" variant="light" mb="sm">
           {importMessage}
         </Alert>
+      ) : null}
+      {!isDeleteMode && onQuickAdd ? (
+        <Group gap="xs" mb="sm" align="flex-end" wrap="nowrap">
+          <TextInput
+            style={{ flex: 1 }}
+            label="빠른 추가"
+            description="예: 넷플릭스 17000원 매달"
+            placeholder="항목명과 금액, 주기를 한 줄로 입력하세요"
+            value={quickAddText}
+            onChange={(event) => setQuickAddText(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitQuickAdd();
+              }
+            }}
+          />
+          <Button onClick={submitQuickAdd} disabled={quickAddText.trim().length === 0}>
+            추가
+          </Button>
+        </Group>
       ) : null}
       <div className="filter-bar" aria-label="카테고리 필터">
         <Select
