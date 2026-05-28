@@ -35,3 +35,29 @@ test("buildApp decorates injected Prisma and leaves injected lifecycle to caller
 
   expect(prisma.$disconnect).not.toHaveBeenCalled();
 });
+
+test("CORS preflight allows the snapshot PUT from an allowed origin", async () => {
+  const prisma = {
+    $disconnect: vi.fn(async () => undefined)
+  } as unknown as PrismaClient;
+  const app = await buildApp({ env, prisma });
+
+  const response = await app.inject({
+    method: "OPTIONS",
+    url: "/workspaces/ws-1/snapshot",
+    headers: {
+      origin: "https://living-cost-manager.gamja.top",
+      "access-control-request-method": "PUT"
+    }
+  });
+
+  expect(response.statusCode).toBe(204);
+  const allowMethods = response.headers["access-control-allow-methods"];
+  expect(allowMethods).toBeDefined();
+  expect(String(allowMethods)).toContain("PUT");
+  expect(response.headers["access-control-allow-origin"]).toBe(
+    "https://living-cost-manager.gamja.top"
+  );
+
+  await app.close();
+});
