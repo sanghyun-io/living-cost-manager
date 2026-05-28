@@ -7,6 +7,7 @@ export function SharingPanel({
   serverSession,
   members,
   invitations,
+  sentInvitations,
   acceptTokens,
   inviteEmail,
   inviteRole,
@@ -20,7 +21,8 @@ export function SharingPanel({
   onInviteEmailChange,
   onInviteRoleChange,
   onUpdateMemberRole,
-  onDeleteMember
+  onDeleteMember,
+  onRevokeInvitation
 }: SharingProps) {
   return (
     <>
@@ -86,6 +88,30 @@ export function SharingPanel({
               ) : null}
             </Group>
           ))}
+
+          {canManageCurrentWorkspace && sentInvitations.length > 0 ? (
+            <Stack gap="xs" aria-label="보낸 초대">
+              <Text className="section-label" size="xs">보낸 초대</Text>
+              <Text fw={700} size="sm">대기 중인 초대</Text>
+              {sentInvitations.map((invitation) => (
+                <Group key={invitation.id} gap="xs" align="flex-end" wrap="nowrap">
+                  <div style={{ flex: 1 }}>
+                    <Text fw={700} size="sm">{invitation.email}</Text>
+                    <Text size="xs" c="dimmed">{invitationRoleLabels[invitation.role]} · 대기 중</Text>
+                  </div>
+                  <Button
+                    variant="subtle"
+                    color="rose"
+                    size="xs"
+                    disabled={isServerBusy}
+                    onClick={() => onRevokeInvitation(invitation.id)}
+                  >
+                    취소
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
+          ) : null}
 
           {canManageCurrentWorkspace ? (
             <Group gap="xs" align="flex-end">

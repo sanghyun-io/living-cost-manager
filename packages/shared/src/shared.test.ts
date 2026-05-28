@@ -173,6 +173,7 @@ describe("shared api contracts", () => {
       workspaceId: "workspace-1",
       email: "invitee@example.com",
       role: "viewer",
+      status: "pending",
       expiresAt: "2026-05-22T10:00:00.000Z",
       acceptedAt: null,
     };
@@ -184,6 +185,18 @@ describe("shared api contracts", () => {
         acceptedAt: "2026-05-22T10:30:00.000Z",
       }).acceptedAt,
     ).toBe("2026-05-22T10:30:00.000Z");
+    expect(
+      workspaceInvitationDtoSchema.parse({
+        ...invitation,
+        status: "revoked",
+      }).status,
+    ).toBe("revoked");
+    expect(() =>
+      workspaceInvitationDtoSchema.parse({
+        ...invitation,
+        status: "bogus",
+      }),
+    ).toThrow();
     expect(() =>
       workspaceInvitationDtoSchema.parse({
         ...invitation,

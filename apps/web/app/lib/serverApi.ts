@@ -50,6 +50,8 @@ export type ServerApiClient = {
   listMembers(workspaceId: string, token: string): Promise<WorkspaceMemberDto[]>;
   createInvitation(workspaceId: string, input: CreateInvitationRequest, token: string): Promise<CreatedInvitation>;
   listInvitations(token: string): Promise<WorkspaceInvitationDto[]>;
+  listWorkspaceInvitations(workspaceId: string, token: string): Promise<WorkspaceInvitationDto[]>;
+  revokeInvitation(workspaceId: string, invitationId: string, token: string): Promise<void>;
   acceptInvitation(invitationId: string, tokenValue: string, token: string): Promise<AcceptInvitationResponse>;
   updateMemberRole(workspaceId: string, memberId: string, role: WorkspaceRole, token: string): Promise<WorkspaceMemberDto>;
   deleteMember(workspaceId: string, memberId: string, token: string): Promise<void>;
@@ -182,6 +184,24 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
     },
     listInvitations(token) {
       return request<WorkspaceInvitationDto[]>("/invitations", { token });
+    },
+    listWorkspaceInvitations(workspaceId, token) {
+      return request<WorkspaceInvitationDto[]>(
+        "/workspaces/" + encodeURIComponent(workspaceId) + "/invitations",
+        { token }
+      );
+    },
+    async revokeInvitation(workspaceId, invitationId, token) {
+      await request<void>(
+        "/workspaces/" +
+          encodeURIComponent(workspaceId) +
+          "/invitations/" +
+          encodeURIComponent(invitationId),
+        {
+          method: "DELETE",
+          token
+        }
+      );
     },
     acceptInvitation(invitationId, tokenValue, token) {
       return request<AcceptInvitationResponse>("/invitations/" + encodeURIComponent(invitationId) + "/accept", {

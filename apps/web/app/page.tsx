@@ -132,6 +132,7 @@ export default function Home() {
   const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
   const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
+  const [sentInvitations, setSentInvitations] = useState<WorkspaceInvitationDto[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InvitationRole>("viewer");
   const [acceptTokens, setAcceptTokens] = useState<Record<string, string>>({});
@@ -598,6 +599,7 @@ export default function Home() {
     setServerWorkspaces([]);
     setMembers([]);
     setInvitations([]);
+    setSentInvitations([]);
     setServerErrorKind(null);
     setLastServerSyncedAt(null);
     setLastSyncedSnapshotKey("");
@@ -859,6 +861,7 @@ export default function Home() {
     setIsServerSnapshotChecked(false);
     clearWorkspaceScopedSharingDrafts();
     setMembers([]);
+    setSentInvitations([]);
     setServerSnapshot(null);
     if (workspace) {
       await prepareServerSyncDecision(nextSession);
@@ -928,13 +931,21 @@ export default function Home() {
       return;
     }
 
+    // Only workspace owners may list the invitations they've sent (server
+    // returns 403 otherwise), so guard the call by role.
+    const isOwner = session.workspace?.role === "owner";
+
     try {
-      const [nextMembers, nextInvitations] = await Promise.all([
+      const [nextMembers, nextInvitations, nextSentInvitations] = await Promise.all([
         session.workspace ? serverApi.listMembers(session.workspace.id, session.token) : Promise.resolve([]),
-        serverApi.listInvitations(session.token)
+        serverApi.listInvitations(session.token),
+        session.workspace && isOwner
+          ? serverApi.listWorkspaceInvitations(session.workspace.id, session.token)
+          : Promise.resolve([])
       ]);
       setMembers(nextMembers);
       setInvitations(nextInvitations);
+      setSentInvitations(nextSentInvitations);
       setServerErrorKind(null);
     } catch (error) {
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
@@ -1023,6 +1034,29 @@ export default function Home() {
     try {
       await serverApi.deleteMember(serverSession.workspace.id, memberId, serverSession.token);
       setServerStatus("멤버를 제거했습니다.");
+      setServerErrorKind(null);
+      await refreshSharing(serverSession);
+    } catch (error) {
+      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
+      setServerStatus(getServerSyncErrorMessage(error));
+    } finally {
+      setIsServerBusy(false);
+    }
+  }
+
+  async function handleRevokeInvitation(invitationId: string) {
+    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
+      return;
+    }
+
+    if (!window.confirm("이 초대를 취소할까요? 취소된 초대 링크는 더 이상 사용할 수 없습니다.")) {
+      return;
+    }
+
+    setIsServerBusy(true);
+    try {
+      await serverApi.revokeInvitation(serverSession.workspace.id, invitationId, serverSession.token);
+      setServerStatus("초대를 취소했습니다.");
       setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
@@ -1285,6 +1319,7 @@ export default function Home() {
             serverSession,
             members,
             invitations,
+            sentInvitations,
             acceptTokens,
             inviteEmail,
             inviteRole,
@@ -1299,7 +1334,8 @@ export default function Home() {
             onInviteEmailChange: setInviteEmail,
             onInviteRoleChange: setInviteRole,
             onUpdateMemberRole: (memberId, role) => void handleUpdateMemberRole(memberId, role),
-            onDeleteMember: (memberId) => void handleDeleteMember(memberId)
+            onDeleteMember: (memberId) => void handleDeleteMember(memberId),
+            onRevokeInvitation: (invitationId) => void handleRevokeInvitation(invitationId)
           }}
         />
 
