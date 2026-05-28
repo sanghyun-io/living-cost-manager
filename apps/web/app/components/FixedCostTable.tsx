@@ -155,6 +155,21 @@ export function FixedCostTable({
           <span>월 환산</span>
           {isDeleteMode ? <span>선택</span> : null}
         </div>
+        {visibleFixedCosts.length === 0 ? (
+          <div className="table-empty" role="note">
+            {categoryFilterId === "all" ? (
+              <>
+                <Text fw={700} mb={4}>아직 등록된 고정비가 없어요</Text>
+                <Text size="sm" c="dimmed">
+                  위의 <strong>빠른 추가</strong>에 “넷플릭스 17000원 매달”처럼 한 줄로 입력하거나,
+                  <strong> 항목 추가</strong> 버튼으로 직접 추가해 보세요. 항목명을 적으면 카테고리를 자동으로 추천해 드려요.
+                </Text>
+              </>
+            ) : (
+              <Text size="sm" c="dimmed">이 카테고리에 해당하는 고정비가 없어요. 다른 카테고리를 보거나 새 항목을 추가해 보세요.</Text>
+            )}
+          </div>
+        ) : null}
         {visibleFixedCosts.map((item) => {
           const options = getPaymentOptions(item.paymentMethodId, cards);
           const optionData = options.map((o) => ({ value: o.id, label: o.label }));
