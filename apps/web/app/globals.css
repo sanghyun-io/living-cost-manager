@@ -176,6 +176,14 @@ body {
   grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 92px 112px 64px;
 }
 
+.table-empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  background: var(--surface);
+}
+
 .table-head {
   min-height: auto;
   border: 0;
