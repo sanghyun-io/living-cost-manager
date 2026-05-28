@@ -9,3 +9,4 @@ out/
 .superpowers/
 tmp-screenshots/
 tmp-debug/
+.playwright-mcp/
