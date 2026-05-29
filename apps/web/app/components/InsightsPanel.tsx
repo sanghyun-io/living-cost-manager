@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Badge, Text, Title } from "@mantine/core";
+import { Badge, Button, Text, Title } from "@mantine/core";
 import {
+  buildMonthlyReport,
   buildSavingsInsights,
+  buildShareSummary,
   getUpcomingDues,
   type SavingsInsight,
   type SnapshotHistoryEntry,
@@ -12,8 +14,12 @@ import { formatWon } from "../lib/formatting";
 
 interface InsightsPanelProps {
   fixedCosts: FixedCost[];
-  // 서버 세션이 있을 때만 전달되는 동기화 히스토리(최신순). 없으면 추세 숨김.
   history?: SnapshotHistoryEntry[];
+  // 공유 요약용. 대시보드 summary 에서 전달.
+  monthlyIncome: number;
+  monthlyExpense: number;
+  topCategoryLabel?: string;
+  topCategoryAmount?: number;
 }
 
 const UPCOMING_WINDOW_DAYS = 14;
@@ -35,11 +41,17 @@ function formatTrendDate(iso: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export function InsightsPanel({ fixedCosts, history }: InsightsPanelProps) {
-  // 날짜 의존 계산은 마운트 후에만 수행한다(정적 export 의 SSR/CSR hydration
-  // 불일치 방지 — 서버와 클라이언트의 "오늘"이 다를 수 있음).
+export function InsightsPanel({
+  fixedCosts,
+  history,
+  monthlyIncome,
+  monthlyExpense,
+  topCategoryLabel,
+  topCategoryAmount
+}: InsightsPanelProps) {
   const [upcoming, setUpcoming] = useState<UpcomingDue<FixedCost>[] | null>(null);
   const [insights, setInsights] = useState<SavingsInsight<FixedCost>[]>([]);
+  const [shareStatus, setShareStatus] = useState<string>("");
 
   useEffect(() => {
     const now = new Date();
@@ -47,16 +59,48 @@ export function InsightsPanel({ fixedCosts, history }: InsightsPanelProps) {
     setInsights(buildSavingsInsights(fixedCosts));
   }, [fixedCosts]);
 
-  // 마운트 전(SSR/첫 페인트)에는 렌더하지 않는다.
   if (upcoming === null) {
     return null;
   }
 
   const trend = (history ?? []).slice(0, TREND_MAX);
+  const monthlyReport = (history ?? []).length > 0 ? buildMonthlyReport(history ?? []) : null;
+  const canShare = monthlyExpense > 0;
 
-  // 보여줄 내용이 전혀 없으면 패널 자체를 숨긴다.
-  if (upcoming.length === 0 && insights.length === 0 && trend.length === 0) {
+  if (
+    upcoming.length === 0 &&
+    insights.length === 0 &&
+    trend.length === 0 &&
+    !monthlyReport &&
+    !canShare
+  ) {
     return null;
+  }
+
+  async function handleShare() {
+    const text = buildShareSummary({
+      monthlyIncome,
+      monthlyExpense,
+      topCategoryLabel,
+      topCategoryAmount
+    });
+    // Web Share API 우선, 미지원 시 클립보드 폴백.
+    try {
+      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        await navigator.share({ text });
+        setShareStatus("");
+        return;
+      }
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        setShareStatus("요약을 클립보드에 복사했어요.");
+        return;
+      }
+      setShareStatus("이 브라우저에서는 공유를 지원하지 않아요.");
+    } catch {
+      // 사용자가 공유 시트를 취소한 경우 등 — 조용히 무시.
+      setShareStatus("");
+    }
   }
 
   return (
@@ -99,6 +143,14 @@ export function InsightsPanel({ fixedCosts, history }: InsightsPanelProps) {
         </div>
       ) : null}
 
+      {monthlyReport ? (
+        <div className="insights-block">
+          <Text className="section-label">월간 리포트</Text>
+          <Title order={3} mb="sm">이번 달 요약</Title>
+          <Text size="sm" className="insights-report-headline">{monthlyReport.headline}</Text>
+        </div>
+      ) : null}
+
       {trend.length > 0 ? (
         <div className="insights-block">
           <Text className="section-label">동기화 추세</Text>
@@ -111,6 +163,22 @@ export function InsightsPanel({ fixedCosts, history }: InsightsPanelProps) {
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+
+      {canShare ? (
+        <div className="insights-block">
+          <Text className="section-label">공유</Text>
+          <Title order={3} mb="sm">요약 카드 공유</Title>
+          <Text size="sm" c="dimmed" mb="sm">
+            수입 절대액은 빼고 비율로만 공유해요.
+          </Text>
+          <Button variant="light" size="sm" onClick={handleShare}>
+            고정비 요약 공유하기
+          </Button>
+          {shareStatus ? (
+            <Text size="xs" c="dimmed" mt="xs">{shareStatus}</Text>
+          ) : null}
         </div>
       ) : null}
     </section>
