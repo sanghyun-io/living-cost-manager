@@ -20,3 +20,20 @@ export const workspaceSnapshotSchema = z.object({
 });
 
 export type WorkspaceSnapshot = z.infer<typeof workspaceSnapshotSchema>;
+
+// 스냅샷 히스토리 엔트리 — 매 동기화 시점의 가벼운 요약(추세 표시용).
+// 전체 페이로드 대신 합계만 노출해 전송량을 줄인다.
+export const snapshotHistoryEntrySchema = z.object({
+  id: idSchema,
+  createdAt: z.string(), // ISO 8601
+  monthlyIncome: z.number().int().min(0),
+  fixedCostMonthlyTotal: z.number().int().min(0),
+  fixedCostCount: z.number().int().min(0),
+});
+
+export const snapshotHistoryResponseSchema = z.object({
+  entries: z.array(snapshotHistoryEntrySchema),
+});
+
+export type SnapshotHistoryEntry = z.infer<typeof snapshotHistoryEntrySchema>;
+export type SnapshotHistoryResponse = z.infer<typeof snapshotHistoryResponseSchema>;

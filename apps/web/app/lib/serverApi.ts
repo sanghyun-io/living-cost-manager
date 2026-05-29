@@ -47,6 +47,7 @@ export type ServerApiClient = {
   listWorkspaces(token: string): Promise<WorkspaceDto[]>;
   getWorkspaceSnapshot(workspaceId: string, token: string): Promise<WorkspaceSnapshot>;
   putWorkspaceSnapshot(workspaceId: string, snapshot: WorkspaceSnapshot, token: string): Promise<WorkspaceSnapshot>;
+  getSnapshotHistory(workspaceId: string, token: string, limit?: number): Promise<SnapshotHistoryEntry[]>;
   listMembers(workspaceId: string, token: string): Promise<WorkspaceMemberDto[]>;
   createInvitation(workspaceId: string, input: CreateInvitationRequest, token: string): Promise<CreatedInvitation>;
   listInvitations(token: string): Promise<WorkspaceInvitationDto[]>;
@@ -171,6 +172,14 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
         token,
         body: snapshot
       });
+    },
+    async getSnapshotHistory(workspaceId, token, limit) {
+      const query = typeof limit === "number" ? "?limit=" + limit : "";
+      const result = await request<{ entries: SnapshotHistoryEntry[] }>(
+        "/workspaces/" + encodeURIComponent(workspaceId) + "/snapshot/history" + query,
+        { token }
+      );
+      return result.entries;
     },
     listMembers(workspaceId, token) {
       return request<WorkspaceMemberDto[]>("/workspaces/" + encodeURIComponent(workspaceId) + "/members", { token });

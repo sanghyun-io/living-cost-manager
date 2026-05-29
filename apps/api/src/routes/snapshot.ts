@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { requireWorkspaceRole } from "../services/membership.js";
 import {
+  getSnapshotHistory,
   getWorkspaceSnapshot,
   isSnapshotVersionConflictError,
   isSnapshotWriteValidationError,
@@ -12,6 +13,11 @@ import {
 
 const snapshotParamsSchema = z.object({
   workspaceId: z.string().min(1)
+});
+
+const historyQuerySchema = z.object({
+  // 기본 24개(약 24회 동기화 추세), 최대 100.
+  limit: z.coerce.number().int().min(1).max(100).default(24)
 });
 
 function parseWorkspaceId(params: unknown): string {
@@ -45,6 +51,24 @@ export async function snapshotRoutes(app: FastifyInstance) {
       ]);
 
       return getWorkspaceSnapshot(app.prisma, workspaceId);
+    }
+  );
+
+  app.get(
+    "/workspaces/:workspaceId/snapshot/history",
+    { preHandler: app.authenticate },
+    async (request) => {
+      const workspaceId = parseWorkspaceId(request.params);
+
+      await requireWorkspaceRole(app, request.user.sub, workspaceId, [
+        "owner",
+        "editor",
+        "viewer"
+      ]);
+
+      const { limit } = historyQuerySchema.parse(request.query);
+      const entries = await getSnapshotHistory(app.prisma, workspaceId, limit);
+      return { entries };
     }
   );
 
