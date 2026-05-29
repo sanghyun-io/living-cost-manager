@@ -34,11 +34,13 @@
     "nodemailer": "^8.0.8",
     "prisma": "^6.19.3",
     "resend": "^6.12.3",
+    "web-push": "^3.6.7",
     "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
     "@types/nodemailer": "^8.0.0",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.14"
