@@ -41,3 +41,44 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(event.request).then((response) => response || caches.match("./")))
   );
 });
+
+// Web Push 수신 → 알림 표시. payload 는 {title, body, url} JSON.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_e) {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "생활비 고정비 관리자";
+  const options = {
+    body: data.body || "",
+    icon: "./icon.svg",
+    badge: "./icon.svg",
+    data: { url: data.url || "./" }
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// 알림 클릭 → 해당 URL(또는 앱)로 포커스/이동.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || "./";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          client.focus();
+          if ("navigate" in client && targetUrl !== "./") {
+            client.navigate(targetUrl);
+          }
+          return undefined;
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+      return undefined;
+    })
+  );
+});

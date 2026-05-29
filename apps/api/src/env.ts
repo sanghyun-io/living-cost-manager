@@ -35,6 +35,12 @@ export const envSchema = z.object({
   SMTP_USER: z.string().min(1).optional(),
   SMTP_PASS: z.string().min(1).optional(),
 
+  // Web Push(VAPID). All optional — when unset, push is disabled gracefully and
+  // server boot is unaffected. VAPID_SUBJECT is a "mailto:..." string.
+  VAPID_PUBLIC_KEY: z.string().min(1).optional(),
+  VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+  VAPID_SUBJECT: z.string().min(1).optional(),
+
   // Token lifetimes (seconds). access short-lived, refresh long-lived.
   ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900), // 15m
   REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(60 * 60 * 24 * 7), // 7d
