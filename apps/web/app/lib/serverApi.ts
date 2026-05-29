@@ -9,7 +9,8 @@ import type {
   WorkspaceInvitationDto,
   WorkspaceMemberDto,
   WorkspaceRole,
-  WorkspaceSnapshot
+  WorkspaceSnapshot,
+  SnapshotHistoryEntry
 } from "@living-cost-manager/shared";
 
 // Bumped to v2 because the session now stores a refresh token alongside the
