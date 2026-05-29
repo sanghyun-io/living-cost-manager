@@ -155,6 +155,66 @@ async function getSnapshot(token: string, workspaceId: string) {
   });
 }
 
+async function getSnapshotHistory(token: string, workspaceId: string, limit?: number) {
+  const query = typeof limit === "number" ? `?limit=${limit}` : "";
+  return app.inject({
+    method: "GET",
+    url: `/workspaces/${workspaceId}/snapshot/history${query}`,
+    headers: authHeaders(token)
+  });
+}
+
+describe("workspace snapshot history", () => {
+  test("매 PUT마다 누적되고 요약을 최신순으로 반환한다", async () => {
+    const owner = await registerTestUser("History Owner");
+
+    // 두 번 PUT → 백업 2건 누적. 두 번째는 버전 1 로(낙관적 잠금).
+    expect((await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 0))).statusCode).toBe(200);
+    expect((await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 1))).statusCode).toBe(200);
+
+    const res = await getSnapshotHistory(owner.token, owner.workspace.id);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      entries: Array<{ createdAt: string; monthlyIncome: number; fixedCostMonthlyTotal: number; fixedCostCount: number }>;
+    }>();
+    expect(body.entries.length).toBe(2);
+    // 최신순(createdAt 내림차순)
+    expect(body.entries[0].createdAt >= body.entries[1].createdAt).toBe(true);
+    // buildSnapshot: monthlyIncome 4_200_000, fixedCosts 2건
+    // (insurance 300000/2.5=120000, rent 1200000/1=1200000) → 합 1_320_000.
+    expect(body.entries[0].monthlyIncome).toBe(4200000);
+    expect(body.entries[0].fixedCostMonthlyTotal).toBe(1320000);
+    expect(body.entries[0].fixedCostCount).toBe(2);
+  });
+
+  test("limit 파라미터로 개수를 제한한다", async () => {
+    const owner = await registerTestUser("History Limit Owner");
+    for (let v = 0; v < 3; v += 1) {
+      expect((await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, v))).statusCode).toBe(200);
+    }
+    const res = await getSnapshotHistory(owner.token, owner.workspace.id, 2);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ entries: unknown[] }>().entries.length).toBe(2);
+  });
+
+  test("viewer도 history를 읽을 수 있다", async () => {
+    const owner = await registerTestUser("History Viewer Owner");
+    const viewer = await addWorkspaceMember(owner.workspace.id, "viewer");
+    expect((await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 0))).statusCode).toBe(200);
+
+    const res = await getSnapshotHistory(viewer.token, owner.workspace.id);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ entries: unknown[] }>().entries.length).toBe(1);
+  });
+
+  test("비멤버는 history를 읽을 수 없다 (403)", async () => {
+    const owner = await registerTestUser("History NonMember Owner");
+    const stranger = await registerTestUser("History Stranger");
+    const res = await getSnapshotHistory(stranger.token, owner.workspace.id);
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 function expectSanitizedBadRequest(response: Awaited<ReturnType<typeof app.inject>>) {
   expect(response.statusCode).toBe(400);
 

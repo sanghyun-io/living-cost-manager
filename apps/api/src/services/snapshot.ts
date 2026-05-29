@@ -1,5 +1,9 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { FixedCostDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
+import type {
+  FixedCostDto,
+  SnapshotHistoryEntry,
+  WorkspaceSnapshot
+} from "@living-cost-manager/shared";
 
 function toFixedCostDto(fixedCost: {
   id: string;
@@ -206,5 +210,62 @@ export async function replaceWorkspaceSnapshot(
     });
 
     return getWorkspaceSnapshot(tx, snapshot.workspaceId);
+  });
+}
+
+function monthlyEquivalentAmount(amount: number, periodMonths: number): number {
+  if (periodMonths <= 0) {
+    return 0;
+  }
+  return Math.round(amount / periodMonths);
+}
+
+// 저장된 백업 페이로드(WorkspaceSnapshot)에서 추세 요약을 계산한다.
+// payload 는 신뢰할 수 없는 Json 이므로 방어적으로 파싱한다.
+function summarizeBackupPayload(payload: unknown): {
+  monthlyIncome: number;
+  fixedCostMonthlyTotal: number;
+  fixedCostCount: number;
+} {
+  const snapshot = (payload ?? {}) as Partial<WorkspaceSnapshot>;
+  const monthlyIncome =
+    typeof snapshot.monthlyIncome === "number" ? Math.max(0, Math.round(snapshot.monthlyIncome)) : 0;
+  const fixedCosts = Array.isArray(snapshot.fixedCosts) ? snapshot.fixedCosts : [];
+  let total = 0;
+  for (const fc of fixedCosts) {
+    if (fc && typeof fc.amount === "number" && typeof fc.periodMonths === "number") {
+      total += monthlyEquivalentAmount(fc.amount, fc.periodMonths);
+    }
+  }
+  return {
+    monthlyIncome,
+    fixedCostMonthlyTotal: Math.max(0, Math.round(total)),
+    fixedCostCount: fixedCosts.length
+  };
+}
+
+/**
+ * 워크스페이스의 동기화 히스토리(최신순)를 가벼운 요약 형태로 반환한다.
+ * 매 PUT 마다 BackupSnapshot 이 쌓이므로 그것을 추세 데이터로 활용한다.
+ */
+export async function getSnapshotHistory(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  workspaceId: string,
+  limit: number
+): Promise<SnapshotHistoryEntry[]> {
+  const backups = await prisma.backupSnapshot.findMany({
+    where: { workspaceId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { id: true, createdAt: true, payload: true }
+  });
+
+  return backups.map((backup) => {
+    const summary = summarizeBackupPayload(backup.payload);
+    return {
+      id: backup.id,
+      createdAt: backup.createdAt.toISOString(),
+      ...summary
+    };
   });
 }
