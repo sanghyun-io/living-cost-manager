@@ -12,9 +12,11 @@ import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
 import { authRoutes } from "./routes/auth.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { memberRoutes } from "./routes/members.js";
+import { pushRoutes } from "./routes/push.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { createEmailProvider, type EmailProvider } from "./services/email.js";
+import { configureWebPush } from "./services/push.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -39,6 +41,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
   app.decorate("prisma", prisma);
   app.decorate("appEnv", env);
   app.decorate("email", createEmailProvider(env, app.log));
+  // VAPID 설정(설정돼 있을 때만). 미설정이면 푸시는 비활성으로 동작한다.
+  configureWebPush(env);
   app.addHook("onClose", async () => {
     if (!options.prisma) {
       await prisma.$disconnect();
@@ -91,6 +95,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(invitationRoutes);
     await api.register(memberRoutes);
     await api.register(snapshotRoutes);
+    await api.register(pushRoutes);
     api.get("/health", async () => ({ ok: true }));
   };
 
