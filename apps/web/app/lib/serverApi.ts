@@ -61,16 +61,37 @@ export type ServerApiClient = {
 
 export class ServerApiError extends Error {
   readonly status: number;
+  // Machine-readable error code from the API body (e.g. "EMAIL_NOT_VERIFIED").
+  readonly code: string | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code: string | null = null) {
     super(message);
     this.name = "ServerApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
+// Stable code the API returns when a write/share endpoint is blocked because the
+// caller's email is not yet verified. Kept in sync with the API's
+// requireVerifiedEmail preHandler.
+export const EMAIL_NOT_VERIFIED_CODE = "EMAIL_NOT_VERIFIED";
+
 export function isServerAuthFailure(error: unknown): boolean {
+  // An email-verification block is a 403 but is NOT a session/permission
+  // failure — exclude it so callers don't show a "log in again" message.
+  if (isEmailNotVerifiedError(error)) {
+    return false;
+  }
   return error instanceof ServerApiError && (error.status === 401 || error.status === 403);
+}
+
+export function isEmailNotVerifiedError(error: unknown): boolean {
+  return (
+    error instanceof ServerApiError &&
+    error.status === 403 &&
+    error.code === EMAIL_NOT_VERIFIED_CODE
+  );
 }
 
 type ClientOptions = {
@@ -274,7 +295,8 @@ async function requestJson<T>(
   });
 
   if (!response.ok) {
-    throw new ServerApiError(await readErrorMessage(response), response.status);
+    const { message, code } = await readError(response);
+    throw new ServerApiError(message, response.status, code);
   }
 
   if (response.status === 204) {
@@ -284,18 +306,21 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readError(response: Response): Promise<{ message: string; code: string | null }> {
   const fallback = response.statusText || "서버 요청에 실패했습니다.";
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
-    return fallback;
+    return { message: fallback, code: null };
   }
 
   try {
-    const body = (await response.json()) as { message?: unknown; error?: unknown };
-    const message = typeof body.message === "string" ? body.message : body.error;
-    return typeof message === "string" && message.trim().length > 0 ? message.trim() : fallback;
+    const body = (await response.json()) as { message?: unknown; error?: unknown; code?: unknown };
+    const rawMessage = typeof body.message === "string" ? body.message : body.error;
+    const message =
+      typeof rawMessage === "string" && rawMessage.trim().length > 0 ? rawMessage.trim() : fallback;
+    const code = typeof body.code === "string" ? body.code : null;
+    return { message, code };
   } catch {
-    return fallback;
+    return { message: fallback, code: null };
   }
 }

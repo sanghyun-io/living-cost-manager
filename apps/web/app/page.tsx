@@ -32,6 +32,7 @@ import {
 import { createUser, getUserDataKey, LOCAL_USER_NAME, mergeUsers, resolveStartupUser, type AppUser } from "./lib/users";
 import {
   createServerApiClient,
+  isEmailNotVerifiedError,
   isServerAuthFailure,
   resolveServerSessionWorkspace,
   ServerApiError,
@@ -71,6 +72,7 @@ import { CategoryModal } from "./components/modals/CategoryModal";
 import { CardModal } from "./components/modals/CardModal";
 import { AuthModal } from "./components/modals/AuthModal";
 import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
+import { VerifyEmailNoticeModal } from "./components/modals/VerifyEmailNoticeModal";
 import { DataModal } from "./components/modals/DataModal";
 
 const USERS_KEY = "living-cost-manager:users:v1";
@@ -97,6 +99,8 @@ export default function Home() {
   // "login" | "register" lives in serverAuthMode; this adds the forgot-password view.
   const [authView, setAuthView] = useState<"auth" | "forgot">("auth");
   const [resetToken, setResetToken] = useState<string | null>(null);
+  // Post-signup "check your email" notice. Holds the address we sent to.
+  const [verifyNoticeEmail, setVerifyNoticeEmail] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [changeCurrentPassword, setChangeCurrentPassword] = useState("");
   const [changeNewPassword, setChangeNewPassword] = useState("");
@@ -272,6 +276,8 @@ export default function Home() {
         .verifyEmail(verify)
         .then(() => {
           setServerStatus("이메일 인증이 완료되었습니다.");
+          // If the post-signup notice is still open, dismiss it now.
+          setVerifyNoticeEmail(null);
           setServerSession((current) => {
             if (!current) {
               return current;
@@ -599,9 +605,20 @@ export default function Home() {
 
       serverRestoreCheckedRef.current = true;
       setServerPassword("");
+      // After signup, walk the user through email verification instead of
+      // dropping them straight into the data modal. Cloud writes are gated on
+      // verification, so the "check your email" notice sets expectations.
+      const justRegisteredUnverified =
+        serverAuthMode === "register" && nextSession.user.emailVerified !== true;
       if (isAuthModalOpen) {
         setIsAuthModalOpen(false);
-        setIsDataModalOpen(true);
+        if (justRegisteredUnverified) {
+          setServerStatus("");
+          setServerErrorKind(null);
+          setVerifyNoticeEmail(nextSession.user.email);
+        } else {
+          setIsDataModalOpen(true);
+        }
       }
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
@@ -1434,6 +1451,26 @@ export default function Home() {
           }}
         />
 
+      <VerifyEmailNoticeModal
+          opened={verifyNoticeEmail !== null}
+          email={verifyNoticeEmail ?? ""}
+          isServerBusy={isServerBusy}
+          serverStatus={serverStatus}
+          serverErrorKind={serverErrorKind}
+          onResend={() => void handleResendVerification()}
+          onContinue={() => {
+            setVerifyNoticeEmail(null);
+            setServerStatus("");
+            setServerErrorKind(null);
+            setIsDataModalOpen(true);
+          }}
+          onClose={() => {
+            setVerifyNoticeEmail(null);
+            setServerStatus("");
+            setServerErrorKind(null);
+          }}
+        />
+
       <CategoryModal
           opened={isCategoryModalOpen}
           categories={categories}
@@ -1592,6 +1629,9 @@ function mapServerErrorMessage(error: ServerApiError): string | null {
 }
 
 function getServerSyncErrorMessage(error: unknown) {
+  if (isEmailNotVerifiedError(error)) {
+    return "이메일 인증 후에 클라우드 저장(동기화)을 사용할 수 있습니다. 가입 시 받은 인증 메일의 링크를 확인해 주세요.";
+  }
   if (isServerAuthFailure(error)) {
     return "서버 세션이 만료되었거나 권한이 없습니다. 다시 로그인해 주세요.";
   }

@@ -51,6 +51,12 @@ async function registerTestUser(name: string): Promise<RegisteredUser> {
   expect(response.statusCode).toBe(201);
 
   const body = response.json<{ accessToken: string } & RegisteredUser>();
+  // Snapshot writes are gated behind email verification; mark the freshly
+  // registered user verified so these tests exercise the happy path.
+  await prisma.user.update({
+    where: { id: body.user.id },
+    data: { emailVerifiedAt: new Date() }
+  });
   return { ...body, token: body.accessToken };
 }
 
@@ -163,6 +169,37 @@ async function getSnapshotHistory(token: string, workspaceId: string, limit?: nu
     headers: authHeaders(token)
   });
 }
+
+// Registers a user WITHOUT marking the email verified, to exercise the gate.
+async function registerUnverifiedUser(name: string): Promise<RegisteredUser> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/auth/register",
+    payload: {
+      email: `${runId}-${crypto.randomUUID()}@example.com`,
+      password: "password123",
+      name
+    }
+  });
+  expect(response.statusCode).toBe(201);
+  const body = response.json<{ accessToken: string } & RegisteredUser>();
+  return { ...body, token: body.accessToken };
+}
+
+describe("email verification gate", () => {
+  test("미인증 사용자는 snapshot PUT 시 403 + EMAIL_NOT_VERIFIED", async () => {
+    const owner = await registerUnverifiedUser("Unverified Owner");
+    const res = await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 0));
+    expect(res.statusCode).toBe(403);
+    expect(res.json<{ code?: string }>().code).toBe("EMAIL_NOT_VERIFIED");
+  });
+
+  test("인증 후에는 snapshot PUT 이 통과한다", async () => {
+    const owner = await registerTestUser("Verified Owner");
+    const res = await putSnapshot(owner.token, buildSnapshot(owner.workspace.id, 0));
+    expect(res.statusCode).toBe(200);
+  });
+});
 
 describe("workspace snapshot history", () => {
   test("매 PUT마다 누적되고 요약을 최신순으로 반환한다", async () => {
