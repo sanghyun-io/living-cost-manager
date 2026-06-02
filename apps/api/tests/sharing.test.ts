@@ -75,6 +75,12 @@ async function registerTestUser(name: string, email?: string): Promise<Registere
   expect(response.statusCode).toBe(201);
 
   const body = response.json<{ accessToken: string } & RegisteredUser>();
+  // Invitations (create + accept) are gated behind email verification; mark
+  // the freshly registered user verified so the sharing flows run normally.
+  await prisma.user.update({
+    where: { id: body.user.id },
+    data: { emailVerifiedAt: new Date() }
+  });
   return { ...body, token: body.accessToken };
 }
 

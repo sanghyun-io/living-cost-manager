@@ -69,7 +69,8 @@ function normalizeCreateInvitationBody(body: unknown): unknown {
 export async function invitationRoutes(app: FastifyInstance) {
   app.post(
     "/workspaces/:workspaceId/invitations",
-    { preHandler: app.authenticate },
+    // Inviting others is a share action — gate it behind email verification.
+    { preHandler: app.requireVerifiedEmail },
     async (request, reply) => {
       const workspaceId = parseWorkspaceId(request.params);
 
@@ -168,7 +169,8 @@ export async function invitationRoutes(app: FastifyInstance) {
 
   app.post(
     "/invitations/:invitationId/accept",
-    { preHandler: app.authenticate },
+    // Joining a shared workspace also requires a verified email.
+    { preHandler: app.requireVerifiedEmail },
     async (request) => {
       const invitationId = parseInvitationId(request.params);
       const parsedBody = acceptInvitationRequestSchema.safeParse(request.body);

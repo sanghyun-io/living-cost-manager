@@ -74,7 +74,8 @@ export async function snapshotRoutes(app: FastifyInstance) {
 
   app.put(
     "/workspaces/:workspaceId/snapshot",
-    { preHandler: app.authenticate },
+    // Cloud writes (sync) are gated behind email verification.
+    { preHandler: app.requireVerifiedEmail },
     async (request) => {
       const workspaceId = parseWorkspaceId(request.params);
 

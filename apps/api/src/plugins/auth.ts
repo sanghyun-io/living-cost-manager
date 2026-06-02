@@ -41,6 +41,10 @@ declare module "@fastify/jwt" {
 declare module "fastify" {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest) => Promise<void>;
+    // Verifies the access token AND that the user's email is confirmed.
+    // Use as a preHandler on write/share endpoints that must be gated behind
+    // email verification (cloud sync, invitations).
+    requireVerifiedEmail: (request: FastifyRequest) => Promise<void>;
     signTokens: (user: { id: string; tokenVersion: number }) => IssuedTokens;
     verifyRefreshToken: (token: string) => { sub: string; tokenVersion: number };
   }
@@ -119,6 +123,32 @@ export const authPlugin = fp<AuthPluginOptions>(async (app, options) => {
     }
 
     request.user = parsedPayload.data;
+  });
+
+  app.decorate("requireVerifiedEmail", async (request: FastifyRequest) => {
+    // Runs the full authenticate flow first (token + tokenVersion checks), then
+    // adds the email-verification gate. Keeping it self-contained means routes
+    // only need this one preHandler instead of chaining authenticate + a guard.
+    await app.authenticate(request);
+
+    const user = await app.prisma.user.findUnique({
+      where: { id: request.user.sub },
+      select: { emailVerifiedAt: true }
+    });
+
+    if (!user) {
+      throw app.httpErrors.unauthorized("Invalid token");
+    }
+
+    if (user.emailVerifiedAt === null) {
+      // 403 with a stable machine-readable code so the SPA can tell an
+      // unverified-email block apart from a generic authorization failure.
+      const error = app.httpErrors.forbidden("Email verification required");
+      // @fastify/sensible serializes thrown errors via its default error
+      // handler; attaching `code` surfaces it in the JSON body as `code`.
+      (error as Error & { code?: string }).code = "EMAIL_NOT_VERIFIED";
+      throw error;
+    }
   });
 });
 
