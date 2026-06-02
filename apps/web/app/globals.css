@@ -1,12 +1,16 @@
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+
 /*
- * Layout, chart, and a few shared utility styles that remain after the Mantine
- * migration. Buttons, inputs, modals, badges, and form chrome are now provided
- * by Mantine components, so their legacy CSS has been removed.
+ * Modern-fintech redesign (Banksalad/Toss calm). Layout, chart, and shared
+ * utility styles; buttons/inputs/modals come from Mantine. Design tokens are
+ * bridged onto Mantine CSS variables and scheme-scoped so light/dark both work.
  *
- * Legacy design tokens are bridged onto Mantine CSS variables so the remaining
- * CSS follows the active color scheme (light/dark) automatically.
+ * Depth comes from soft (teal-tinted) shadows on a tinted canvas, not 1px
+ * borders. Numbers use tabular figures (.tnum). The inline-edit table grid
+ * columns are intentionally left untouched — this is a visual restyle only.
  */
 :root {
+  --app-bg: #f4f7f6; /* tinted canvas, not pure white */
   --background: var(--mantine-color-body);
   --surface: var(--mantine-color-default);
   --surface-muted: var(--mantine-color-default-hover);
@@ -16,27 +20,60 @@
   --line: var(--mantine-color-default-border);
   --accent: var(--mantine-color-teal-6);
   --accent-strong: var(--mantine-color-teal-8);
-  --blue: #2563eb;
   --rose: var(--mantine-color-rose-6);
-  --shadow: var(--mantine-shadow-xs);
-  --shadow-lg: var(--mantine-shadow-lg);
-  --radius: 8px;
+  --amber-fg: var(--mantine-color-amber-7);
+  --amber-bg: rgba(243, 173, 34, 0.14);
+  --shadow-card: 0 1px 4px rgba(15, 158, 134, 0.06), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 4px 20px rgba(15, 158, 134, 0.14), 0 12px 40px rgba(0, 0, 0, 0.12);
+  --hero-accent: linear-gradient(120deg, #0f9e86 0%, #17c8aa 55%, #2ecba6 100%);
+  --shadow: var(--shadow-card);
+  --shadow-lg: var(--shadow-card-hover);
+  --radius: 14px;
+}
+
+[data-mantine-color-scheme="dark"] {
+  --app-bg: #161b1a;
+  --amber-fg: var(--mantine-color-amber-4);
+  --amber-bg: rgba(243, 173, 34, 0.18);
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: 0 2px 8px rgba(0, 0, 0, 0.36), 0 8px 24px rgba(0, 0, 0, 0.44);
+  --hero-accent: linear-gradient(120deg, #0a806c 0%, #0f9e86 55%, #17b899 100%);
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body {
+  background: var(--app-bg);
+}
+
 body {
   margin: 0;
-  font-family: Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   font-size: 14px;
+  color: var(--text);
+}
+
+/* Tabular figures for every emphasized numeral (metric values, amounts, donut). */
+.tnum {
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .page-shell {
   width: min(1240px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 28px 0 48px;
+  padding: 36px 0 56px;
+}
+
+/* Full-bleed header strip with a hairline divider. */
+.app-header-shell {
+  width: 100%;
+  background: var(--mantine-color-body);
+  border-bottom: 1px solid var(--line);
 }
 
 .app-header {
@@ -44,7 +81,9 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin-bottom: 18px;
+  width: min(1240px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 12px 0;
 }
 
 .local-note {
@@ -63,63 +102,128 @@ body {
   max-width: 620px;
 }
 
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 20px;
-  align-items: stretch;
-  margin-bottom: 16px;
+/* Section label as a soft teal pill instead of bare uppercase text. */
+.section-label {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--mantine-color-teal-light);
+  color: var(--mantine-color-teal-light-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.section-label {
-  margin: 0 0 8px;
-  color: var(--accent-strong);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
+/* HERO — single full-width strip card with a gradient left accent. */
+.hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin-bottom: 24px;
+}
+
+.hero-strip {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 120px;
+  padding: 24px 28px;
+  border-radius: 20px;
+  background: var(--surface);
+  border-left: 4px solid transparent;
+  border-image: var(--hero-accent) 1;
+  box-shadow: var(--shadow-card);
+}
+
+.hero-left {
+  flex: 1 1 360px;
+  min-width: 280px;
+}
+
+.hero-right {
+  flex: 0 1 320px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .hero-copy {
   max-width: 620px;
-  margin: 0 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 15px;
   line-height: 1.7;
 }
 
+/* Surface cards float on shadow; borders removed. */
 .summary-panel,
 .cost-list,
 .diagram {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: none;
+  border-radius: 20px;
   background: var(--surface);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-card);
 }
 
 .summary-panel {
   display: flex;
-  min-height: 206px;
   flex-direction: column;
   justify-content: center;
   padding: 22px;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
+  min-height: auto;
 }
 
 .cost-list,
 .diagram {
-  padding: 22px;
+  padding: 24px 28px;
+}
+
+/* METRIC BAND — five KPI cells in one continuous card. */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 24px;
+  border: none;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.metric-cell {
+  padding: 20px 24px;
+  background: transparent;
+  border-right: 1px solid var(--line);
+}
+
+.metric-cell:last-child {
+  border-right: none;
+}
+
+.metric-cell:first-child {
+  border-left: 3px solid var(--mantine-color-teal-6);
+  padding-left: 21px;
+}
+
+[data-mantine-color-scheme="dark"] .metric-cell:first-child {
+  border-left-color: var(--mantine-color-teal-4);
+}
+
+.metric-value {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.metric-value.is-danger {
+  color: var(--rose);
 }
 
 .section-heading {
@@ -144,14 +248,21 @@ body {
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-end;
   justify-content: flex-end;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: none;
+  border-radius: 14px;
   background: var(--surface-subtle);
+  box-shadow: var(--shadow);
   margin-bottom: 12px;
   padding: 10px 12px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
 }
 
 .table {
@@ -159,17 +270,24 @@ body {
   gap: 8px;
 }
 
+/* Grid columns intentionally unchanged — visual restyle only. */
 .table-row {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 92px 112px;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  min-height: 62px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 10px 12px;
+  min-height: 68px;
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-radius: 10px;
+  padding: 12px 16px;
   background: var(--surface);
+  overflow: visible; /* keep input focus rings from being clipped by the radius */
   transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.table-row:hover {
+  border-color: var(--mantine-color-teal-4);
+  box-shadow: 0 2px 8px rgba(15, 158, 134, 0.1);
 }
 
 .table-row.delete-mode {
@@ -188,12 +306,21 @@ body {
   min-height: auto;
   border: 0;
   background: transparent;
-  padding-top: 0;
-  padding-bottom: 0;
+  padding: 0 16px;
   font-weight: 700;
   box-shadow: none;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Deterministic, decorative category dot before the category select. */
+.cat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
 }
 
 .delete-select-cell {
@@ -225,7 +352,7 @@ body {
 }
 
 .bar-track {
-  height: 10px;
+  height: 8px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--surface-muted);
@@ -234,7 +361,7 @@ body {
 .bar-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent), var(--blue));
+  background: var(--hero-accent);
 }
 
 .sync-summary-grid {
@@ -272,7 +399,7 @@ body {
   position: relative;
   z-index: 1;
   color: var(--text);
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 800;
 }
 
@@ -311,26 +438,52 @@ body {
   gap: 10px;
 }
 
+/* Legend rows as soft tiles. Grid columns unchanged. */
 .pie-legend-row {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr) 58px 110px;
   gap: 10px;
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: none;
+  border-radius: 10px;
   background: var(--surface);
-  padding: 10px 12px;
+  box-shadow: var(--shadow-card);
+  padding: 10px 14px;
 }
 
 .pie-legend-row.active {
-  border-color: var(--accent);
+  box-shadow: var(--shadow-card-hover);
+  border-left: 3px solid var(--mantine-color-teal-6);
+  padding-left: 11px;
   background: var(--mantine-color-teal-light);
+}
+
+[data-mantine-color-scheme="dark"] .pie-legend-row.active {
+  border-left-color: var(--mantine-color-teal-4);
 }
 
 .legend-color {
   width: 12px;
   height: 12px;
   border-radius: 999px;
+}
+
+/* Quiet delta chip (amber by default, rose when negative). Used sparingly. */
+.delta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--amber-bg);
+  color: var(--amber-fg);
+}
+
+.delta-chip.is-neg {
+  background: var(--mantine-color-rose-light);
+  color: var(--mantine-color-rose-light-color);
 }
 
 .sr-only {
@@ -353,8 +506,38 @@ body {
     grid-template-columns: 1fr;
   }
 
+  /* Hero strip stacks so the 120px single row doesn't cramp at mid-width. */
+  .hero-strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-right {
+    flex: 1 1 auto;
+  }
+
+  /* Metric band re-wraps to 2 columns with internal borders restored. */
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-cell {
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .metric-cell:nth-child(2n) {
+    border-right: none;
+  }
+
+  /* Last cell (5th, odd → starts a final single-column row): drop both edges. */
+  .metric-cell:last-child {
+    border-right: none;
+    border-bottom: none;
+  }
+
+  .metric-cell:first-child {
+    border-left: 3px solid var(--mantine-color-teal-6);
   }
 
   .bars,
@@ -382,17 +565,33 @@ body {
 }
 
 @media (max-width: 560px) {
-  .metric-grid,
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-cell {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .metric-cell:last-child {
+    border-bottom: none;
+  }
+
   .table-row,
   .table-row.delete-mode,
   .sync-summary-grid {
     grid-template-columns: 1fr;
   }
 
-  .section-heading,
-  .app-header {
+  .section-heading {
     display: grid;
     justify-items: stretch;
+  }
+
+  /* Header is flex; let its buttons wrap and fill the row instead of crowding right. */
+  .app-header {
+    justify-content: flex-start;
   }
 
   .action-group,

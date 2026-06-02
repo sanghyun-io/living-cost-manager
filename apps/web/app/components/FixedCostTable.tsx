@@ -33,6 +33,25 @@ function toNumber(value: number | string, fallback: number): number {
   return typeof value === "number" ? value : fallback;
 }
 
+// Deterministic, purely decorative category dot colors (Mantine palette vars so
+// both color schemes resolve correctly).
+const CATEGORY_COLORS = [
+  "var(--mantine-color-teal-6)",
+  "var(--mantine-color-amber-6)",
+  "var(--mantine-color-violet-6)",
+  "var(--mantine-color-blue-6)",
+  "var(--mantine-color-orange-6)",
+  "var(--mantine-color-pink-6)"
+];
+
+function categoryColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return CATEGORY_COLORS[Math.abs(hash) % CATEGORY_COLORS.length];
+}
+
 export function FixedCostTable({
   categories,
   cards,
@@ -141,7 +160,7 @@ export function FixedCostTable({
           size="sm"
         />
         <Text size="sm">{visibleFixedCosts.length}개 항목</Text>
-        <Text size="sm" fw={700}>월 환산 {formatWon(visibleFixedCostTotal)}</Text>
+        <Text size="sm" fw={700} className="tnum">월 환산 {formatWon(visibleFixedCostTotal)}</Text>
       </div>
       <div className="table" role="table" aria-label="고정비 목록">
         <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} role="row">
@@ -190,14 +209,22 @@ export function FixedCostTable({
                 />
               </span>
               <span>
-                <Select
-                  aria-label="카테고리"
-                  size="xs"
-                  data={categoryData}
-                  value={item.categoryId}
-                  onChange={(value) => onItemChange(item.id, { categoryId: value ?? item.categoryId })}
-                  allowDeselect={false}
-                />
+                <Group gap={6} wrap="nowrap" align="center">
+                  <span
+                    className="cat-dot"
+                    style={{ background: categoryColor(item.categoryId) }}
+                    aria-hidden
+                  />
+                  <Select
+                    aria-label="카테고리"
+                    size="xs"
+                    style={{ flex: 1 }}
+                    data={categoryData}
+                    value={item.categoryId}
+                    onChange={(value) => onItemChange(item.id, { categoryId: value ?? item.categoryId })}
+                    allowDeselect={false}
+                  />
+                </Group>
                 {!isDeleteMode && suggestedCategory ? (
                   <Button
                     variant="subtle"
@@ -281,7 +308,7 @@ export function FixedCostTable({
                 />
               </span>
               <span className="monthly-equivalent-cell">
-                <Text fw={700} size="sm">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
+                <Text fw={700} size="sm" className="tnum">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
                 <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
               </span>
               {isDeleteMode ? (

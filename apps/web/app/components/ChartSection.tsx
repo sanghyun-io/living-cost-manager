@@ -54,7 +54,7 @@ export function ChartSection({
             <div className="bar-row" key={bucket.categoryId}>
               <div className="bar-meta">
                 <span>{bucket.label}</span>
-                <strong>{formatWon(bucket.amount)}</strong>
+                <strong className="tnum">{formatWon(bucket.amount)}</strong>
               </div>
               <div className="bar-track">
                 <div
@@ -74,7 +74,7 @@ export function ChartSection({
             onMouseLeave={onPieLeave}
             onMouseMove={onPieMove}
           >
-            <span>{monthlyExpense > 0 ? "100%" : "0%"}</span>
+            <span className="tnum">{monthlyExpense > 0 ? "100%" : "0%"}</span>
             {activePieSegment ? (
               <div
                 className="pie-tooltip"
@@ -82,8 +82,8 @@ export function ChartSection({
                 role="tooltip"
               >
                 <strong>{activePieSegment.label}</strong>
-                <span>{formatWon(activePieSegment.amount)}</span>
-                <small>{activePieSegment.percent}%</small>
+                <span className="tnum">{formatWon(activePieSegment.amount)}</span>
+                <small className="tnum">{activePieSegment.percent}%</small>
               </div>
             ) : null}
           </div>
@@ -95,8 +95,8 @@ export function ChartSection({
               >
                 <span className="legend-color" style={{ background: chartColors[index % chartColors.length] }} />
                 <span>{segment.label}</span>
-                <strong>{segment.percent}%</strong>
-                <small>{formatWon(segment.amount)}</small>
+                <strong className="tnum">{segment.percent}%</strong>
+                <small className="tnum">{formatWon(segment.amount)}</small>
               </div>
             ))}
           </div>
