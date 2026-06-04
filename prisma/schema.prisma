@@ -18,6 +18,7 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
   pushSubscriptions       PushSubscription[]
+  pushDeliveries          PushDelivery[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 }
@@ -31,6 +32,20 @@ model PushSubscription {
   auth      String
   createdAt DateTime @default(now())
 
+  @@index([userId])
+}
+
+// 발송 이력 — 중복 발송 방지용. dedupeKey 는 "발송 대상 날짜"(YYYY-MM-DD,
+// 묶음 발송이므로 사용자당 하루 1건). (userId, dedupeKey) 가 unique 이므로
+// 배치를 같은 날 재실행해도 한 번만 발송된다.
+model PushDelivery {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dedupeKey String
+  sentAt    DateTime @default(now())
+
+  @@unique([userId, dedupeKey])
   @@index([userId])
 }
 

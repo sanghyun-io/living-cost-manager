@@ -1,0 +1,14 @@
+[Unit]
+Description=Living Cost Manager — schedule daily due-reminder push (09:00 KST)
+
+[Timer]
+# 정책(#35): 매일 오전 9시 KST = UTC 00:00. systemd 는 UTC 기준이므로 00:00.
+OnCalendar=*-*-* 00:00:00 UTC
+# VM 가 꺼져 있어 놓친 실행이 있으면 부팅 후 한 번 보충.
+Persistent=true
+# 다른 타이머와 정확히 겹치지 않도록 소폭 분산(최대 2분).
+RandomizedDelaySec=120
+Unit=living-cost-manager-push.service
+
+[Install]
+WantedBy=timers.target

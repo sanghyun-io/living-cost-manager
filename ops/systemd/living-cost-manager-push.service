@@ -1,0 +1,22 @@
+[Unit]
+Description=Living Cost Manager — daily due-reminder push batch (D-1)
+# DB(원격 PostgreSQL)와 네트워크가 올라온 뒤 실행.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/living-cost-manager
+# .env.oci 에서 DATABASE_URL · VAPID_* 등을 주입(이미 운영에 존재).
+EnvironmentFile=/home/ubuntu/living-cost-manager/.env.oci
+# 배치 본체: 한 번 실행 후 종료. dist 는 api 빌드 산출물.
+ExecStart=/usr/bin/node /home/ubuntu/living-cost-manager/apps/api/dist/jobs/send-due-reminders.js
+# 1GB RAM VM 보호 — 종료형 배치라 상시 점유는 없지만 상한을 둔다.
+MemoryMax=400M
+# 실패 시 systemd 가 로그에 기록(journalctl). 재시도는 timer Persistent 가 담당.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
