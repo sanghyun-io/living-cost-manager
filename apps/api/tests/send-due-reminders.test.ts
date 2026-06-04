@@ -95,8 +95,21 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-beforeEach(() => {
+// runDueReminders 는 "모든 구독 사용자"를 순회하므로, 테스트 간 데이터가 누적되면
+// targetedUsers 등 전역 카운트가 오염된다. 각 테스트 전에 이 파일이 만든
+// (runId 범위) 데이터를 외래키 순서로 정리해 격리한다.
+async function cleanupTestData() {
+  await prisma.pushDelivery.deleteMany({ where: { user: { email: { contains: runId } } } });
+  await prisma.fixedCost.deleteMany({
+    where: { workspace: { members: { some: { user: { email: { contains: runId } } } } } }
+  });
+  await prisma.pushSubscription.deleteMany({ where: { endpoint: { contains: runId } } });
+  await prisma.user.deleteMany({ where: { email: { contains: runId } } });
+}
+
+beforeEach(async () => {
   vi.clearAllMocks();
+  await cleanupTestData();
 });
 
 describe("runDueReminders", () => {
