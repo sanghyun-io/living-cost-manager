@@ -171,10 +171,23 @@ export type SavingsInsight<T extends PredictableFixedCost> = {
   items: T[];
 };
 
+// 구조적으로 줄이기 어려운(필수·계약형) 카테고리. 월세(주거)·보험은 "구독을
+// 끊으세요" 식 절감 조언이 헛다리이므로, "largest" 절감 후보에서 제외한다.
+// (중복 구독 인사이트는 카테고리와 무관하게 유효하므로 그대로 둔다.)
+export const HARD_TO_REDUCE_CATEGORY_IDS: ReadonlySet<string> = new Set([
+  "housing",
+  "insurance"
+]);
+
+export function isHardToReduceCategory(categoryId: string): boolean {
+  return HARD_TO_REDUCE_CATEGORY_IDS.has(categoryId);
+}
+
 /**
  * 액션형 절감 인사이트를 만든다(우선순위 순).
  *  1) 중복 구독 — 하나만 남기면 나머지 합계만큼 절감.
- *  2) 가장 큰 단일 항목 — 빼면 얼마 절감(참고용).
+ *  2) 줄일 만한 항목 중 가장 큰 단일 항목 — 빼면 얼마 절감(참고용).
+ *     단 주거·보험처럼 줄이기 어려운 카테고리는 후보에서 제외한다.
  */
 export function buildSavingsInsights<T extends PredictableFixedCost>(
   items: T[]
@@ -199,9 +212,10 @@ export function buildSavingsInsights<T extends PredictableFixedCost>(
     }
   }
 
-  // 가장 큰 단일 항목(중복 인사이트와 겹치지 않을 때만 추가).
-  if (items.length > 0) {
-    const largest = items.reduce((max, i) =>
+  // 가장 큰 단일 항목 — 단 "줄일 만한"(주거·보험 제외) 항목 중에서만 고른다.
+  const reducible = items.filter((i) => !isHardToReduceCategory(i.categoryId));
+  if (reducible.length > 0) {
+    const largest = reducible.reduce((max, i) =>
       monthlyEquivalent(i) > monthlyEquivalent(max) ? i : max
     );
     const monthly = monthlyEquivalent(largest);
