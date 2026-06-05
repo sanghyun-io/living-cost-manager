@@ -472,6 +472,7 @@ describe("server snapshot mapping", () => {
   test("hydrates server snapshots back to local app state", () => {
     const hydrated = hydrateWorkspaceSnapshot({
       workspaceId: "workspace-1",
+      syncVersion: 0,
       monthlyIncome: 3_500_000,
       categories: [{ id: "fitness", workspaceId: "workspace-1", label: "운동" }],
       cards: [{ id: "card-living", workspaceId: "workspace-1", label: "생활비 카드", billingDay: 21, isEndOfMonth: false }],
@@ -505,6 +506,7 @@ describe("server snapshot mapping", () => {
     expect(
       isWorkspaceSnapshotEmpty({
         workspaceId: "workspace-1",
+        syncVersion: 0,
         monthlyIncome: 0,
         categories: [],
         cards: [],
