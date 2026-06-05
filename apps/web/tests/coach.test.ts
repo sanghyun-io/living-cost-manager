@@ -82,6 +82,99 @@ describe("selectCoachSegments — 조합", () => {
     }
   });
 
+  test("추세 데이터 없으면(previous null) trend 조각 없음", () => {
+    expect(keys(input())).not.toContain("trend");
+  });
+
+  test("지난달 대비 데이터 있으면 trend 추가되고 격려 바로 뒤", () => {
+    const k = keys(
+      input({ previousMonthlyTotal: 1_000_000, deltaAmount: 39_000, deltaPercent: 3.9 })
+    );
+    expect(k).toContain("trend");
+    expect(k.indexOf("trend")).toBe(1);
+  });
+
+  test("고정비 증가 시 trend 문장에 '늘었'과 금액·퍼센트 포함", () => {
+    const seg = selectCoachSegments(
+      input({ previousMonthlyTotal: 1_000_000, deltaAmount: 39_000, deltaPercent: 3.9 })
+    ).find((s) => s.key === "trend");
+    expect(seg?.example).toContain("늘었");
+    expect(seg?.example).toContain("39,000원");
+    expect(seg?.example).toContain("+3.9%");
+  });
+
+  test("고정비 감소 시 trend 문장에 '줄였'과 양수 금액 포함", () => {
+    const seg = selectCoachSegments(
+      input({ previousMonthlyTotal: 1_039_000, deltaAmount: -39_000, deltaPercent: -3.8 })
+    ).find((s) => s.key === "trend");
+    expect(seg?.example).toContain("줄였");
+    expect(seg?.example).toContain("39,000원");
+  });
+
+  test("증감 0이면 trend 문장은 '비슷하게 유지'", () => {
+    const seg = selectCoachSegments(
+      input({ previousMonthlyTotal: 1_039_000, deltaAmount: 0, deltaPercent: 0 })
+    ).find((s) => s.key === "trend");
+    expect(seg?.example).toContain("비슷하게");
+  });
+
+  test("deltaPercent null 이어도(이전 0원) trend 는 금액만으로 안전 생성", () => {
+    const seg = selectCoachSegments(
+      input({ previousMonthlyTotal: 0, deltaAmount: 50_000, deltaPercent: null })
+    ).find((s) => s.key === "trend");
+    expect(seg?.example).toContain("50,000원");
+    expect(seg?.example).not.toContain("%");
+  });
+
+  test("모든 관점이 켜져도 조각은 최대 4개로 제한된다", () => {
+    const segments = selectCoachSegments(
+      input({
+        previousMonthlyTotal: 1_000_000,
+        deltaAmount: 39_000,
+        deltaPercent: 3.9,
+        savings: [{ title: "구독", monthlySavings: 10000 }],
+        insuranceHigh: true,
+        upcoming: [{ name: "통신비", amount: 79000, daysUntil: 3 }]
+      })
+    );
+    expect(segments.length).toBe(4);
+  });
+
+  test("상한 적용 시 격려는 항상 보존되고, 절감이 가장 먼저 잘린다", () => {
+    // 5개 후보(praise/trend/savings/insurance/upcoming) → 4개로 컷.
+    // 우선순위: praise > upcoming > trend > insurance > savings 이므로 savings 탈락.
+    const k = keys(
+      input({
+        previousMonthlyTotal: 1_000_000,
+        deltaAmount: 39_000,
+        deltaPercent: 3.9,
+        savings: [{ title: "구독", monthlySavings: 10000 }],
+        insuranceHigh: true,
+        upcoming: [{ name: "통신비", amount: 79000, daysUntil: 3 }]
+      })
+    );
+    expect(k).toContain("praise");
+    expect(k).not.toContain("savings");
+    expect(k).toContain("upcoming");
+    expect(k).toContain("trend");
+    expect(k).toContain("insurance");
+  });
+
+  test("상한 후에도 등장 순서(흐름)는 보존된다", () => {
+    // 남는 4개는 원래 순서 praise→trend→insurance→upcoming 를 유지해야 한다.
+    const k = keys(
+      input({
+        previousMonthlyTotal: 1_000_000,
+        deltaAmount: 39_000,
+        deltaPercent: 3.9,
+        savings: [{ title: "구독", monthlySavings: 10000 }],
+        insuranceHigh: true,
+        upcoming: [{ name: "통신비", amount: 79000, daysUntil: 3 }]
+      })
+    );
+    expect(k).toEqual(["praise", "trend", "insurance", "upcoming"]);
+  });
+
   test("임박 2건 이상이면 '외' 표현이 들어간다", () => {
     const segments = selectCoachSegments(
       input({
