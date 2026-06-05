@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { InvitationRole, SnapshotHistoryEntry, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
-import { parseFixedCostInput } from "@living-cost-manager/shared";
+import { buildSavingsInsights, getUpcomingDues, parseFixedCostInput } from "@living-cost-manager/shared";
 import {
   buildBudgetSummary,
   createCategory,
@@ -73,6 +73,14 @@ import { CardModal } from "./components/modals/CardModal";
 import { AuthModal } from "./components/modals/AuthModal";
 import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
 import { VerifyEmailNoticeModal } from "./components/modals/VerifyEmailNoticeModal";
+import { CoachModal, type CoachStatus } from "./components/modals/CoachModal";
+import { type CoachInput, getCoachEngine, streamCoaching } from "./lib/coach";
+import {
+  COACH_MODEL_APPROX_MB,
+  isCoachOptedIn,
+  isWebGpuAvailable,
+  setCoachOptIn
+} from "./lib/coachModel";
 import { DataModal } from "./components/modals/DataModal";
 
 const USERS_KEY = "living-cost-manager:users:v1";
@@ -96,6 +104,13 @@ export default function Home() {
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  // 온디바이스 AI 코치 (opt-in, WebGPU). 모델은 켤 때만 로드한다.
+  const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
+  const [coachStatus, setCoachStatus] = useState<CoachStatus>("idle");
+  const [coachProgress, setCoachProgress] = useState(0);
+  const [coachProgressText, setCoachProgressText] = useState("");
+  const [coachingText, setCoachingText] = useState("");
+  const [coachError, setCoachError] = useState("");
   // "login" | "register" lives in serverAuthMode; this adds the forgot-password view.
   const [authView, setAuthView] = useState<"auth" | "forgot">("auth");
   const [resetToken, setResetToken] = useState<string | null>(null);
@@ -307,6 +322,39 @@ export default function Home() {
     () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
     [visibleFixedCosts]
   );
+
+  // AI 코치 입력 — 결정적 요약(현재 고정비 · 절감 인사이트 · 임박 납부)을 묶는다.
+  // 월간 추세(지난달 대비)는 서버 동기화 히스토리가 필요하므로 로컬에서는 null.
+  const coachInput = useMemo<CoachInput>(() => {
+    const now = new Date();
+    const savings = buildSavingsInsights(fixedCosts).map((s) => ({
+      title: s.title,
+      monthlySavings: s.monthlySavings
+    }));
+    const upcoming = getUpcomingDues(fixedCosts, now, 14)
+      .slice(0, 5)
+      .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
+    return {
+      monthlyTotal: summary.monthlyExpense,
+      previousMonthlyTotal: null,
+      deltaAmount: null,
+      deltaPercent: null,
+      monthlyIncome,
+      fixedCostCount: fixedCosts.length,
+      savings,
+      upcoming
+    };
+  }, [fixedCosts, monthlyIncome, summary.monthlyExpense]);
+
+  // 규칙 기반 폴백 한 줄(WebGPU 미지원/에러 시 보조 표시).
+  const coachFallbackHeadline = useMemo(() => {
+    const rate =
+      monthlyIncome > 0 ? Math.round((summary.monthlyExpense / monthlyIncome) * 1000) / 10 : null;
+    const rateText = rate !== null ? ` 수입의 ${rate}%예요.` : "";
+    return `이번 달 월 환산 고정비는 ${summary.monthlyExpense.toLocaleString("ko-KR")}원, ${fixedCosts.length}건이에요.${rateText}`;
+  }, [summary.monthlyExpense, monthlyIncome, fixedCosts.length]);
+
+  const coachHasData = fixedCosts.length > 0;
   const pieBackground = buildPieBackground(pieSegments);
   const currentServerMember = useMemo(
     () => findCurrentMember(members, serverSession?.user.id),
@@ -745,6 +793,37 @@ export default function Home() {
       );
     } finally {
       setIsServerBusy(false);
+    }
+  }
+
+  // 코칭 생성: 엔진을 (필요시) 로드한 뒤 스트리밍으로 멘트를 만든다.
+  async function runCoaching() {
+    if (!isWebGpuAvailable()) {
+      setCoachStatus("error");
+      setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
+      return;
+    }
+    setCoachError("");
+    setCoachingText("");
+    try {
+      setCoachStatus("loading");
+      const engine = await getCoachEngine((p) => {
+        setCoachProgress(p.progress);
+        setCoachProgressText(p.text);
+      });
+      // 한 번 켜면 opt-in 으로 기억(다음엔 즉시 캐시 로드).
+      setCoachOptIn(true);
+      setCoachStatus("generating");
+      await streamCoaching(engine, coachInput, (full) => setCoachingText(full));
+      setCoachStatus("ready");
+    } catch (error) {
+      setCoachStatus("error");
+      const message = error instanceof Error ? error.message : String(error);
+      setCoachError(
+        message === "WEBGPU_UNAVAILABLE"
+          ? "이 브라우저는 WebGPU를 지원하지 않습니다."
+          : "AI 모델을 불러오지 못했어요. 네트워크를 확인하고 다시 시도해 주세요."
+      );
     }
   }
 
@@ -1273,6 +1352,14 @@ export default function Home() {
         currentUserName={currentUser?.name}
         onOpenData={() => setIsDataModalOpen(true)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenCoach={() => {
+          setIsCoachModalOpen(true);
+          setCoachError("");
+          // 이미 한 번 켰고(opt-in) 아직 코칭 전이면, 열자마자 자동 실행.
+          if (isCoachOptedIn() && isWebGpuAvailable() && coachHasData && coachStatus === "idle") {
+            void runCoaching();
+          }
+        }}
         onServerLogout={() => {
           handleServerLogout();
           handleLogout();
@@ -1469,6 +1556,22 @@ export default function Home() {
             setServerStatus("");
             setServerErrorKind(null);
           }}
+        />
+
+      <CoachModal
+          opened={isCoachModalOpen}
+          webGpuAvailable={isWebGpuAvailable()}
+          hasData={coachHasData}
+          approxMb={COACH_MODEL_APPROX_MB}
+          status={coachStatus}
+          loadProgress={coachProgress}
+          loadText={coachProgressText}
+          coaching={coachingText}
+          errorMessage={coachError}
+          fallbackHeadline={coachFallbackHeadline}
+          onStart={() => void runCoaching()}
+          onRegenerate={() => void runCoaching()}
+          onClose={() => setIsCoachModalOpen(false)}
         />
 
       <CategoryModal
