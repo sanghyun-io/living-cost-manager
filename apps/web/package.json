@@ -13,6 +13,7 @@
     "@living-cost-manager/shared": "workspace:*",
     "@mantine/core": "^7.17.8",
     "@mantine/hooks": "^7.17.8",
+    "@mlc-ai/web-llm": "^0.2.84",
     "next": "^16.0.7",
     "pretendard": "^1.3.9",
     "react": "^19.2.0",

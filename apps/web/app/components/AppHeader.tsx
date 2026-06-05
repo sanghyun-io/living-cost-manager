@@ -10,6 +10,7 @@ interface AppHeaderProps {
   currentUserName: string | undefined;
   onOpenData: () => void;
   onOpenAuth: () => void;
+  onOpenCoach: () => void;
   /** Combines server logout + local logout (wrapped in page). */
   onServerLogout: () => void;
 }
@@ -21,6 +22,7 @@ export function AppHeader({
   currentUserName,
   onOpenData,
   onOpenAuth,
+  onOpenCoach,
   onServerLogout
 }: AppHeaderProps) {
   const saveLabel = saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
@@ -40,6 +42,9 @@ export function AppHeader({
         >
           {computed === "dark" ? "☀️" : "🌙"}
         </ActionIcon>
+        <Button variant="light" color="teal" radius="xl" onClick={onOpenCoach}>
+          AI 코치
+        </Button>
         <Badge variant="light" color={saveError ? "rose" : "teal"} size="sm" radius="xl">
           {saveLabel}
         </Badge>
