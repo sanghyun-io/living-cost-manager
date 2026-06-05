@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { InvitationRole, SnapshotHistoryEntry, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
-import { buildInsuranceCheck, buildSavingsInsights, getUpcomingDues, parseFixedCostInput } from "@living-cost-manager/shared";
+import type { InvitationRole, MonthlyReport, SnapshotHistoryEntry, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
+import { buildInsuranceCheck, buildMonthlyReport, buildSavingsInsights, getUpcomingDues, parseFixedCostInput } from "@living-cost-manager/shared";
 import {
   buildBudgetSummary,
   createCategory,
@@ -144,6 +144,9 @@ export default function Home() {
   });
   const [serverStatus, setServerStatus] = useState("");
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  // 서버 동기화 히스토리로 계산한 월간 추세(지난달 대비). 코치의 추세 조각 입력.
+  // 동기화 검사 시 best-effort 로 채우며, 히스토리가 없으면 null 로 둔다.
+  const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
   const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
   const [isServerBusy, setIsServerBusy] = useState(false);
   const [serverErrorKind, setServerErrorKind] = useState<"auth" | "request" | null>(null);
@@ -324,7 +327,7 @@ export default function Home() {
   );
 
   // AI 코치 입력 — 결정적 요약(현재 고정비 · 절감 인사이트 · 임박 납부)을 묶는다.
-  // 월간 추세(지난달 대비)는 서버 동기화 히스토리가 필요하므로 로컬에서는 null.
+  // 월간 추세(지난달 대비)는 서버 동기화 히스토리(monthlyReport)가 있을 때만 채운다.
   const coachInput = useMemo<CoachInput>(() => {
     const now = new Date();
     const savings = buildSavingsInsights(fixedCosts).map((s) => ({
@@ -335,18 +338,20 @@ export default function Home() {
       .slice(0, 5)
       .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
     const insurance = buildInsuranceCheck(fixedCosts, monthlyIncome);
+    // 추세는 직전 달이 있을 때만 의미가 있다(첫 달은 previous 가 null).
+    const hasTrend = monthlyReport?.previous != null && monthlyReport.deltaAmount != null;
     return {
       monthlyTotal: summary.monthlyExpense,
-      previousMonthlyTotal: null,
-      deltaAmount: null,
-      deltaPercent: null,
+      previousMonthlyTotal: hasTrend ? monthlyReport!.previous!.fixedCostMonthlyTotal : null,
+      deltaAmount: hasTrend ? monthlyReport!.deltaAmount : null,
+      deltaPercent: hasTrend ? monthlyReport!.deltaPercent : null,
       monthlyIncome,
       fixedCostCount: fixedCosts.length,
       savings,
       upcoming,
       insuranceHigh: insurance.isHigh
     };
-  }, [fixedCosts, monthlyIncome, summary.monthlyExpense]);
+  }, [fixedCosts, monthlyIncome, summary.monthlyExpense, monthlyReport]);
 
   // 규칙 기반 폴백 한 줄(WebGPU 미지원/에러 시 보조 표시).
   const coachFallbackHeadline = useMemo(() => {
@@ -846,6 +851,20 @@ export default function Home() {
     }
   }
 
+  // 동기화 히스토리로 월간 추세를 best-effort 로 갱신한다. 히스토리 조회는
+  // 동기화 본류가 아니므로(코치 추세 조각 입력용) 실패해도 조용히 무시한다.
+  async function refreshMonthlyReport(session: ServerSession) {
+    if (!serverApi || !session.workspace) {
+      return;
+    }
+    try {
+      const entries = await serverApi.getSnapshotHistory(session.workspace.id, session.token, 24);
+      setMonthlyReport(buildMonthlyReport(entries));
+    } catch {
+      // 히스토리 조회 실패는 무시 — 추세 조각만 빠지고 나머지 코칭은 정상 동작.
+    }
+  }
+
   async function prepareServerSyncDecision(session: ServerSession) {
     if (!serverApi) {
       setIsServerSnapshotChecked(false);
@@ -854,6 +873,7 @@ export default function Home() {
 
     setIsServerSnapshotChecked(false);
     setServerSnapshot(null);
+    setMonthlyReport(null);
     setServerErrorKind(null);
 
     if (!session.workspace) {
@@ -865,6 +885,8 @@ export default function Home() {
       const remoteSnapshot = await serverApi.getWorkspaceSnapshot(session.workspace.id, session.token);
       setServerSnapshot(remoteSnapshot);
       setIsServerSnapshotChecked(true);
+      // 추세 조각용 히스토리를 백그라운드로 갱신(대기하지 않음 — 동기화 흐름 안 막음).
+      void refreshMonthlyReport(session);
 
       if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())) {
         setServerStatus("서버 워크스페이스가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
@@ -1022,6 +1044,8 @@ export default function Home() {
       setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(savedSnapshot)));
       setServerErrorKind(null);
       setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
+      // 방금 업로드가 새 히스토리 엔트리가 되므로 추세를 다시 계산해 둔다.
+      void refreshMonthlyReport(serverSession);
     } catch (error) {
       // 충돌(409): 다른 기기/멤버가 먼저 저장함. 서버 최신본을 다시 받아와
       // serverSnapshot 을 갱신하고, 사용자에게 다시 불러온 뒤 동기화하도록 안내.
@@ -1058,6 +1082,8 @@ export default function Home() {
       setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(nextSnapshot)));
       setServerErrorKind(null);
       setServerStatus("서버 데이터를 이 브라우저에 불러왔습니다.");
+      // 복원 직후에도 히스토리 기반 추세를 채워 코치 입력에 반영한다.
+      void refreshMonthlyReport(serverSession);
     } catch (error) {
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getServerSyncErrorMessage(error) + " 로컬 데이터는 변경하지 않았습니다.");

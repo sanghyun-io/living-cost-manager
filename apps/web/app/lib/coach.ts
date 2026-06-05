@@ -56,10 +56,25 @@ const SEGMENT_RULES = [
 ].join("\n");
 
 export type CoachSegment = {
-  key: "praise" | "savings" | "insurance" | "upcoming";
+  key: "praise" | "trend" | "savings" | "insurance" | "upcoming";
   // 코드가 만든 완성 코칭 문장. 모델은 이걸 같은 뜻으로 패러프레이즈만 한다.
   // 모델 호출이 실패하면 이 문장을 그대로 폴백으로 쓴다(환각 0).
   example: string;
+};
+
+// 조각 수 상한 — 항목이 많아 모든 관점이 켜져도 코치 출력이 길어지지 않게
+// 자른다. 격려는 항상 보존하고, 나머지는 아래 우선순위가 높은 것부터 채운다.
+// 작은 모델이라 조각 하나당 한 문장이므로 4문장이면 충분히 충실하다.
+const MAX_SEGMENTS = 4;
+
+// 격려를 제외한 조각의 보존 우선순위(높을수록 먼저 살아남는다).
+// 시간이 임박한 납부(행동 필요) > 추세(맥락) > 보험 점검 > 절감 제안 순.
+const SEGMENT_PRIORITY: Record<CoachSegment["key"], number> = {
+  praise: 100, // 항상 보존(자르기 대상 아님)
+  upcoming: 4,
+  trend: 3,
+  insurance: 2,
+  savings: 1
 };
 
 // 입력에서 "해당되는 조각만" 동적으로 만든다(없는 관점은 호출 자체를 건너뜀).
@@ -82,7 +97,28 @@ export function selectCoachSegments(input: CoachInput): CoachSegment[] {
         : "고정비를 차곡차곡 정리해 두셔서 살림을 안정적으로 꾸려가고 계세요.";
   segments.push({ key: "praise", example: praise });
 
-  // 2) 절감 조언 — 코드가 고른 절감 후보가 있을 때만.
+  // 2) 지난달 대비 추세 — 서버 동기화 히스토리가 있어 비교가 가능할 때만.
+  //    deltaAmount 부호로 증가/감소/동일을 나눈다. 퍼센트는 있을 때만 곁들인다.
+  if (input.previousMonthlyTotal !== null && input.deltaAmount !== null) {
+    const delta = input.deltaAmount;
+    const pct =
+      input.deltaPercent !== null
+        ? `${input.deltaPercent > 0 ? "+" : ""}${input.deltaPercent}%`
+        : null;
+    let trend: string;
+    if (delta === 0) {
+      trend = "이번 달 고정비는 지난달과 비슷하게 안정적으로 유지되고 있어요.";
+    } else if (delta > 0) {
+      const tail = pct ? `${won(delta)}(${pct}) 늘었으니` : `${won(delta)} 늘었으니`;
+      trend = `이번 달 고정비가 지난달보다 ${tail} 어떤 항목이 올랐는지 한번 살펴보시면 좋겠어요.`;
+    } else {
+      const tail = pct ? `${won(-delta)}(${pct}) 줄였으니` : `${won(-delta)} 줄였으니`;
+      trend = `이번 달 고정비를 지난달보다 ${tail} 알뜰하게 잘 관리하고 계세요.`;
+    }
+    segments.push({ key: "trend", example: trend });
+  }
+
+  // 3) 절감 조언 — 코드가 고른 절감 후보가 있을 때만.
   if (input.savings.length > 0) {
     segments.push({
       key: "savings",
@@ -90,7 +126,7 @@ export function selectCoachSegments(input: CoachInput): CoachSegment[] {
     });
   }
 
-  // 3) 보험 점검 — 보험 비중이 높을 때만(휴리스틱).
+  // 4) 보험 점검 — 보험 비중이 높을 때만(휴리스틱).
   if (input.insuranceHigh) {
     segments.push({
       key: "insurance",
@@ -98,7 +134,7 @@ export function selectCoachSegments(input: CoachInput): CoachSegment[] {
     });
   }
 
-  // 4) 임박 납부 — 14일 내 도래가 있을 때만.
+  // 5) 임박 납부 — 14일 내 도래가 있을 때만.
   if (input.upcoming.length > 0) {
     const u = input.upcoming[0];
     const tail =
@@ -111,7 +147,23 @@ export function selectCoachSegments(input: CoachInput): CoachSegment[] {
     });
   }
 
-  return segments;
+  return capSegments(segments);
+}
+
+// 조각이 MAX_SEGMENTS 를 넘으면 우선순위가 낮은 것부터 버린다. 격려는 항상
+// 남기고, 원래 등장 순서(흐름)는 그대로 유지한 채 "어떤 조각을 뺄지"만 고른다.
+function capSegments(segments: CoachSegment[]): CoachSegment[] {
+  if (segments.length <= MAX_SEGMENTS) {
+    return segments;
+  }
+  // 우선순위 높은 순으로 정렬해 상위 MAX_SEGMENTS 개를 살릴 집합으로 고른 뒤,
+  // 원래 배열을 그 집합으로 필터링해 등장 순서를 보존한다(안정적 결과).
+  const keep = new Set(
+    [...segments]
+      .sort((a, b) => SEGMENT_PRIORITY[b.key] - SEGMENT_PRIORITY[a.key])
+      .slice(0, MAX_SEGMENTS)
+  );
+  return segments.filter((s) => keep.has(s));
 }
 
 function buildSegmentMessages(segment: CoachSegment) {
