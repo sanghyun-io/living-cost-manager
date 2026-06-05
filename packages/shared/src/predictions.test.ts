@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  buildInsuranceCheck,
   buildSavingsInsights,
   computeNextDueDate,
   findDuplicateSubscriptions,
@@ -170,5 +171,45 @@ describe("buildSavingsInsights", () => {
     ];
     const insights = buildSavingsInsights(items);
     expect(insights.find((i) => i.kind === "largest")).toBeUndefined();
+  });
+});
+
+describe("buildInsuranceCheck", () => {
+  test("보험 비중이 임계(12%) 초과면 isHigh", () => {
+    // 수입 300만, 보험 40만 → 13.3% > 12%
+    const items = [cost({ id: "ins", categoryId: "insurance", amount: 400000 })];
+    const r = buildInsuranceCheck(items, 3_000_000);
+    expect(r.monthlyInsuranceTotal).toBe(400000);
+    expect(r.isHigh).toBe(true);
+  });
+
+  test("보험 비중이 임계 이하면 isHigh=false", () => {
+    // 수입 300만, 보험 15.5만 → 5.2% < 12%
+    const items = [cost({ id: "ins", categoryId: "insurance", amount: 155000 })];
+    const r = buildInsuranceCheck(items, 3_000_000);
+    expect(r.isHigh).toBe(false);
+  });
+
+  test("보험 항목 없으면 합계 0, isHigh=false", () => {
+    const items = [cost({ id: "sub", categoryId: "subscription", amount: 35000 })];
+    const r = buildInsuranceCheck(items, 3_000_000);
+    expect(r.monthlyInsuranceTotal).toBe(0);
+    expect(r.isHigh).toBe(false);
+  });
+
+  test("수입 0이면 비율 null, isHigh=false", () => {
+    const items = [cost({ id: "ins", categoryId: "insurance", amount: 400000 })];
+    const r = buildInsuranceCheck(items, 0);
+    expect(r.ratioOfIncome).toBeNull();
+    expect(r.isHigh).toBe(false);
+  });
+
+  test("여러 보험 항목은 월 환산 합산", () => {
+    const items = [
+      cost({ id: "i1", categoryId: "insurance", amount: 200000 }),
+      cost({ id: "i2", categoryId: "insurance", amount: 240000, periodMonths: 2 }) // 월 환산 12만
+    ];
+    const r = buildInsuranceCheck(items, 3_000_000);
+    expect(r.monthlyInsuranceTotal).toBe(320000); // 20만 + 12만
   });
 });

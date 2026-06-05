@@ -183,6 +183,43 @@ export function isHardToReduceCategory(categoryId: string): boolean {
   return HARD_TO_REDUCE_CATEGORY_IDS.has(categoryId);
 }
 
+// 보험은 "무조건 줄이기 어려움"이 아니라 "과하면 점검 여지 있음"으로 다룬다.
+// 공공 통계의 보험 항목이 민간 보장성보험과 정확히 매칭되지 않아(사회보험 혼재,
+// 연령대별 약함) 외부 API 대신, 보험업계 통설인 "보장성보험료는 가처분소득의
+// 8~12%가 적정"을 휴리스틱 임계로 쓴다. 수입 대비 보험 비중이 이 상단(12%)을
+// 넘을 때만 "점검 권유"를 띄운다.
+export const INSURANCE_RATIO_HIGH_THRESHOLD = 0.12;
+
+export type InsuranceCheck = {
+  // 보험 카테고리 월 환산 합계.
+  monthlyInsuranceTotal: number;
+  // 월 수입 대비 비율(0~1). 수입 0이면 null.
+  ratioOfIncome: number | null;
+  // 임계 초과로 점검을 권할 만한지.
+  isHigh: boolean;
+};
+
+/**
+ * 보험료가 수입 대비 과한지 판정한다(점검 권유 여부).
+ * 임계 초과가 아니면 isHigh=false 로, 코치는 보험을 굳이 건드리지 않는다.
+ */
+export function buildInsuranceCheck<T extends PredictableFixedCost>(
+  items: T[],
+  monthlyIncome: number
+): InsuranceCheck {
+  const monthlyInsuranceTotal = items
+    .filter((i) => i.categoryId === "insurance")
+    .reduce((sum, i) => sum + monthlyEquivalent(i), 0);
+
+  const ratioOfIncome =
+    monthlyIncome > 0 ? monthlyInsuranceTotal / monthlyIncome : null;
+
+  const isHigh =
+    ratioOfIncome !== null && ratioOfIncome > INSURANCE_RATIO_HIGH_THRESHOLD;
+
+  return { monthlyInsuranceTotal, ratioOfIncome, isHigh };
+}
+
 /**
  * 액션형 절감 인사이트를 만든다(우선순위 순).
  *  1) 중복 구독 — 하나만 남기면 나머지 합계만큼 절감.

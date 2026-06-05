@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { InvitationRole, SnapshotHistoryEntry, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
-import { buildSavingsInsights, getUpcomingDues, parseFixedCostInput } from "@living-cost-manager/shared";
+import { buildInsuranceCheck, buildSavingsInsights, getUpcomingDues, parseFixedCostInput } from "@living-cost-manager/shared";
 import {
   buildBudgetSummary,
   createCategory,
@@ -334,6 +334,7 @@ export default function Home() {
     const upcoming = getUpcomingDues(fixedCosts, now, 14)
       .slice(0, 5)
       .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
+    const insurance = buildInsuranceCheck(fixedCosts, monthlyIncome);
     return {
       monthlyTotal: summary.monthlyExpense,
       previousMonthlyTotal: null,
@@ -342,7 +343,8 @@ export default function Home() {
       monthlyIncome,
       fixedCostCount: fixedCosts.length,
       savings,
-      upcoming
+      upcoming,
+      insuranceHigh: insurance.isHigh
     };
   }, [fixedCosts, monthlyIncome, summary.monthlyExpense]);
 
