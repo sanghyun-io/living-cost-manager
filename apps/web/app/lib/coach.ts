@@ -30,100 +30,103 @@ export type CoachInput = {
   savings: Array<{ title: string; monthlySavings: number }>;
   // 14일 내 임박 납부(이름 + 금액 + N일 후).
   upcoming: Array<{ name: string; amount: number; daysUntil: number }>;
+  // 보험료가 수입 대비 과한지(휴리스틱). true 일 때만 코치가 보험 점검을 권한다.
+  insuranceHigh: boolean;
 };
 
 function won(n: number): string {
   return `${Math.round(n).toLocaleString("ko-KR")}원`;
 }
 
-// 결정적 데이터를 한국어 "문장"으로 직렬화한다(모델 입력).
-// 0.5B 같은 작은 모델은 입력 형식을 그대로 모방하는 경향이 강하다. 표(라벨:값)
-// 형태로 주면 출력도 표/나열로 나오므로, 일부러 자연스러운 서술문으로 풀어
-// 모델이 문장체 조언을 내도록 유도한다.
-export function buildCoachContext(input: CoachInput): string {
-  const lines: string[] = [];
+// ── 조각(segment) 기반 코칭 ─────────────────────────────────────────────────
+// WebLLM 은 한 엔진에서 동시 추론이 안 된다(병렬 요청 시 출력이 섞임). 그래서
+// "여러 관점을 한 번에" 대신, 관점마다 좁은 프롬프트로 1문장씩 '순차' 생성하고
+// 코드가 이어붙인다. 작은(0.5B) 모델은 한 번에 한 가지만 시키면 누락·환각이
+// 크게 준다. "무엇을 짚을지" 선정은 이미 shared 의 결정적 함수가 했고(환각 0),
+// 여기서는 고른 조각마다 코멘트만 생성한다.
 
-  if (input.monthlyIncome > 0) {
-    const rate = Math.round((input.monthlyTotal / input.monthlyIncome) * 1000) / 10;
-    lines.push(
-      `이번 달 월 환산 고정비는 ${won(input.monthlyTotal)}으로, 항목 ${input.fixedCostCount}건이고 월 수입 ${won(input.monthlyIncome)}의 ${rate}%를 차지해요.`
-    );
-  } else {
-    lines.push(
-      `이번 달 월 환산 고정비는 ${won(input.monthlyTotal)}으로, 항목은 ${input.fixedCostCount}건이에요.`
-    );
-  }
-
-  if (input.previousMonthlyTotal !== null && input.deltaAmount !== null) {
-    if (input.deltaAmount === 0) {
-      lines.push("지난달과 고정비가 거의 같아요.");
-    } else {
-      const dir = input.deltaAmount > 0 ? "늘었어요" : "줄었어요";
-      const pct = input.deltaPercent !== null ? ` (${input.deltaPercent}%)` : "";
-      lines.push(`지난달보다 ${won(Math.abs(input.deltaAmount))}${pct} ${dir}.`);
-    }
-  }
-
-  if (input.savings.length > 0) {
-    const s = input.savings[0];
-    lines.push(`눈여겨볼 만한 건 "${s.title}"으로, 손보면 월 ${won(s.monthlySavings)} 정도 아낄 수 있어요.`);
-  }
-
-  if (input.upcoming.length > 0) {
-    const u = input.upcoming[0];
-    const more = input.upcoming.length > 1 ? ` 외 ${input.upcoming.length - 1}건이 곧 빠져나가요` : "이 곧 빠져나가요";
-    lines.push(`며칠 안에 ${u.name} ${won(u.amount)}(${u.daysUntil}일 후)${more}.`);
-  }
-
-  return lines.join(" ");
-}
-
-// 작은(0.5B) 모델은 긴 출력에서 반복·환각이 늘고, 목록형 입력을 목록으로
-// 모방한다. 그래서 (1) 출력을 "정확히 2문장"으로 짧게 묶고, (2) "칭찬 1문장 +
-// 조언 1문장"이라는 단순 구조를 못박고, (3) few-shot 2개로 서로 다른 상황을
-// 보여줘 한 가지 패턴(예: '1건/2건/3건' 나열)을 모방하지 않게 한다.
-const SYSTEM_PROMPT = [
+// 0.5B 에게 "자유 생성"을 시키면 환각이 난다. 대신 우리가 이미 가진 완성 문장
+// (example)을 "같은 뜻으로 살짝만 바꿔 한 문장으로" 패러프레이즈하게 한다.
+// 새 정보를 못 넣으므로 환각 여지가 거의 없고, 톤만 자연스러워진다.
+const SEGMENT_RULES = [
   "당신은 한국어로 답하는 다정한 가계부 코치입니다.",
-  "사용자의 상황을 듣고 '정확히 두 문장'으로만 코칭하세요.",
-  "첫 문장은 따뜻한 격려, 둘째 문장은 바로 해볼 수 있는 구체적 제안 한 가지.",
-  "규칙:",
-  "- 한국어 존댓말, 부드러운 대화체. 두 문장을 넘기지 않습니다.",
-  "- 숫자·항목을 나열하거나 목록/표를 만들지 않습니다. 받은 내용을 그대로 반복하지 않습니다.",
-  "- 주어진 사실 안에서만 말하고, 없는 수치나 항목을 지어내지 않습니다.",
-  "- 구체적인 금액(원)이나 퍼센트 숫자를 답에 쓰지 않습니다. 숫자 대신 '조금', '꽤', '가볍게' 같은 말로 표현합니다. (정확한 금액은 화면에 이미 보여요.)",
-  "- 절감 제안은 입력에 '눈여겨볼 만한 건'으로 주어진 항목에 대해서만 합니다. 그 항목이 없으면 절감 얘기를 꺼내지 않습니다.",
-  "- 월세·전세·보험처럼 줄이기 어려운 고정비는 '줄이라'고 하지 않습니다. 구독·통신요금처럼 조정 가능한 항목 위주로 제안합니다.",
-  "- 마크다운·머리말·접두어 없이 코칭 두 문장만 출력합니다."
+  "주어지는 '코치 문장'을 같은 뜻으로 자연스럽게 한 문장으로 바꿔 말하세요.",
+  "규칙: 의미를 바꾸거나 새 내용을 더하지 않습니다. 숫자·퍼센트·금액·항목명을 새로 만들지 않습니다.",
+  "부드러운 존댓말, 딱 한 문장. 목록·머리말·따옴표·접두어 없이 그 한 문장만 출력합니다."
 ].join("\n");
 
-// few-shot 2개 — 절감 후보가 있을 때 / 없을 때. 서로 다른 형태를 보여줘 모델이
-// 한 가지 출력 패턴에 고착되지 않게 한다. 둘 다 "격려 + 제안" 2문장 구조.
-const FEWSHOTS: Array<{ user: string; assistant: string }> = [
-  {
-    user:
-      "이번 달 월 환산 고정비는 1,200,000원으로, 항목 4건이고 월 수입 4,000,000원의 30%를 차지해요. 눈여겨볼 만한 건 \"중복 구독\"으로, 손보면 월 20,000원 정도 아낄 수 있어요.",
-    assistant:
-      "고정비를 수입의 알맞은 선에서 안정적으로 관리하고 계세요. 이번 주에 겹치는 구독 하나만 정리해 보시면 매달 조금씩 가볍게 아낄 수 있어요."
-  },
-  {
-    user:
-      "이번 달 월 환산 고정비는 539,000원으로, 항목은 5건이고 월 수입 3,000,000원의 18%를 차지해요. 며칠 안에 통신비 79,000원(5일 후) 외 2건이 곧 빠져나가요.",
-    assistant:
-      "수입 대비 고정비 비중이 낮아서 살림을 단단하게 꾸리고 계시네요. 곧 통신비가 빠져나가니 잔액만 미리 확인해 두시면 마음 편히 넘어가실 거예요."
-  }
-];
+export type CoachSegment = {
+  key: "praise" | "savings" | "insurance" | "upcoming";
+  // 코드가 만든 완성 코칭 문장. 모델은 이걸 같은 뜻으로 패러프레이즈만 한다.
+  // 모델 호출이 실패하면 이 문장을 그대로 폴백으로 쓴다(환각 0).
+  example: string;
+};
 
-export function buildCoachMessages(input: CoachInput) {
+// 입력에서 "해당되는 조각만" 동적으로 만든다(없는 관점은 호출 자체를 건너뜀).
+export function selectCoachSegments(input: CoachInput): CoachSegment[] {
+  const segments: CoachSegment[] = [];
+
+  // 각 조각의 example 은 코드가 만든 "완성 코칭 문장"이다. 모델은 이걸 같은
+  // 뜻으로만 다듬으므로, 동적 정보(항목명·비중 톤)는 여기서 문장에 박아 둔다.
+
+  // 1) 전체 격려 — 항상.
+  const rate =
+    input.monthlyIncome > 0
+      ? Math.round((input.monthlyTotal / input.monthlyIncome) * 1000) / 10
+      : null;
+  const praise =
+    rate !== null && rate <= 40
+      ? "고정비를 수입의 낮은 선에서 알뜰하게 관리하고 계세요."
+      : rate !== null && rate > 60
+        ? "고정비가 조금 부담될 수 있는데도 항목을 잘 정리해 관리하고 계세요."
+        : "고정비를 차곡차곡 정리해 두셔서 살림을 안정적으로 꾸려가고 계세요.";
+  segments.push({ key: "praise", example: praise });
+
+  // 2) 절감 조언 — 코드가 고른 절감 후보가 있을 때만.
+  if (input.savings.length > 0) {
+    segments.push({
+      key: "savings",
+      example: `${input.savings[0].title}은(는) 이번 주에 한번 살펴보시면 매달 조금씩 가볍게 아낄 수 있어요.`
+    });
+  }
+
+  // 3) 보험 점검 — 보험 비중이 높을 때만(휴리스틱).
+  if (input.insuranceHigh) {
+    segments.push({
+      key: "insurance",
+      example: "보험료 비중이 평균보다 조금 높은 편이라, 지금 보장 내용이 나에게 꼭 맞는지 한번 점검해 보시면 좋겠어요."
+    });
+  }
+
+  // 4) 임박 납부 — 14일 내 도래가 있을 때만.
+  if (input.upcoming.length > 0) {
+    const u = input.upcoming[0];
+    const tail =
+      input.upcoming.length > 1
+        ? `${u.name} 외 몇 건이 며칠 안에 빠져나가니`
+        : `${u.name}이(가) 며칠 안에 빠져나가니`;
+    segments.push({
+      key: "upcoming",
+      example: `${tail} 잔액만 미리 확인해 두시면 마음 편히 넘어가실 거예요.`
+    });
+  }
+
+  return segments;
+}
+
+function buildSegmentMessages(segment: CoachSegment) {
   return [
-    { role: "system" as const, content: SYSTEM_PROMPT },
-    ...FEWSHOTS.flatMap((ex) => [
-      { role: "user" as const, content: ex.user },
-      { role: "assistant" as const, content: ex.assistant }
-    ]),
+    { role: "system" as const, content: SEGMENT_RULES },
+    // few-shot 1개 — "코치 문장 → 같은 뜻 한 문장" 패러프레이즈 시연.
     {
       role: "user" as const,
-      content: buildCoachContext(input)
-    }
+      content: "코치 문장: 고정비를 잘 정리해 두셔서 살림을 안정적으로 꾸리고 계세요."
+    },
+    {
+      role: "assistant" as const,
+      content: "고정비를 차곡차곡 정리해 두신 덕분에 살림을 안정적으로 꾸려가고 계세요."
+    },
+    { role: "user" as const, content: `코치 문장: ${segment.example}` }
   ];
 }
 
@@ -189,26 +192,21 @@ function overrideModelUrl(
   };
 }
 
-/**
- * 코칭 멘트를 스트리밍 생성한다. onToken 으로 부분 응답을 흘려보낸다.
- * 전체 응답 문자열을 반환한다.
- */
-export async function streamCoaching(
+// 한 조각을 1문장으로 생성한다(스트리밍, 1문장 컷).
+async function generateSegment(
   engine: MLCEngineInterface,
-  input: CoachInput,
-  onToken?: (full: string) => void
+  segment: CoachSegment,
+  onPartial?: (sentence: string) => void
 ): Promise<string> {
   const chunks = await engine.chat.completions.create({
-    messages: buildCoachMessages(input),
-    // 코치는 "주어진 데이터로만 말하는" RAG형 작업이다. 작은 모델에서 temp 가
-    // 높으면 환각이 급증하므로 낮게(0.3) 잡아 사실에 붙인다.
-    temperature: 0.3,
+    messages: buildSegmentMessages(segment),
+    // 패러프레이즈 작업이라 temp 를 아주 낮춰(0.2) 원문에 바싹 붙인다.
+    temperature: 0.2,
     top_p: 0.9,
-    // 반복("1건/2건/3건 ...") 억제 — frequency 는 같은 토큰, presence 는 같은
-    // 주제 반복을 누른다(OpenAI 의미, [-2,2]).
-    frequency_penalty: 0.6,
-    presence_penalty: 0.4,
-    max_tokens: 160,
+    frequency_penalty: 0.4,
+    presence_penalty: 0.2,
+    // 한 문장이라 토큰 상한을 짧게 둬 군더더기를 원천 차단.
+    max_tokens: 70,
     stream: true
   });
 
@@ -217,24 +215,48 @@ export async function streamCoaching(
     const delta = chunk.choices[0]?.delta?.content ?? "";
     if (delta) {
       raw += delta;
-      // 스트리밍 중에도 2문장으로 잘라 보여준다 — 작은 모델이 2문장 뒤로
-      // 환각 계산식·목록을 덧붙여도 사용자에게는 노출되지 않는다.
-      onToken?.(clampToTwoSentences(raw));
+      onPartial?.(clampToOneSentence(raw) || segment.example);
     }
   }
-  return clampToTwoSentences(raw);
+  const result = clampToOneSentence(raw);
+  // 모델 출력이 비었거나 비정상으로 짧으면(패러프레이즈 실패) 원문 폴백.
+  return result.length >= 6 ? result : segment.example;
 }
 
-// 작은 모델은 "2문장만"을 자주 못 지키고 뒤에 계산식/목록 환각을 덧붙인다.
-// 출력 안정화를 위해 앞 2문장만 취한다(목록 글머리 줄은 문장으로 안 침).
-export function clampToTwoSentences(text: string): string {
-  // 줄바꿈 이후의 목록/계산식 꼬리는 통째로 버린다(보통 환각이 여기서 시작).
+/**
+ * 코칭을 조각별로 '순차' 생성해 코드로 결합한다. onToken 으로 누적 결과를
+ * 흘려보내(한 줄씩 채우기) 순차 대기 체감을 줄인다.
+ *
+ * WebLLM 은 동시 추론을 지원하지 않으므로 조각은 await 로 하나씩 처리한다.
+ * 해당되는 조각만 호출하므로 보통 2~3회(격려 + 1~2개 조언)면 끝난다.
+ */
+export async function streamCoaching(
+  engine: MLCEngineInterface,
+  input: CoachInput,
+  onToken?: (full: string) => void
+): Promise<string> {
+  const segments = selectCoachSegments(input);
+  const done: string[] = [];
+
+  for (const segment of segments) {
+    // 진행 중 조각은 done(확정분) 뒤에 실시간으로 이어 붙여 표시한다.
+    const sentence = await generateSegment(engine, segment, (partial) => {
+      onToken?.([...done, partial].filter(Boolean).join(" "));
+    });
+    if (sentence) {
+      done.push(sentence);
+      onToken?.(done.join(" "));
+    }
+  }
+
+  return done.join(" ");
+}
+
+// 작은 모델은 "한 문장만"을 자주 못 지키고 뒤에 군더더기를 덧붙인다.
+// 첫 문장(첫 종결부호까지)만 취한다. 줄바꿈 이후 꼬리도 버린다.
+export function clampToOneSentence(text: string): string {
   const firstBlock = text.split(/\n/)[0]?.trim() ?? "";
   const base = firstBlock.length > 0 ? firstBlock : text.trim();
-  // 마침표/물음표/느낌표 기준 최대 2문장.
-  const matches = base.match(/[^.!?。]*[.!?。]/g);
-  if (!matches || matches.length === 0) {
-    return base;
-  }
-  return matches.slice(0, 2).join("").trim();
+  const matches = base.match(/[^.!?。]*[.!?。]/);
+  return (matches ? matches[0] : base).trim();
 }
