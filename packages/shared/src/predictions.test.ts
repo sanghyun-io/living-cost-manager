@@ -149,4 +149,26 @@ describe("buildSavingsInsights", () => {
   test("빈 목록이면 인사이트 없음", () => {
     expect(buildSavingsInsights([])).toEqual([]);
   });
+
+  test("줄이기 어려운 카테고리(주거·보험)는 largest 후보에서 제외", () => {
+    const items = [
+      cost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000 }),
+      cost({ id: "ins", name: "실손보험", categoryId: "insurance", amount: 120000 }),
+      cost({ id: "sub", name: "넷플릭스", categoryId: "subscription", amount: 17000 })
+    ];
+    const insights = buildSavingsInsights(items);
+    const largest = insights.find((i) => i.kind === "largest");
+    // 월세(주거)·보험을 제치고 줄일 만한 구독이 largest 로 선정돼야 한다.
+    expect(largest).toBeTruthy();
+    expect(largest!.items[0].id).toBe("sub");
+  });
+
+  test("주거·보험만 있으면 largest 인사이트 없음(헛다리 방지)", () => {
+    const items = [
+      cost({ id: "rent", name: "월세", categoryId: "housing", amount: 650000 }),
+      cost({ id: "ins", name: "보험", categoryId: "insurance", amount: 120000 })
+    ];
+    const insights = buildSavingsInsights(items);
+    expect(insights.find((i) => i.kind === "largest")).toBeUndefined();
+  });
 });
