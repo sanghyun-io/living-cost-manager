@@ -167,6 +167,11 @@ export default function Home() {
   // 진행 중인 fire-and-forget 히스토리 응답을 무효화한다(stale 결과가 다음
   // 사용자/워크스페이스의 코치 입력으로 새어 들어가는 것을 막는다).
   const monthlyReportGenRef = useRef(0);
+  // 현재 활성 "사용자|워크스페이스" 식별자. refreshMonthlyReport 가 응답을 커밋하기
+  // 전에 이 값과 대조한다. 세대(숫자)만으로는, caller 가 첫 await 동안 전환이 일어나
+  // 세대가 이미 올라간 뒤 stale 한 refresh 를 새로 시작하면 새 세대를 캡처해 가드를
+  // 통과하는 경로가 남는다(red-review R2). identity 대조로 그 경로까지 막는다.
+  const activeReportScopeRef = useRef<string | null>(null);
   const serverApi = useMemo(() => createServerApiClient(), []);
 
   useEffect(() => {
@@ -857,24 +862,35 @@ export default function Home() {
     }
   }
 
+  // 이 세션이 속한 "사용자|워크스페이스" 식별자. monthlyReport 가 어느 컨텍스트
+  // 것인지 표시하는 scope 키다(계정 전환·워크스페이스 전환 모두 구분).
+  function reportScopeOf(session: ServerSession): string | null {
+    return session.workspace ? `${session.user.id}|${session.workspace.id}` : null;
+  }
+
   // 동기화 히스토리로 월간 추세를 best-effort 로 갱신한다. 히스토리 조회는
   // 동기화 본류가 아니므로(코치 추세 조각 입력용) 실패해도 조용히 무시한다.
   //
   // ⚠️ fire-and-forget 이라 응답이 늦게 도착하는 사이 로그아웃·계정/워크스페이스
-  // 전환이 일어날 수 있다. 그러면 이전 사용자의 추세가 다음 사용자의 코치
-  // 입력으로 새어 들어간다(프라이버시 경계 위반). 이를 막기 위해 (1) 호출 시점의
-  // 세대를 캡처하고, (2) 응답 도착 후 세대가 여전히 같고 워크스페이스도 동일할
-  // 때만 상태를 커밋한다. 세대는 로그아웃/세션무효화/워크스페이스전환에서 증가한다.
+  // 전환이 일어날 수 있다. 그러면 이전 사용자의 추세가 다음 사용자의 코치 입력으로
+  // 새어 들어간다(프라이버시 경계 위반). 두 가드로 막는다:
+  //  (1) 세대(gen): getSnapshotHistory await 중에 경계 전환이 일어나면 결과 폐기.
+  //  (2) scope(identity): 이 요청이 가져온 데이터가 "지금 활성" 사용자·워크스페이스
+  //      것일 때만 커밋. caller 가 자기 첫 await(스냅샷 조회 등) 동안 전환이 일어나
+  //      세대가 이미 올라간 뒤 refresh 를 새로 시작해 새 세대를 캡처하더라도,
+  //      session 의 scope 가 활성 scope 와 다르면 차단된다(red-review R2 갭).
   async function refreshMonthlyReport(session: ServerSession) {
     if (!serverApi || !session.workspace) {
       return;
     }
+    const scope = reportScopeOf(session);
     const workspaceId = session.workspace.id;
     const gen = monthlyReportGenRef.current;
     try {
       const entries = await serverApi.getSnapshotHistory(workspaceId, session.token, 24);
-      // 응답이 도착하는 사이 신뢰 경계를 넘었으면(세대 변경) 결과를 버린다.
-      if (monthlyReportGenRef.current !== gen) {
+      // 응답이 도착하는 사이 신뢰 경계를 넘었으면(세대 변경 또는 활성 scope 불일치)
+      // 결과를 버린다. scope 대조가 "stale caller 가 새 세대 캡처" 경로까지 막는다.
+      if (monthlyReportGenRef.current !== gen || activeReportScopeRef.current !== scope) {
         return;
       }
       setMonthlyReport(buildMonthlyReport(entries));
@@ -885,8 +901,11 @@ export default function Home() {
 
   // monthlyReport 를 즉시 비우고 진행 중인 모든 히스토리 응답을 무효화한다.
   // 신뢰 경계 전환(로그아웃·세션무효화·워크스페이스전환) 시점에 호출한다.
-  function invalidateMonthlyReport() {
+  // nextScope 를 주면 이후 그 scope 의 응답만 커밋되도록 활성 scope 를 갱신한다
+  // (전환 후 새로 시작하는 refresh 는 이 scope 와 일치해야 통과).
+  function invalidateMonthlyReport(nextScope: string | null = null) {
     monthlyReportGenRef.current += 1;
+    activeReportScopeRef.current = nextScope;
     setMonthlyReport(null);
   }
 
@@ -899,8 +918,9 @@ export default function Home() {
     setIsServerSnapshotChecked(false);
     setServerSnapshot(null);
     // 워크스페이스/세션이 바뀔 수 있는 진입점이므로 세대를 올려 이전 워크스페이스의
-    // 진행 중 히스토리 응답이 새 컨텍스트에 커밋되지 않게 한다.
-    invalidateMonthlyReport();
+    // 진행 중 히스토리 응답을 무효화하고, 활성 scope 를 이 세션으로 맞춘다(이후
+    // 이 세션의 refresh 만 커밋 가능). workspace 없으면 scope 는 null.
+    invalidateMonthlyReport(reportScopeOf(session));
     setServerErrorKind(null);
 
     if (!session.workspace) {
@@ -1039,10 +1059,10 @@ export default function Home() {
     setMembers([]);
     setSentInvitations([]);
     setServerSnapshot(null);
-    // 워크스페이스 전환은 신뢰 경계 — 이전 워크스페이스의 추세/진행 중 응답을 버린다.
-    // (workspace 가 있으면 prepareServerSyncDecision 이 다시 갱신하지만, 없는 경로도
-    //  포함해 항상 무효화해 둔다.)
-    invalidateMonthlyReport();
+    // 워크스페이스 전환은 신뢰 경계 — 이전 워크스페이스의 추세/진행 중 응답을 버리고
+    // 활성 scope 를 새 워크스페이스로 맞춘다(workspace 가 있으면 곧 prepareServerSyncDecision
+    // 이 같은 scope 로 다시 설정; 없는 경로는 null 로 남아 어떤 응답도 커밋 안 됨).
+    invalidateMonthlyReport(reportScopeOf(nextSession));
     if (workspace) {
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
@@ -1078,6 +1098,8 @@ export default function Home() {
       setServerErrorKind(null);
       setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
       // 방금 업로드가 새 히스토리 엔트리가 되므로 추세를 다시 계산해 둔다.
+      // (업로드 await 중 전환이 있었다면 serverSession 의 scope 가 활성 scope 와
+      //  달라 refreshMonthlyReport 가 커밋 단계에서 스스로 폐기한다.)
       void refreshMonthlyReport(serverSession);
     } catch (error) {
       // 충돌(409): 다른 기기/멤버가 먼저 저장함. 서버 최신본을 다시 받아와
