@@ -6,9 +6,8 @@ let app: Awaited<ReturnType<typeof buildApp>> | undefined;
 try {
   const env = loadEnv();
   app = await buildApp({ env });
-
   await app.listen({
-    host: "0.0.0.0",
+    host: process.env.HOST ?? "127.0.0.1",
     port: env.PORT
   });
 } catch (error) {
