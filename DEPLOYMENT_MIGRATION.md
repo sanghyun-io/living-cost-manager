@@ -12,3 +12,8 @@ The previous GitHub Actions direct Pages workflow and historical OCI runtime
 instructions are retired. Runtime rollback is performed only with
 `scripts/gamja-deploy rollback`, switching backend and Pages together before
 exact-SHA verification.
+
+After a host or launchd restart, recovery reuses the persisted immutable
+`current` release. Both API health and `release-meta.json` must retain the same
+release ID and full commit SHA; rebuilding from a mutable checkout is not an
+accepted recovery mechanism.
