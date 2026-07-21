@@ -25,7 +25,11 @@ test("GET /health returns ok", async () => {
   });
 
   expect(response.statusCode).toBe(200);
-  expect(response.json()).toEqual({ ok: true });
+  expect(response.json()).toEqual({
+    ok: true,
+    releaseId: "development",
+    commitSha: "development"
+  });
 });
 
 test("응답에 helmet 보안 헤더가 포함된다", async () => {
@@ -78,7 +82,11 @@ test("serves health under configured API base path", async () => {
     });
 
     expect(prefixed.statusCode).toBe(200);
-    expect(prefixed.json()).toEqual({ ok: true });
+    expect(prefixed.json()).toEqual({
+      ok: true,
+      releaseId: "development",
+      commitSha: "development"
+    });
     expect(root.statusCode).toBe(404);
   } finally {
     await prefixedApp.close();

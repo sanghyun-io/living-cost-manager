@@ -96,7 +96,11 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(memberRoutes);
     await api.register(snapshotRoutes);
     await api.register(pushRoutes);
-    api.get("/health", async () => ({ ok: true }));
+    api.get("/health", async () => ({
+      ok: true,
+      releaseId: env.LCM_RELEASE_ID ?? "development",
+      commitSha: env.LCM_COMMIT_SHA ?? "development"
+    }));
   };
 
   if (env.API_BASE_PATH) {
