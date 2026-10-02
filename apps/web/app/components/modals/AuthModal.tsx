@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, Anchor, Button, Group, PasswordInput, SegmentedControl, Text, TextInput } from "@mantine/core";
 import type { ServerSession } from "../../lib/serverApi";
 import {
@@ -63,9 +63,14 @@ export function AuthModal({
   // Form drafts live here now. This wrapper stays mounted for the whole page
   // lifetime (only Mantine's content unmounts on close), so drafts persist
   // across open/close exactly like the previous page-level state.
-  const [serverEmail, setServerEmail] = useState("");
+  //
+  // Boot prefill: the page gates all modals until after the boot effect has
+  // set initialSession, so seeding the useState initializers reproduces the
+  // old boot-time setServerEmail/setServerName exactly (and, like the
+  // original, never touches these drafts afterwards).
+  const [serverEmail, setServerEmail] = useState(initialSession?.user.email ?? "");
   const [serverPassword, setServerPassword] = useState("");
-  const [serverName, setServerName] = useState("");
+  const [serverName, setServerName] = useState(initialSession?.user.name ?? "");
   const [serverAuthMode, setServerAuthMode] = useState<"login" | "register">("login");
   const [authView, setAuthView] = useState<"auth" | "forgot">("auth");
   // Track which auth fields the user has left (blurred) so we only surface
@@ -73,22 +78,15 @@ export function AuthModal({
   // Name is optional (falls back to email), so it has no validation entry.
   const [authTouched, setAuthTouched] = useState<AuthTouched>(CLEAN_AUTH_TOUCHED);
 
-  // Boot prefill: the page sets initialSession exactly once (boot effect),
-  // matching the old one-shot setServerEmail/setServerName.
-  useEffect(() => {
-    if (initialSession) {
-      setServerEmail(initialSession.user.email);
-      setServerName(initialSession.user.name);
-    }
-  }, [initialSession]);
-
-  // Password-reset success reopens this modal in login mode.
-  useEffect(() => {
-    if (loginRequest > 0) {
-      setServerAuthMode("login");
-      setAuthView("auth");
-    }
-  }, [loginRequest]);
+  // Password-reset success reopens this modal in login mode. Adjusted during
+  // render (not in an effect) so the modal never paints a frame in the stale
+  // mode/view — the old page set mode+view+open in one batch, same frame.
+  const [seenLoginRequest, setSeenLoginRequest] = useState(0);
+  if (loginRequest !== seenLoginRequest) {
+    setSeenLoginRequest(loginRequest);
+    setServerAuthMode("login");
+    setAuthView("auth");
+  }
 
   const authEmailError = authEmailMessage(serverEmail);
   const authPasswordError = authPasswordMessage(serverPassword);
