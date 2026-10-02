@@ -1,6 +1,6 @@
-// Shared types for page.tsx and its extracted components.
-// Grouped prop bundles (SyncProps, SharingProps, DataModalProps) are added here
-// as those components are extracted (Tasks 7-9).
+// Shared types for page.tsx and its extracted components/modals/hooks.
+// Grouped prop bundles (SyncProps, SharingProps, DataModalProps) carry the
+// DataModal surface so the page stays thin.
 import type { RefObject } from "react";
 import type { InvitationRole, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
 import type { Category, FixedCost } from "./budget";

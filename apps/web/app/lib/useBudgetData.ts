@@ -57,7 +57,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const backupFileRef = useRef<HTMLInputElement | null>(null);
 
   const { currentUser, isBootLoaded, isLoaded, setIsLoaded } = users;
-  const { categoryFilterId, setCategoryFilterId, isDeleteMode, setIsDeleteMode, selectedDeleteIds, setSelectedDeleteIds, importMessage, setImportMessage } = ui;
+  const { categoryFilterId, setCategoryFilterId, selectedDeleteIds, setIsDeleteMode, setSelectedDeleteIds, setImportMessage } = ui;
 
   // ── per-user localStorage load / save ────────────────────────────────
   useEffect(() => {
