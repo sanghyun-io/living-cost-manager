@@ -2,6 +2,7 @@ import type { WorkspaceSnapshot } from "@living-cost-manager/shared";
 
 import { createFixedCost, DEFAULT_CATEGORIES, type Category, type FixedCost } from "./budget";
 import { normalizePaymentCard, type PaymentCard } from "./cards";
+import type { BudgetSnapshot } from "./pageTypes";
 
 export type LocalBudgetSnapshot = {
   monthlyIncome: number;
@@ -61,4 +62,43 @@ export function hasLocalBudgetData(snapshot: LocalBudgetSnapshot): boolean {
     snapshot.cards.length > 0 ||
     snapshot.categories.some((category) => !DEFAULT_CATEGORIES.some((defaultCategory) => defaultCategory.id === category.id))
   );
+}
+
+// ── moved from page.tsx (behavior unchanged) ─────────────────────────────
+
+// Re-shapes the page-held BudgetSnapshot into the LocalBudgetSnapshot key
+// order used when persisting/serving data.
+export function getCurrentBudgetSnapshotFromState(snapshot: BudgetSnapshot): LocalBudgetSnapshot {
+  return {
+    monthlyIncome: snapshot.monthlyIncome,
+    categories: snapshot.categories,
+    cards: snapshot.cards,
+    fixedCosts: snapshot.fixedCosts
+  };
+}
+
+// Stable identity of a budget snapshot; used to decide "already synced".
+export function buildSnapshotKey(snapshot: LocalBudgetSnapshot) {
+  return JSON.stringify({
+    monthlyIncome: Math.max(0, Math.round(snapshot.monthlyIncome)),
+    categories: snapshot.categories.map((category) => ({
+      id: category.id,
+      label: category.label
+    })),
+    cards: snapshot.cards.map((card) => ({
+      id: card.id,
+      label: card.label,
+      billingDay: card.billingDay
+    })),
+    fixedCosts: snapshot.fixedCosts.map((item) => ({
+      id: item.id,
+      name: item.name,
+      categoryId: item.categoryId,
+      paymentMethodId: item.paymentMethodId,
+      paymentOptionId: item.paymentOptionId,
+      amount: item.amount,
+      periodMonths: item.periodMonths,
+      billingDay: item.billingDay
+    }))
+  });
 }

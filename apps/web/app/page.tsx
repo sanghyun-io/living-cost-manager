@@ -1,190 +1,58 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { InvitationRole, MonthlyReport, SnapshotHistoryEntry, WorkspaceDto, WorkspaceInvitationDto, WorkspaceMemberDto, WorkspaceSnapshot } from "@living-cost-manager/shared";
-import { buildInsuranceCheck, buildMonthlyReport, buildSavingsInsights, getUpcomingDues, parseFixedCostInput } from "@living-cost-manager/shared";
-import {
-  buildBudgetSummary,
-  createCategory,
-  createFixedCost,
-  DEFAULT_CATEGORIES,
-  deleteCategory,
-  getCategoryBuckets,
-  getMonthlyEquivalentAmount,
-  getCategoryPieSegments,
-  getPieSegmentAtPercent,
-  renameCategory,
-  updateFixedCost,
-  type Category,
-  type CategoryPieSegment,
-  type FixedCost
-} from "./lib/budget";
-import { buildFixedCostCsvTemplate, parseFixedCostCsvTemplate } from "./lib/budgetImportExport";
-import { buildLivingCostBackup, parseLivingCostBackup } from "./lib/backup";
-import {
-  createPaymentCard,
-  DEFAULT_CARDS,
-  deletePaymentCard,
-  renamePaymentCard,
-  updatePaymentCard,
-  type PaymentCard
-} from "./lib/cards";
-import { createUser, getUserDataKey, LOCAL_USER_NAME, mergeUsers, resolveStartupUser, type AppUser } from "./lib/users";
-import {
-  createServerApiClient,
-  isEmailNotVerifiedError,
-  isServerAuthFailure,
-  resolveServerSessionWorkspace,
-  ServerApiError,
-  SERVER_SESSION_STORAGE_KEY,
-  type CreatedInvitation,
-  type ServerSession
-} from "./lib/serverApi";
-import {
-  buildWorkspaceSnapshot,
-  hasLocalBudgetData,
-  hydrateWorkspaceSnapshot,
-  isWorkspaceSnapshotEmpty,
-  type LocalBudgetSnapshot
-} from "./lib/snapshot";
-import { canManageSharing, canSyncWorkspace, findCurrentMember } from "./lib/sharing";
-import {
-  getAccountSyncState,
-  getSyncStateView,
-  summarizeBudgetSnapshot,
-  type AccountSyncState
-} from "./lib/syncStatus";
-import {
-  buildPieBackground,
-  clampBillingDay,
-  mergeCards,
-  mergeCategories,
-  parseCurrencyInput
-} from "./lib/formatting";
-import type { BudgetSnapshot } from "./lib/pageTypes";
-import { validateEmail, validateName, validatePassword } from "./lib/validation";
-import { emptyBudgetSnapshot, sampleBudgetSnapshot, seedFixedCosts } from "./lib/seedData";
+import { useEffect, useRef } from "react";
+import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
 import { ChartSection } from "./components/ChartSection";
 import { FixedCostTable } from "./components/FixedCostTable";
 import { CategoryModal } from "./components/modals/CategoryModal";
-import { CardModal, type CardDraft } from "./components/modals/CardModal";
-import { AuthModal, type AuthFormValues } from "./components/modals/AuthModal";
+import { CardModal } from "./components/modals/CardModal";
+import { AuthModal } from "./components/modals/AuthModal";
 import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
 import { VerifyEmailNoticeModal } from "./components/modals/VerifyEmailNoticeModal";
-import { CoachModal, type CoachStatus } from "./components/modals/CoachModal";
-import { type CoachInput, getCoachEngine, streamCoaching } from "./lib/coach";
-import {
-  COACH_MODEL_APPROX_MB,
-  isCoachOptedIn,
-  isWebGpuAvailable,
-  setCoachOptIn
-} from "./lib/coachModel";
+import { CoachModal } from "./components/modals/CoachModal";
 import { DataModal } from "./components/modals/DataModal";
-
-const USERS_KEY = "living-cost-manager:users:v1";
-const ACTIVE_USER_KEY = "living-cost-manager:active-user:v1";
-const STORAGE_KEY = "living-cost-manager:v2";
-const LEGACY_STORAGE_KEY = "living-cost-manager:v1";
+import { useUIState } from "./lib/useUIState";
+import { useServerAuth } from "./lib/useServerAuth";
+import { useLocalUsers } from "./lib/useLocalUsers";
+import { useBudgetData } from "./lib/useBudgetData";
+import { useCoach } from "./lib/useCoach";
+import { useWorkspaceSync } from "./lib/useWorkspaceSync";
+import type { BudgetDataApi } from "./lib/useBudgetData";
+import type { LocalUsersApi } from "./lib/useLocalUsers";
+import type { WorkspaceSyncApi } from "./lib/useWorkspaceSync";
 
 export default function Home() {
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
-  const [knownUsers, setKnownUsers] = useState<AppUser[]>([]);
-  const initialDataMode: "sample" | "blank" = "sample";
-  const [monthlyIncome, setMonthlyIncome] = useState(3_000_000);
-  const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(seedFixedCosts);
-  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
-  const [cards, setCards] = useState<PaymentCard[]>(DEFAULT_CARDS);
-  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [isCardModalOpen, setIsCardModalOpen] = useState(false);
-  const [isDataModalOpen, setIsDataModalOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  // 온디바이스 AI 코치 (opt-in, WebGPU). 모델은 켤 때만 로드한다.
-  const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
-  const [coachStatus, setCoachStatus] = useState<CoachStatus>("idle");
-  const [coachProgress, setCoachProgress] = useState(0);
-  const [coachProgressText, setCoachProgressText] = useState("");
-  const [coachingText, setCoachingText] = useState("");
-  const [coachError, setCoachError] = useState("");
-  const [resetToken, setResetToken] = useState<string | null>(null);
-  // Bumped after a successful password reset to reopen AuthModal in login mode
-  // (the form mode/view itself now lives inside AuthModal).
-  const [authLoginRequest, setAuthLoginRequest] = useState(0);
-  // Post-signup "check your email" notice. Holds the address we sent to.
-  const [verifyNoticeEmail, setVerifyNoticeEmail] = useState<string | null>(null);
-  const [changeCurrentPassword, setChangeCurrentPassword] = useState("");
-  const [changeNewPassword, setChangeNewPassword] = useState("");
-  const [chartMode, setChartMode] = useState<"bar" | "pie">("bar");
-  const [activePieSegment, setActivePieSegment] = useState<CategoryPieSegment | null>(null);
-  const [pieTooltipPosition, setPieTooltipPosition] = useState({ x: 0, y: 0 });
-  const [categoryFilterId, setCategoryFilterId] = useState("all");
-  const [isDeleteMode, setIsDeleteMode] = useState(false);
-  const [selectedDeleteIds, setSelectedDeleteIds] = useState<string[]>([]);
-  const [importMessage, setImportMessage] = useState("");
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [saveError, setSaveError] = useState("");
-  const [isBootLoaded, setIsBootLoaded] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [serverSession, setServerSession] = useState<ServerSession | null>(null);
-  // The session restored at boot, handed to AuthModal once to prefill the
-  // email/name drafts (old boot-effect behavior, now owned by the modal).
-  const [bootServerSession, setBootServerSession] = useState<ServerSession | null>(null);
-  const [serverStatus, setServerStatus] = useState("");
-  const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
-  // 서버 동기화 히스토리로 계산한 월간 추세(지난달 대비). 코치의 추세 조각 입력.
-  // 동기화 검사 시 best-effort 로 채우며, 히스토리가 없으면 null 로 둔다.
-  const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
-  const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
-  const [isServerBusy, setIsServerBusy] = useState(false);
-  const [serverErrorKind, setServerErrorKind] = useState<"auth" | "request" | null>(null);
-  const [lastServerSyncedAt, setLastServerSyncedAt] = useState<Date | null>(null);
-  const [lastSyncedSnapshotKey, setLastSyncedSnapshotKey] = useState("");
-  const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
-  const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
-  const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
-  const [sentInvitations, setSentInvitations] = useState<WorkspaceInvitationDto[]>([]);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<InvitationRole>("viewer");
-  const [acceptTokens, setAcceptTokens] = useState<Record<string, string>>({});
-  const [createdInvitation, setCreatedInvitation] = useState<CreatedInvitation | null>(null);
-  const importFileRef = useRef<HTMLInputElement | null>(null);
-  const backupFileRef = useRef<HTMLInputElement | null>(null);
-  const serverRestoreCheckedRef = useRef(false);
-  // monthlyReport 요청 세대. 로그아웃·세션 무효화·워크스페이스 전환 시 증가시켜
-  // 진행 중인 fire-and-forget 히스토리 응답을 무효화한다(stale 결과가 다음
-  // 사용자/워크스페이스의 코치 입력으로 새어 들어가는 것을 막는다).
-  const monthlyReportGenRef = useRef(0);
-  // 현재 활성 "사용자|워크스페이스" 식별자. refreshMonthlyReport 가 응답을 커밋하기
-  // 전에 이 값과 대조한다. 세대(숫자)만으로는, caller 가 첫 await 동안 전환이 일어나
-  // 세대가 이미 올라간 뒤 stale 한 refresh 를 새로 시작하면 새 세대를 캡처해 가드를
-  // 통과하는 경로가 남는다(red-review R2). identity 대조로 그 경로까지 막는다.
-  const activeReportScopeRef = useRef<string | null>(null);
-  const serverApi = useMemo(() => createServerApiClient(), []);
+  // Hook creation order respects render-time data flow:
+  //   ui → auth → users → budget → coach → sync
+  // The two async back-edges (auth → users/sync) go through latest-value refs
+  // below — their handlers only run from events/post-boot effects.
+  const ui = useUIState();
+  const usersRef = useRef<LocalUsersApi | null>(null);
+  const budgetRef = useRef<BudgetDataApi | null>(null);
+  const syncRef = useRef<WorkspaceSyncApi | null>(null);
 
-  useEffect(() => {
-    const users = readJson<AppUser[]>(USERS_KEY, []);
-    const activeUserId = window.localStorage.getItem(ACTIVE_USER_KEY);
-    const storedServerSession = readJson<ServerSession | null>(SERVER_SESSION_STORAGE_KEY, null);
-    const validServerSession = isServerSession(storedServerSession) ? storedServerSession : null;
-    const startupUser = resolveStartupUser({
-      users,
-      activeUserId,
-      serverUser: validServerSession?.user ?? null
-    });
+  const auth = useServerAuth({
+    ui,
+    getUsers: () => usersRef.current as LocalUsersApi,
+    getSync: () => syncRef.current as WorkspaceSyncApi
+  });
+  const users = useLocalUsers({
+    ui,
+    auth,
+    getBudget: () => (budgetRef.current as BudgetDataApi).getCurrentBudgetSnapshot()
+  });
+  const budget = useBudgetData({ users, ui });
+  const coach = useCoach({ budget, serverApi: auth.serverApi });
+  const sync = useWorkspaceSync({ ui, auth, budget, coach });
 
-    window.localStorage.setItem(USERS_KEY, JSON.stringify(startupUser.users));
-    window.localStorage.setItem(ACTIVE_USER_KEY, startupUser.user.id);
-    setKnownUsers(startupUser.users);
-    setCurrentUser(startupUser.user);
-    if (validServerSession) {
-      setServerSession(validServerSession);
-      setBootServerSession(validServerSession);
-    }
-    setIsBootLoaded(true);
-  }, []);
+  usersRef.current = users;
+  budgetRef.current = budget;
+  syncRef.current = sync;
 
+  // Service worker: production-only, registered after load (see note inside).
   useEffect(() => {
     if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) {
       return;
@@ -205,1180 +73,7 @@ export default function Home() {
     return () => window.removeEventListener("load", registerWorker);
   }, []);
 
-  useEffect(() => {
-    if (!isBootLoaded) {
-      return;
-    }
-
-    if (!currentUser) {
-      setIsLoaded(true);
-      return;
-    }
-
-    setIsLoaded(false);
-    const stored = window.localStorage.getItem(getUserDataKey(currentUser.id));
-    const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    const parsed = parseBudgetSnapshot(stored ?? legacyStored);
-
-    if (parsed.recovered && stored) {
-      try {
-        window.localStorage.setItem(getUserDataKey(currentUser.id) + ":corrupt:" + Date.now().toString(36), stored);
-      } catch {
-        // Recovery should continue even if the browser refuses the extra copy.
-      }
-      setImportMessage("저장 데이터가 손상되어 기본값으로 복구했습니다. 가능하면 전체 백업을 내보내세요.");
-    }
-
-    setMonthlyIncome(parsed.snapshot.monthlyIncome);
-    setCategories(parsed.snapshot.categories);
-    setCards(parsed.snapshot.cards);
-    setFixedCosts(parsed.snapshot.fixedCosts);
-    setLastSavedAt(null);
-    setSaveError("");
-    setIsLoaded(true);
-  }, [currentUser, isBootLoaded]);
-
-  useEffect(() => {
-    if (!isBootLoaded || !isLoaded || !currentUser) {
-      return;
-    }
-
-    try {
-      window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
-      setLastSavedAt(new Date());
-      setSaveError("");
-    } catch {
-      setSaveError("브라우저 저장 공간에 저장하지 못했습니다. 전체 백업을 먼저 내보내세요.");
-    }
-  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, monthlyIncome]);
-
-
-  useEffect(() => {
-    if ((!isDataModalOpen && !isAuthModalOpen) || !serverSession || !serverApi) {
-      return;
-    }
-
-    void refreshSharing(serverSession);
-  }, [isDataModalOpen, isAuthModalOpen, serverApi, serverSession]);
-
-  useEffect(() => {
-    if (!isBootLoaded || !serverSession || !serverApi || serverRestoreCheckedRef.current) {
-      return;
-    }
-
-    serverRestoreCheckedRef.current = true;
-    void refreshRestoredServerSession(serverSession);
-  }, [isBootLoaded, serverApi, serverSession]);
-
-  // Handle auth deep links delivered by email. The app is a static-export SPA
-  // served only at "/", so links use root query params: ?reset_token / ?verify_token.
-  useEffect(() => {
-    if (typeof window === "undefined" || !serverApi) {
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-
-    const reset = params.get("reset_token");
-    if (reset) {
-      setResetToken(reset);
-      return;
-    }
-
-    const verify = params.get("verify_token");
-    if (verify) {
-      clearAuthQueryParam("verify_token");
-      void serverApi
-        .verifyEmail(verify)
-        .then(() => {
-          setServerStatus("이메일 인증이 완료되었습니다.");
-          // If the post-signup notice is still open, dismiss it now.
-          setVerifyNoticeEmail(null);
-          setServerSession((current) => {
-            if (!current) {
-              return current;
-            }
-            const updated = { ...current, user: { ...current.user, emailVerified: true } };
-            saveServerSession(updated);
-            return updated;
-          });
-        })
-        .catch(() => {
-          setServerStatus("이메일 인증 링크가 유효하지 않거나 만료되었습니다.");
-        })
-        .finally(() => {
-          setIsDataModalOpen(true);
-        });
-    }
-  }, [serverApi]);
-
-  const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
-  const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
-  const pieSegments = useMemo(() => getCategoryPieSegments(buckets), [buckets]);
-  const visibleFixedCosts = useMemo(
-    () => (categoryFilterId === "all" ? fixedCosts : fixedCosts.filter((item) => item.categoryId === categoryFilterId)),
-    [categoryFilterId, fixedCosts]
-  );
-  const visibleFixedCostTotal = useMemo(
-    () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
-    [visibleFixedCosts]
-  );
-
-  // AI 코치 입력 — 결정적 요약(현재 고정비 · 절감 인사이트 · 임박 납부)을 묶는다.
-  // 월간 추세(지난달 대비)는 서버 동기화 히스토리(monthlyReport)가 있을 때만 채운다.
-  const coachInput = useMemo<CoachInput>(() => {
-    const now = new Date();
-    const savings = buildSavingsInsights(fixedCosts).map((s) => ({
-      title: s.title,
-      monthlySavings: s.monthlySavings
-    }));
-    const upcoming = getUpcomingDues(fixedCosts, now, 14)
-      .slice(0, 5)
-      .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
-    const insurance = buildInsuranceCheck(fixedCosts, monthlyIncome);
-    // 추세는 직전 달이 있을 때만 의미가 있다(첫 달은 previous 가 null).
-    const hasTrend = monthlyReport?.previous != null && monthlyReport.deltaAmount != null;
-    return {
-      monthlyTotal: summary.monthlyExpense,
-      previousMonthlyTotal: hasTrend ? monthlyReport!.previous!.fixedCostMonthlyTotal : null,
-      deltaAmount: hasTrend ? monthlyReport!.deltaAmount : null,
-      deltaPercent: hasTrend ? monthlyReport!.deltaPercent : null,
-      monthlyIncome,
-      fixedCostCount: fixedCosts.length,
-      savings,
-      upcoming,
-      insuranceHigh: insurance.isHigh
-    };
-  }, [fixedCosts, monthlyIncome, summary.monthlyExpense, monthlyReport]);
-
-  // 규칙 기반 폴백 한 줄(WebGPU 미지원/에러 시 보조 표시).
-  const coachFallbackHeadline = useMemo(() => {
-    const rate =
-      monthlyIncome > 0 ? Math.round((summary.monthlyExpense / monthlyIncome) * 1000) / 10 : null;
-    const rateText = rate !== null ? ` 수입의 ${rate}%예요.` : "";
-    return `이번 달 월 환산 고정비는 ${summary.monthlyExpense.toLocaleString("ko-KR")}원, ${fixedCosts.length}건이에요.${rateText}`;
-  }, [summary.monthlyExpense, monthlyIncome, fixedCosts.length]);
-
-  const coachHasData = fixedCosts.length > 0;
-  const pieBackground = buildPieBackground(pieSegments);
-  const currentServerMember = useMemo(
-    () => findCurrentMember(members, serverSession?.user.id),
-    [members, serverSession?.user.id]
-  );
-  const currentWorkspaceRole = currentServerMember?.role ?? serverSession?.workspace?.role ?? null;
-  const canManageCurrentWorkspace = canManageSharing(currentWorkspaceRole);
-  const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole) && isServerSnapshotChecked;
-  const visibleCreatedInvitation =
-    canManageCurrentWorkspace && createdInvitation?.workspaceId === serverSession?.workspace?.id ? createdInvitation : null;
-  const currentBudgetSnapshot = useMemo(
-    () => getCurrentBudgetSnapshotFromState({ monthlyIncome, categories, cards, fixedCosts }),
-    [cards, categories, fixedCosts, monthlyIncome]
-  );
-  const localSnapshotSummary = useMemo(() => summarizeBudgetSnapshot(currentBudgetSnapshot), [currentBudgetSnapshot]);
-  const serverSnapshotSummary = useMemo(
-    () => (serverSnapshot ? summarizeBudgetSnapshot(hydrateWorkspaceSnapshot(serverSnapshot)) : null),
-    [serverSnapshot]
-  );
-  const hasRemoteDecision =
-    !!serverSnapshot &&
-    (!isWorkspaceSnapshotEmpty(serverSnapshot) || hasLocalBudgetData(currentBudgetSnapshot));
-  const currentSnapshotKey = useMemo(() => buildSnapshotKey(currentBudgetSnapshot), [currentBudgetSnapshot]);
-  const isServerSyncCurrent = !!lastSyncedSnapshotKey && currentSnapshotKey === lastSyncedSnapshotKey;
-  const accountSyncState = getAccountSyncState({
-    hasServerApi: !!serverApi,
-    hasSession: !!serverSession,
-    hasWorkspace: !!serverSession?.workspace,
-    isBusy: isServerBusy,
-    isSnapshotChecked: isServerSnapshotChecked,
-    hasServerSnapshot: hasRemoteDecision,
-    hasAuthFailure: serverErrorKind === "auth",
-    hasError: serverErrorKind !== null
-  });
-  const displayedSyncState: AccountSyncState =
-    accountSyncState === "signed-in" && lastServerSyncedAt && isServerSyncCurrent ? "synced" : accountSyncState;
-  const syncStateView = getSyncStateView(displayedSyncState);
-
-  function handleIncomeChange(value: number) {
-    setMonthlyIncome(Math.max(0, Math.round(value)));
-  }
-
-  function handleItemChange(id: string, patch: Partial<Omit<FixedCost, "id">>) {
-    setFixedCosts((items) => items.map((item) => (item.id === id ? updateFixedCost(item, patch) : item)));
-  }
-
-  function handlePaymentMethodChange(item: FixedCost, paymentMethodId: FixedCost["paymentMethodId"]) {
-    const selectedCard = paymentMethodId === "credit-card" ? cards.find((card) => card.id === item.paymentOptionId) : null;
-    handleItemChange(item.id, {
-      paymentMethodId,
-      billingDay: selectedCard?.billingDay ?? item.billingDay,
-      isEndOfMonth: selectedCard?.isEndOfMonth ?? item.isEndOfMonth
-    });
-  }
-
-  function handlePaymentOptionChange(item: FixedCost, paymentOptionId: string) {
-    const selectedCard = item.paymentMethodId === "credit-card" ? cards.find((card) => card.id === paymentOptionId) : null;
-    handleItemChange(item.id, {
-      paymentOptionId,
-      billingDay: selectedCard?.billingDay ?? item.billingDay,
-      isEndOfMonth: selectedCard?.isEndOfMonth ?? item.isEndOfMonth
-    });
-  }
-
-  function handleAddItem() {
-    setFixedCosts((items) => [
-      ...items,
-      createFixedCost({
-        id: "cost-" + Date.now().toString(36),
-        name: "새 고정비",
-        categoryId: categories[0]?.id ?? "other",
-        paymentMethodId: "bank-transfer",
-        paymentOptionId: "auto-transfer",
-        amount: 0,
-        periodMonths: 1,
-        billingDay: 1
-      })
-    ]);
-  }
-
-  // 자연어 한 줄("넷플릭스 17000원 매달")을 파싱해 고정비를 추가한다.
-  // 추출 실패한 필드는 handleAddItem 과 동일한 기본값으로 폴백한다.
-  function handleQuickAdd(text: string) {
-    const parsed = parseFixedCostInput(text);
-    setFixedCosts((items) => [
-      ...items,
-      createFixedCost({
-        id: "cost-" + Date.now().toString(36),
-        name: parsed.name ?? "새 고정비",
-        categoryId: categories[0]?.id ?? "other",
-        paymentMethodId: "bank-transfer",
-        paymentOptionId: "auto-transfer",
-        amount: parsed.amount ?? 0,
-        periodMonths: parsed.periodMonths ?? 1,
-        billingDay: 1
-      })
-    ]);
-  }
-
-  function handleEnterDeleteMode() {
-    setIsDeleteMode(true);
-    setSelectedDeleteIds([]);
-    setImportMessage("");
-  }
-
-  function handleCancelDeleteMode() {
-    setIsDeleteMode(false);
-    setSelectedDeleteIds([]);
-  }
-
-  function handleToggleDeleteSelection(id: string) {
-    setSelectedDeleteIds((ids) => (ids.includes(id) ? ids.filter((selectedId) => selectedId !== id) : [...ids, id]));
-  }
-
-  function handleConfirmDeleteItems() {
-    if (selectedDeleteIds.length === 0) {
-      setImportMessage("삭제할 항목을 선택하세요.");
-      return;
-    }
-
-    const deleteCount = selectedDeleteIds.length;
-    const shouldDelete = window.confirm(deleteCount + "개 항목을 삭제할까요?");
-    if (!shouldDelete) {
-      return;
-    }
-
-    setFixedCosts((items) => items.filter((item) => !selectedDeleteIds.includes(item.id)));
-    setSelectedDeleteIds([]);
-    setIsDeleteMode(false);
-    setImportMessage(deleteCount + "개 항목을 삭제했습니다.");
-  }
-
-  // The draft label is owned by CategoryModal and handed up on submit; the modal
-  // clears its own draft (see components/modals/CategoryModal.tsx).
-  function handleAddCategory(label: string) {
-    const nextCategory = createCategory(label);
-    setCategories((currentCategories) => mergeCategories(currentCategories, [nextCategory]));
-  }
-
-  function handleRenameCategory(categoryId: string, label: string) {
-    setCategories((currentCategories) => renameCategory(currentCategories, categoryId, label));
-  }
-
-  function handleDeleteCategory(categoryId: string) {
-    setCategories((currentCategories) => {
-      const result = deleteCategory(currentCategories, fixedCosts, categoryId);
-      setFixedCosts(result.items);
-      return result.categories;
-    });
-    if (categoryFilterId === categoryId) {
-      setCategoryFilterId("all");
-    }
-  }
-
-  // CardModal owns the new-card draft fields and hands them up on submit.
-  function handleAddCard(draft: CardDraft) {
-    const nextCard = createPaymentCard(draft.label, draft.billingDay, draft.isEndOfMonth);
-    setCards((currentCards) => mergeCards(currentCards, [nextCard]));
-  }
-
-  function handleRenameCard(cardId: string, label: string) {
-    setCards((currentCards) => renamePaymentCard(currentCards, cardId, label));
-  }
-
-  function handleUpdateCardEndOfMonth(cardId: string, isEndOfMonth: boolean) {
-    setCards((currentCards) => updatePaymentCard(currentCards, cardId, { isEndOfMonth }));
-    // Propagate to fixed costs paying via this card so their billing date stays in sync.
-    setFixedCosts((items) =>
-      items.map((item) =>
-        item.paymentMethodId === "credit-card" && item.paymentOptionId === cardId
-          ? updateFixedCost(item, { isEndOfMonth })
-          : item
-      )
-    );
-  }
-
-  function handleUpdateCardBillingDay(cardId: string, billingDay: number) {
-    const nextBillingDay = clampBillingDay(billingDay);
-    setCards((currentCards) => updatePaymentCard(currentCards, cardId, { billingDay: nextBillingDay }));
-    setFixedCosts((items) =>
-      items.map((item) =>
-        item.paymentMethodId === "credit-card" && item.paymentOptionId === cardId
-          ? updateFixedCost(item, { billingDay: nextBillingDay })
-          : item
-      )
-    );
-  }
-
-  function handleDeleteCard(cardId: string) {
-    setCards((currentCards) => {
-      const result = deletePaymentCard(currentCards, fixedCosts, cardId);
-      setFixedCosts(result.items);
-      return result.cards;
-    });
-  }
-
-  function handleLogin(userName: string) {
-    const nextUser = createUser(userName);
-    const isNewUser = !knownUsers.some((user) => user.id === nextUser.id);
-    const nextUsers = mergeUsers(knownUsers, nextUser);
-    const userDataKey = getUserDataKey(nextUser.id);
-
-    window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
-    window.localStorage.setItem(ACTIVE_USER_KEY, nextUser.id);
-    if (currentUser && currentUser.id !== nextUser.id) {
-      window.localStorage.setItem(userDataKey, JSON.stringify(getCurrentBudgetSnapshot()));
-    } else if (isNewUser && !window.localStorage.getItem(userDataKey)) {
-      const snapshot = initialDataMode === "blank" ? emptyBudgetSnapshot : sampleBudgetSnapshot;
-      window.localStorage.setItem(userDataKey, JSON.stringify(snapshot));
-    }
-    setKnownUsers(nextUsers);
-    setIsLoaded(false);
-    setCurrentUser(nextUser);
-  }
-
-  function handleLogout() {
-    const localUser = createUser(LOCAL_USER_NAME);
-    const nextUsers = mergeUsers(knownUsers, localUser);
-
-    window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
-    window.localStorage.setItem(ACTIVE_USER_KEY, localUser.id);
-    setKnownUsers(nextUsers);
-    setCurrentUser(localUser);
-    setIsLoaded(false);
-    setIsCategoryModalOpen(false);
-    setIsCardModalOpen(false);
-    setIsDataModalOpen(false);
-    setIsDeleteMode(false);
-    setSelectedDeleteIds([]);
-  }
-
-  // Auth form drafts, blur-time validation and mode/view switching now live
-  // inside AuthModal. The parent only runs the server request with the values
-  // it hands up, resolving true so the modal can clear the password draft.
-  async function handleServerAuthSubmit(values: AuthFormValues): Promise<boolean> {
-    if (!serverApi) {
-      setServerStatus("서버 API URL이 없어 로컬 전용으로 동작합니다.");
-      return false;
-    }
-
-    const validationError =
-      validateEmail(values.email) ??
-      validatePassword(values.password) ??
-      (values.mode === "register" ? validateName(values.name) : null);
-    if (validationError) {
-      setServerErrorKind("request");
-      setServerStatus(validationError);
-      return false;
-    }
-
-    setIsServerBusy(true);
-    setServerStatus("");
-    setServerErrorKind(null);
-
-    try {
-      const authResult =
-        values.mode === "register"
-          ? await serverApi.register({
-              email: values.email,
-              password: values.password,
-              name: values.name || values.email
-            })
-          : await serverApi.login({ email: values.email, password: values.password });
-      const nextSession = await resolveAndStoreServerSession({
-        ...authResult,
-        workspace: authResult.workspace ?? serverSession?.workspace ?? null
-      });
-
-      serverRestoreCheckedRef.current = true;
-      // After signup, walk the user through email verification instead of
-      // dropping them straight into the data modal. Cloud writes are gated on
-      // verification, so the "check your email" notice sets expectations.
-      const justRegisteredUnverified =
-        values.mode === "register" && nextSession.user.emailVerified !== true;
-      if (isAuthModalOpen) {
-        setIsAuthModalOpen(false);
-        if (justRegisteredUnverified) {
-          setServerStatus("");
-          setServerErrorKind(null);
-          setVerifyNoticeEmail(nextSession.user.email);
-        } else {
-          setIsDataModalOpen(true);
-        }
-      }
-      await prepareServerSyncDecision(nextSession);
-      await refreshSharing(nextSession);
-      handleLogin(nextSession.user.name || nextSession.user.email);
-      return true;
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getErrorMessage(error));
-      return false;
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  function handleServerLogout() {
-    // Best-effort server-side logout (invalidates refresh tokens); ignore failures.
-    if (serverApi && serverSession) {
-      void serverApi.logout(serverSession.token).catch(() => undefined);
-    }
-    window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
-    setServerSession(null);
-    setServerSnapshot(null);
-    // 진행 중인 히스토리 응답을 무효화하고 이전 사용자 추세를 즉시 비운다.
-    invalidateMonthlyReport();
-    setIsServerSnapshotChecked(false);
-    setServerWorkspaces([]);
-    setMembers([]);
-    setInvitations([]);
-    setSentInvitations([]);
-    setServerErrorKind(null);
-    setLastServerSyncedAt(null);
-    setLastSyncedSnapshotKey("");
-    clearWorkspaceScopedSharingDrafts();
-    setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
-  }
-
-  async function handleForgotPassword(email: string) {
-    if (!serverApi) {
-      return;
-    }
-    const validationError = validateEmail(email);
-    if (validationError) {
-      setServerErrorKind("request");
-      setServerStatus(validationError);
-      return;
-    }
-    setIsServerBusy(true);
-    setServerStatus("");
-    setServerErrorKind(null);
-    try {
-      await serverApi.forgotPassword(email);
-      setServerStatus("입력하신 이메일이 가입되어 있다면 재설정 링크를 보냈습니다. 메일함을 확인하세요.");
-    } catch (error) {
-      setServerErrorKind("request");
-      setServerStatus(getErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  // Returns true on success so ResetPasswordModal can clear its own draft
-  // (the old page-level state was cleared here; now the modal mirrors that).
-  async function handleResetPassword(password: string): Promise<boolean> {
-    if (!serverApi || !resetToken) {
-      return false;
-    }
-    const validationError = validatePassword(password);
-    if (validationError) {
-      setServerErrorKind("request");
-      setServerStatus(validationError);
-      return false;
-    }
-    setIsServerBusy(true);
-    setServerStatus("");
-    setServerErrorKind(null);
-    try {
-      await serverApi.resetPassword(resetToken, password);
-      setResetToken(null);
-      clearAuthQueryParam("reset_token");
-      setAuthLoginRequest((count) => count + 1);
-      setIsAuthModalOpen(true);
-      setServerStatus("비밀번호를 재설정했습니다. 새 비밀번호로 로그인하세요.");
-      return true;
-    } catch (error) {
-      setServerErrorKind("request");
-      setServerStatus(getErrorMessage(error));
-      return false;
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  async function handleChangePassword() {
-    if (!serverApi || !serverSession) {
-      return;
-    }
-    if (!changeCurrentPassword) {
-      setServerErrorKind("request");
-      setServerStatus("현재 비밀번호를 입력해주세요.");
-      return;
-    }
-    const newPasswordError = validatePassword(changeNewPassword);
-    if (newPasswordError) {
-      setServerErrorKind("request");
-      setServerStatus(newPasswordError === "비밀번호를 입력해주세요." ? "새 비밀번호를 입력해주세요." : "새 " + newPasswordError);
-      return;
-    }
-    setIsServerBusy(true);
-    setServerStatus("");
-    setServerErrorKind(null);
-    try {
-      const updated = await serverApi.changePassword(
-        changeCurrentPassword,
-        changeNewPassword,
-        serverSession.token
-      );
-      // change-password bumps tokenVersion and returns fresh tokens; keep workspace.
-      const nextSession = await resolveAndStoreServerSession({
-        ...updated,
-        workspace: updated.workspace ?? serverSession.workspace ?? null
-      });
-      setServerSession(nextSession);
-      setChangeCurrentPassword("");
-      setChangeNewPassword("");
-      setServerStatus("비밀번호를 변경했습니다.");
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(
-        isServerAuthFailure(error) ? "현재 비밀번호가 올바르지 않습니다." : getErrorMessage(error)
-      );
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  // 코칭 생성: 엔진을 (필요시) 로드한 뒤 스트리밍으로 멘트를 만든다.
-  async function runCoaching() {
-    if (!isWebGpuAvailable()) {
-      setCoachStatus("error");
-      setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
-      return;
-    }
-    setCoachError("");
-    setCoachingText("");
-    try {
-      setCoachStatus("loading");
-      const engine = await getCoachEngine((p) => {
-        setCoachProgress(p.progress);
-        setCoachProgressText(p.text);
-      });
-      // 한 번 켜면 opt-in 으로 기억(다음엔 즉시 캐시 로드).
-      setCoachOptIn(true);
-      setCoachStatus("generating");
-      await streamCoaching(engine, coachInput, (full) => setCoachingText(full));
-      setCoachStatus("ready");
-    } catch (error) {
-      setCoachStatus("error");
-      const message = error instanceof Error ? error.message : String(error);
-      setCoachError(
-        message === "WEBGPU_UNAVAILABLE"
-          ? "이 브라우저는 WebGPU를 지원하지 않습니다."
-          : "AI 모델을 불러오지 못했어요. 네트워크를 확인하고 다시 시도해 주세요."
-      );
-    }
-  }
-
-  async function handleResendVerification() {
-    if (!serverApi || !serverSession) {
-      return;
-    }
-    setIsServerBusy(true);
-    setServerStatus("");
-    try {
-      await serverApi.resendVerification(serverSession.token);
-      setServerStatus("인증 메일을 다시 보냈습니다. 메일함을 확인하세요.");
-    } catch (error) {
-      setServerErrorKind("request");
-      setServerStatus(getErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  // 이 세션이 속한 "사용자|워크스페이스" 식별자. monthlyReport 가 어느 컨텍스트
-  // 것인지 표시하는 scope 키다(계정 전환·워크스페이스 전환 모두 구분).
-  function reportScopeOf(session: ServerSession): string | null {
-    return session.workspace ? `${session.user.id}|${session.workspace.id}` : null;
-  }
-
-  // 동기화 히스토리로 월간 추세를 best-effort 로 갱신한다. 히스토리 조회는
-  // 동기화 본류가 아니므로(코치 추세 조각 입력용) 실패해도 조용히 무시한다.
-  //
-  // ⚠️ fire-and-forget 이라 응답이 늦게 도착하는 사이 로그아웃·계정/워크스페이스
-  // 전환이 일어날 수 있다. 그러면 이전 사용자의 추세가 다음 사용자의 코치 입력으로
-  // 새어 들어간다(프라이버시 경계 위반). 두 가드로 막는다:
-  //  (1) 세대(gen): getSnapshotHistory await 중에 경계 전환이 일어나면 결과 폐기.
-  //  (2) scope(identity): 이 요청이 가져온 데이터가 "지금 활성" 사용자·워크스페이스
-  //      것일 때만 커밋. caller 가 자기 첫 await(스냅샷 조회 등) 동안 전환이 일어나
-  //      세대가 이미 올라간 뒤 refresh 를 새로 시작해 새 세대를 캡처하더라도,
-  //      session 의 scope 가 활성 scope 와 다르면 차단된다(red-review R2 갭).
-  async function refreshMonthlyReport(session: ServerSession) {
-    if (!serverApi || !session.workspace) {
-      return;
-    }
-    const scope = reportScopeOf(session);
-    const workspaceId = session.workspace.id;
-    const gen = monthlyReportGenRef.current;
-    try {
-      const entries = await serverApi.getSnapshotHistory(workspaceId, session.token, 24);
-      // 응답이 도착하는 사이 신뢰 경계를 넘었으면(세대 변경 또는 활성 scope 불일치)
-      // 결과를 버린다. scope 대조가 "stale caller 가 새 세대 캡처" 경로까지 막는다.
-      if (monthlyReportGenRef.current !== gen || activeReportScopeRef.current !== scope) {
-        return;
-      }
-      setMonthlyReport(buildMonthlyReport(entries));
-    } catch {
-      // 히스토리 조회 실패는 무시 — 추세 조각만 빠지고 나머지 코칭은 정상 동작.
-    }
-  }
-
-  // monthlyReport 를 즉시 비우고 진행 중인 모든 히스토리 응답을 무효화한다.
-  // 신뢰 경계 전환(로그아웃·세션무효화·워크스페이스전환) 시점에 호출한다.
-  // nextScope 를 주면 이후 그 scope 의 응답만 커밋되도록 활성 scope 를 갱신한다
-  // (전환 후 새로 시작하는 refresh 는 이 scope 와 일치해야 통과).
-  function invalidateMonthlyReport(nextScope: string | null = null) {
-    monthlyReportGenRef.current += 1;
-    activeReportScopeRef.current = nextScope;
-    setMonthlyReport(null);
-  }
-
-  async function prepareServerSyncDecision(session: ServerSession) {
-    if (!serverApi) {
-      setIsServerSnapshotChecked(false);
-      return false;
-    }
-
-    setIsServerSnapshotChecked(false);
-    setServerSnapshot(null);
-    // 워크스페이스/세션이 바뀔 수 있는 진입점이므로 세대를 올려 이전 워크스페이스의
-    // 진행 중 히스토리 응답을 무효화하고, 활성 scope 를 이 세션으로 맞춘다(이후
-    // 이 세션의 refresh 만 커밋 가능). workspace 없으면 scope 는 null.
-    invalidateMonthlyReport(reportScopeOf(session));
-    setServerErrorKind(null);
-
-    if (!session.workspace) {
-      setServerStatus("서버 계정은 연결됐지만 선택된 워크스페이스가 없습니다. 초대 수락 후 동기화를 사용할 수 있습니다.");
-      return false;
-    }
-
-    try {
-      const remoteSnapshot = await serverApi.getWorkspaceSnapshot(session.workspace.id, session.token);
-      setServerSnapshot(remoteSnapshot);
-      setIsServerSnapshotChecked(true);
-      // 추세 조각용 히스토리를 백그라운드로 갱신(대기하지 않음 — 동기화 흐름 안 막음).
-      void refreshMonthlyReport(session);
-
-      if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())) {
-        setServerStatus("서버 워크스페이스가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
-        return true;
-      }
-
-      if (!isWorkspaceSnapshotEmpty(remoteSnapshot)) {
-        setServerStatus("서버 데이터가 있습니다. 불러오거나 현재 브라우저 데이터로 동기화할 수 있습니다.");
-        return true;
-      }
-
-      setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
-      return true;
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error) + " 서버 상태 확인 전에는 업로드를 막습니다. 로컬 저장은 계속 유지됩니다.");
-      return false;
-    }
-  }
-
-  async function refreshRestoredServerSession(session: ServerSession) {
-    if (!serverApi) {
-      return;
-    }
-
-    // The stored access token is short-lived; if it has expired, transparently
-    // exchange the refresh token for a new pair before restoring the session.
-    let activeSession = session;
-    try {
-      await serverApi.me(session.token);
-    } catch (probeError) {
-      if (isServerAuthFailure(probeError)) {
-        try {
-          const refreshed = await serverApi.refresh(session.refreshToken);
-          activeSession = { ...refreshed, workspace: refreshed.workspace ?? session.workspace };
-          saveServerSession(activeSession);
-          setServerSession(activeSession);
-        } catch {
-          // refresh token also invalid -> fall through to the catch below via me()
-        }
-      }
-    }
-
-    try {
-      const [{ user }, nextSession] = await Promise.all([
-        serverApi.me(activeSession.token),
-        resolveServerSessionWorkspace(serverApi, activeSession)
-      ]);
-      const restoredSession = {
-        ...nextSession,
-        user
-      };
-
-      saveServerSession(restoredSession);
-      setServerSession(restoredSession);
-      setServerErrorKind(null);
-      await loadServerWorkspaces(restoredSession);
-      if (restoredSession.workspace) {
-        await prepareServerSyncDecision(restoredSession);
-      } else {
-        setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
-      }
-    } catch (error) {
-      if (isServerAuthFailure(error)) {
-        window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
-        setServerSession(null);
-        setServerWorkspaces([]);
-        // 세션 무효화 — 진행 중인 히스토리 응답을 버리고 추세를 비운다.
-        invalidateMonthlyReport();
-        setIsServerSnapshotChecked(false);
-        setServerErrorKind("auth");
-        setServerStatus(getServerSyncErrorMessage(error));
-        return;
-      }
-      setServerErrorKind("request");
-      setServerStatus(getServerSyncErrorMessage(error) + " 서버 연결은 유지했습니다. 데이터 관리에서 다시 시도하세요.");
-    }
-  }
-
-  async function resolveAndStoreServerSession(session: ServerSession) {
-    if (!serverApi) {
-      saveServerSession(session);
-      setServerSession(session);
-      setIsServerSnapshotChecked(false);
-      return session;
-    }
-
-    const nextSession = await resolveServerSessionWorkspace(serverApi, session);
-    saveServerSession(nextSession);
-    setServerSession(nextSession);
-    setServerErrorKind(null);
-    setIsServerSnapshotChecked(false);
-    await loadServerWorkspaces(nextSession);
-    return nextSession;
-  }
-
-  async function loadServerWorkspaces(session = serverSession) {
-    if (!serverApi || !session) {
-      setServerWorkspaces([]);
-      return [];
-    }
-
-    const workspaces = await serverApi.listWorkspaces(session.token);
-    setServerWorkspaces(workspaces);
-    return workspaces;
-  }
-
-  async function handleSelectServerWorkspace(workspaceId: string) {
-    if (!serverSession) {
-      return;
-    }
-
-    const workspace = serverWorkspaces.find((item) => item.id === workspaceId) ?? null;
-    const nextSession = {
-      ...serverSession,
-      workspace
-    };
-
-    saveServerSession(nextSession);
-    setServerSession(nextSession);
-    setIsServerSnapshotChecked(false);
-    clearWorkspaceScopedSharingDrafts();
-    setMembers([]);
-    setSentInvitations([]);
-    setServerSnapshot(null);
-    // 워크스페이스 전환은 신뢰 경계 — 이전 워크스페이스의 추세/진행 중 응답을 버리고
-    // 활성 scope 를 새 워크스페이스로 맞춘다(workspace 가 있으면 곧 prepareServerSyncDecision
-    // 이 같은 scope 로 다시 설정; 없는 경로는 null 로 남아 어떤 응답도 커밋 안 됨).
-    invalidateMonthlyReport(reportScopeOf(nextSession));
-    if (workspace) {
-      await prepareServerSyncDecision(nextSession);
-      await refreshSharing(nextSession);
-    } else {
-      setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
-    }
-  }
-
-  async function handleSyncNow() {
-    if (!serverApi || !serverSession?.workspace) {
-      setServerStatus("동기화할 서버 워크스페이스가 없습니다.");
-      return;
-    }
-
-    if (!canUploadServerSnapshot) {
-      setServerStatus(isServerSnapshotChecked ? "보기 전용 권한은 서버에 업로드할 수 없습니다." : "서버 상태 확인이 끝난 뒤 업로드할 수 있습니다.");
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      // 마지막으로 읽은 서버 버전을 실어 보낸다. 서버가 이 값과 현재 DB 값을
-      // 비교해 동시 편집 충돌(409)을 판정한다.
-      const nextSnapshot = buildWorkspaceSnapshot(
-        serverSession.workspace.id,
-        getCurrentBudgetSnapshot(),
-        serverSnapshot?.syncVersion ?? 0
-      );
-      const savedSnapshot = await serverApi.putWorkspaceSnapshot(serverSession.workspace.id, nextSnapshot, serverSession.token);
-      setServerSnapshot(savedSnapshot);
-      setLastServerSyncedAt(new Date());
-      setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(savedSnapshot)));
-      setServerErrorKind(null);
-      setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
-      // 방금 업로드가 새 히스토리 엔트리가 되므로 추세를 다시 계산해 둔다.
-      // (업로드 await 중 전환이 있었다면 serverSession 의 scope 가 활성 scope 와
-      //  달라 refreshMonthlyReport 가 커밋 단계에서 스스로 폐기한다.)
-      void refreshMonthlyReport(serverSession);
-    } catch (error) {
-      // 충돌(409): 다른 기기/멤버가 먼저 저장함. 서버 최신본을 다시 받아와
-      // serverSnapshot 을 갱신하고, 사용자에게 다시 불러온 뒤 동기화하도록 안내.
-      if (error instanceof ServerApiError && error.status === 409) {
-        try {
-          const latest = await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token);
-          setServerSnapshot(latest);
-        } catch {
-          // 최신본 재조회 실패는 무시 — 아래 충돌 안내는 그대로 표시한다.
-        }
-        setServerErrorKind("request");
-        setServerStatus("다른 기기나 멤버가 먼저 저장해 충돌이 났습니다. 서버 데이터를 다시 불러온 뒤 동기화하세요. 로컬 저장은 계속 유지됩니다.");
-        return;
-      }
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error) + " 로컬 저장은 계속 유지됩니다.");
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  async function handleLoadServerSnapshot() {
-    if (!serverApi || !serverSession?.workspace) {
-      setServerStatus("불러올 서버 워크스페이스가 없습니다.");
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      const nextSnapshot = serverSnapshot ?? (await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token));
-      applyBudgetSnapshot(hydrateWorkspaceSnapshot(nextSnapshot));
-      setServerSnapshot(nextSnapshot);
-      setLastServerSyncedAt(new Date());
-      setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(nextSnapshot)));
-      setServerErrorKind(null);
-      setServerStatus("서버 데이터를 이 브라우저에 불러왔습니다.");
-      // 복원 직후에도 히스토리 기반 추세를 채워 코치 입력에 반영한다.
-      void refreshMonthlyReport(serverSession);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error) + " 로컬 데이터는 변경하지 않았습니다.");
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  function handleStayLocalOnly() {
-    setServerStatus("로컬 전용으로 계속합니다. 서버 연결은 유지되지만 데이터를 덮어쓰지 않습니다.");
-  }
-
-  async function refreshSharing(session = serverSession) {
-    if (!serverApi || !session) {
-      return;
-    }
-
-    // Only workspace owners may list the invitations they've sent (server
-    // returns 403 otherwise), so guard the call by role.
-    const isOwner = session.workspace?.role === "owner";
-
-    try {
-      const [nextMembers, nextInvitations, nextSentInvitations] = await Promise.all([
-        session.workspace ? serverApi.listMembers(session.workspace.id, session.token) : Promise.resolve([]),
-        serverApi.listInvitations(session.token),
-        session.workspace && isOwner
-          ? serverApi.listWorkspaceInvitations(session.workspace.id, session.token)
-          : Promise.resolve([])
-      ]);
-      setMembers(nextMembers);
-      setInvitations(nextInvitations);
-      setSentInvitations(nextSentInvitations);
-      setServerErrorKind(null);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error));
-    }
-  }
-
-  async function handleCreateInvitation() {
-    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      const invitation = await serverApi.createInvitation(serverSession.workspace.id, { email: inviteEmail, role: inviteRole }, serverSession.token);
-      setCreatedInvitation(invitation);
-      setInviteEmail("");
-      setServerStatus("초대를 만들었습니다. 아래 토큰을 초대받은 사용자에게 전달하세요.");
-      setServerErrorKind(null);
-      await refreshSharing(serverSession);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  async function handleAcceptInvitation(invitationId: string) {
-    if (!serverApi || !serverSession) {
-      return;
-    }
-
-    const tokenValue = acceptTokens[invitationId]?.trim() ?? "";
-    if (!tokenValue) {
-      setServerStatus("초대 토큰을 입력하세요.");
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      const accepted = await serverApi.acceptInvitation(invitationId, tokenValue, serverSession.token);
-      const nextSession = await resolveAndStoreServerSession({ ...serverSession, workspace: accepted.workspace });
-      clearWorkspaceScopedSharingDrafts();
-      setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
-      setServerErrorKind(null);
-      await prepareServerSyncDecision(nextSession);
-      await refreshSharing(nextSession);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  async function handleUpdateMemberRole(memberId: string, role: WorkspaceMemberDto["role"]) {
-    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      await serverApi.updateMemberRole(serverSession.workspace.id, memberId, role, serverSession.token);
-      setServerStatus("멤버 권한을 변경했습니다.");
-      setServerErrorKind(null);
-      await refreshSharing(serverSession);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  async function handleDeleteMember(memberId: string) {
-    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
-      return;
-    }
-
-    if (!window.confirm("이 멤버를 워크스페이스에서 제거할까요?")) {
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      await serverApi.deleteMember(serverSession.workspace.id, memberId, serverSession.token);
-      setServerStatus("멤버를 제거했습니다.");
-      setServerErrorKind(null);
-      await refreshSharing(serverSession);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  async function handleRevokeInvitation(invitationId: string) {
-    if (!serverApi || !serverSession?.workspace || !canManageCurrentWorkspace) {
-      return;
-    }
-
-    if (!window.confirm("이 초대를 취소할까요? 취소된 초대 링크는 더 이상 사용할 수 없습니다.")) {
-      return;
-    }
-
-    setIsServerBusy(true);
-    try {
-      await serverApi.revokeInvitation(serverSession.workspace.id, invitationId, serverSession.token);
-      setServerStatus("초대를 취소했습니다.");
-      setServerErrorKind(null);
-      await refreshSharing(serverSession);
-    } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(getServerSyncErrorMessage(error));
-    } finally {
-      setIsServerBusy(false);
-    }
-  }
-
-  function handleExportTemplate() {
-    const csv = buildFixedCostCsvTemplate({ fixedCosts, categories, cards });
-    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = "fixed-cost-template.csv";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setImportMessage("템플릿을 내보냈습니다.");
-  }
-
-  function handleExportBackup() {
-    const backup = buildLivingCostBackup({ monthlyIncome, fixedCosts, categories, cards });
-    const blob = new Blob([backup], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = "living-cost-backup.lcm";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setImportMessage("전체 백업을 내보냈습니다.");
-  }
-
-  async function handleImportTemplate(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    try {
-      const result = parseFixedCostCsvTemplate({
-        csv: await file.text(),
-        categories,
-        cards
-      });
-
-      setCategories(result.categories);
-      setCards(result.cards);
-      setFixedCosts(result.fixedCosts);
-      setImportMessage(result.importedCount + "개 항목을 가져왔습니다.");
-    } catch {
-      setImportMessage("가져오기에 실패했습니다.");
-    } finally {
-      if (importFileRef.current) {
-        importFileRef.current.value = "";
-      }
-    }
-  }
-
-  async function handleImportBackup(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    try {
-      const result = parseLivingCostBackup(await file.text());
-
-      setMonthlyIncome(result.monthlyIncome);
-      setCategories(result.categories);
-      setCards(result.cards);
-      setFixedCosts(result.fixedCosts);
-      setCategoryFilterId("all");
-      setIsDeleteMode(false);
-      setSelectedDeleteIds([]);
-      setImportMessage("전체 백업을 가져왔습니다.");
-    } catch {
-      setImportMessage("전체 백업 가져오기에 실패했습니다.");
-    } finally {
-      if (backupFileRef.current) {
-        backupFileRef.current.value = "";
-      }
-    }
-  }
-
-  function getCurrentBudgetSnapshot(): LocalBudgetSnapshot {
-    return {
-      monthlyIncome,
-      categories,
-      cards,
-      fixedCosts
-    };
-  }
-
-  function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
-    setMonthlyIncome(snapshot.monthlyIncome);
-    setCategories(snapshot.categories);
-    setCards(snapshot.cards);
-    setFixedCosts(snapshot.fixedCosts);
-    setCategoryFilterId("all");
-    setIsDeleteMode(false);
-    setSelectedDeleteIds([]);
-  }
-
-  function saveServerSession(session: ServerSession) {
-    window.localStorage.setItem(SERVER_SESSION_STORAGE_KEY, JSON.stringify(session));
-  }
-
-  function clearWorkspaceScopedSharingDrafts() {
-    setCreatedInvitation(null);
-    setInviteEmail("");
-    setInviteRole("viewer");
-    setAcceptTokens({});
-  }
-
-  function handlePieMove(event: MouseEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const angle = Math.atan2(x - centerX, centerY - y);
-    const percent = (((angle < 0 ? angle + Math.PI * 2 : angle) / (Math.PI * 2)) * 100);
-
-    setActivePieSegment(getPieSegmentAtPercent(pieSegments, percent));
-    setPieTooltipPosition({ x, y });
-  }
-
-  if (!isBootLoaded || !isLoaded) {
+  if (!users.isBootLoaded || !users.isLoaded) {
     return (
       <main className="page-shell">
         <section className="login-card">
@@ -1392,372 +87,220 @@ export default function Home() {
   return (
     <main className="page-shell">
       <AppHeader
-        saveError={saveError}
-        lastSavedAt={lastSavedAt}
-        serverSession={serverSession}
-        currentUserName={currentUser?.name}
-        onOpenData={() => setIsDataModalOpen(true)}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
-        onOpenCoach={() => {
-          setIsCoachModalOpen(true);
-          setCoachError("");
-          // 이미 한 번 켰고(opt-in) 아직 코칭 전이면, 열자마자 자동 실행.
-          if (isCoachOptedIn() && isWebGpuAvailable() && coachHasData && coachStatus === "idle") {
-            void runCoaching();
-          }
-        }}
+        saveError={budget.saveError}
+        lastSavedAt={budget.lastSavedAt}
+        serverSession={auth.serverSession}
+        currentUserName={users.currentUser?.name}
+        onOpenData={() => ui.setIsDataModalOpen(true)}
+        onOpenAuth={() => ui.setIsAuthModalOpen(true)}
+        onOpenCoach={coach.openCoachModal}
         onServerLogout={() => {
-          handleServerLogout();
-          handleLogout();
+          auth.handleServerLogout();
+          users.handleLogout();
         }}
       />
       <HeroPanel
-        monthlyIncome={monthlyIncome}
-        expenseRate={summary.expenseRate}
-        hasServerWorkspace={Boolean(serverSession?.workspace)}
-        onIncomeChange={handleIncomeChange}
+        monthlyIncome={budget.monthlyIncome}
+        expenseRate={budget.summary.expenseRate}
+        hasServerWorkspace={Boolean(auth.serverSession?.workspace)}
+        onIncomeChange={budget.handleIncomeChange}
       />
 
-      <MetricGrid summary={summary} fixedCostCount={fixedCosts.length} />
+      <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
 
       <section className="workspace">
         <FixedCostTable
-          categories={categories}
-          cards={cards}
-          visibleFixedCosts={visibleFixedCosts}
-          visibleFixedCostTotal={visibleFixedCostTotal}
-          categoryFilterId={categoryFilterId}
-          isDeleteMode={isDeleteMode}
-          selectedDeleteIds={selectedDeleteIds}
-          importMessage={importMessage}
-          onItemChange={handleItemChange}
-          onPaymentMethodChange={handlePaymentMethodChange}
-          onPaymentOptionChange={handlePaymentOptionChange}
-          onAddItem={handleAddItem}
-          onQuickAdd={handleQuickAdd}
-          onEnterDeleteMode={handleEnterDeleteMode}
-          onCancelDeleteMode={handleCancelDeleteMode}
-          onConfirmDeleteItems={handleConfirmDeleteItems}
-          onToggleDeleteSelection={handleToggleDeleteSelection}
-          onFilterChange={(categoryId) => {
-            setCategoryFilterId(categoryId);
-            setSelectedDeleteIds([]);
-          }}
-          onOpenCategory={() => setIsCategoryModalOpen(true)}
-          onOpenCard={() => setIsCardModalOpen(true)}
-          onOpenData={() => setIsDataModalOpen(true)}
+          categories={budget.categories}
+          cards={budget.cards}
+          visibleFixedCosts={budget.visibleFixedCosts}
+          visibleFixedCostTotal={budget.visibleFixedCostTotal}
+          categoryFilterId={ui.categoryFilterId}
+          isDeleteMode={ui.isDeleteMode}
+          selectedDeleteIds={ui.selectedDeleteIds}
+          importMessage={ui.importMessage}
+          onItemChange={budget.handleItemChange}
+          onPaymentMethodChange={budget.handlePaymentMethodChange}
+          onPaymentOptionChange={budget.handlePaymentOptionChange}
+          onAddItem={budget.handleAddItem}
+          onQuickAdd={budget.handleQuickAdd}
+          onEnterDeleteMode={budget.handleEnterDeleteMode}
+          onCancelDeleteMode={budget.handleCancelDeleteMode}
+          onConfirmDeleteItems={budget.handleConfirmDeleteItems}
+          onToggleDeleteSelection={budget.handleToggleDeleteSelection}
+          onFilterChange={ui.handleFilterChange}
+          onOpenCategory={() => ui.setIsCategoryModalOpen(true)}
+          onOpenCard={() => ui.setIsCardModalOpen(true)}
+          onOpenData={() => ui.setIsDataModalOpen(true)}
         />
 
         <ChartSection
-          chartMode={chartMode}
-          buckets={buckets}
-          pieSegments={pieSegments}
-          monthlyExpense={summary.monthlyExpense}
-          pieBackground={pieBackground}
-          activePieSegment={activePieSegment}
-          pieTooltipPosition={pieTooltipPosition}
-          onChartModeChange={setChartMode}
-          onPieMove={handlePieMove}
-          onPieLeave={() => setActivePieSegment(null)}
+          chartMode={ui.chartMode}
+          buckets={budget.buckets}
+          pieSegments={budget.pieSegments}
+          monthlyExpense={budget.summary.monthlyExpense}
+          pieBackground={budget.pieBackground}
+          activePieSegment={ui.activePieSegment}
+          pieTooltipPosition={ui.pieTooltipPosition}
+          onChartModeChange={ui.setChartMode}
+          onPieMove={(event) => ui.handlePieMove(event, budget.pieSegments)}
+          onPieLeave={() => ui.setActivePieSegment(null)}
         />
       </section>
 
       <DataModal
-          opened={isDataModalOpen}
-          hasServerApi={Boolean(serverApi)}
-          importFileRef={importFileRef}
-          backupFileRef={backupFileRef}
-          onClose={() => setIsDataModalOpen(false)}
-          onExportTemplate={handleExportTemplate}
-          onImportTemplate={(file) => void handleImportTemplate(file)}
-          onExportBackup={handleExportBackup}
-          onImportBackup={(file) => void handleImportBackup(file)}
+          opened={ui.isDataModalOpen}
+          hasServerApi={Boolean(auth.serverApi)}
+          importFileRef={budget.importFileRef}
+          backupFileRef={budget.backupFileRef}
+          onClose={() => ui.setIsDataModalOpen(false)}
+          onExportTemplate={budget.handleExportTemplate}
+          onImportTemplate={(file) => void budget.handleImportTemplate(file)}
+          onExportBackup={budget.handleExportBackup}
+          onImportBackup={(file) => void budget.handleImportBackup(file)}
           sync={{
-            serverSession,
-            syncStateView,
-            displayedSyncState,
-            lastServerSyncedAt,
-            localSnapshotSummary,
-            serverSnapshotSummary,
-            serverSnapshot,
-            serverWorkspaces,
-            currentWorkspaceRole,
-            canUploadServerSnapshot,
-            isServerBusy,
-            serverStatus,
-            serverErrorKind,
-            changeCurrentPassword,
-            changeNewPassword,
-            showUploadButton: Boolean(
-              serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(getCurrentBudgetSnapshot())
-            ),
-            showLoadButton: Boolean(serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot)),
-            onServerLogout: handleServerLogout,
-            onResendVerification: () => void handleResendVerification(),
-            onChangePassword: () => void handleChangePassword(),
-            onChangeCurrentPassword: setChangeCurrentPassword,
-            onChangeNewPassword: setChangeNewPassword,
-            onSelectWorkspace: (workspaceId) => void handleSelectServerWorkspace(workspaceId),
+            serverSession: auth.serverSession,
+            syncStateView: sync.syncStateView,
+            displayedSyncState: sync.displayedSyncState,
+            lastServerSyncedAt: sync.lastServerSyncedAt,
+            localSnapshotSummary: sync.localSnapshotSummary,
+            serverSnapshotSummary: sync.serverSnapshotSummary,
+            serverSnapshot: sync.serverSnapshot,
+            serverWorkspaces: sync.serverWorkspaces,
+            currentWorkspaceRole: sync.currentWorkspaceRole,
+            canUploadServerSnapshot: sync.canUploadServerSnapshot,
+            isServerBusy: auth.isServerBusy,
+            serverStatus: auth.serverStatus,
+            serverErrorKind: auth.serverErrorKind,
+            changeCurrentPassword: auth.changeCurrentPassword,
+            changeNewPassword: auth.changeNewPassword,
+            showUploadButton: sync.showUploadButton,
+            showLoadButton: sync.showLoadButton,
+            onServerLogout: auth.handleServerLogout,
+            onResendVerification: () => void auth.handleResendVerification(),
+            onChangePassword: () => void auth.handleChangePassword(),
+            onChangeCurrentPassword: auth.setChangeCurrentPassword,
+            onChangeNewPassword: auth.setChangeNewPassword,
+            onSelectWorkspace: (workspaceId) => void sync.handleSelectServerWorkspace(workspaceId),
             onCheckServer: () => {
-              if (serverSession) {
-                void prepareServerSyncDecision(serverSession);
+              if (auth.serverSession) {
+                void sync.prepareServerSyncDecision(auth.serverSession);
               }
             },
-            onSyncNow: () => void handleSyncNow(),
-            onLoadSnapshot: () => void handleLoadServerSnapshot(),
-            onStayLocal: handleStayLocalOnly,
+            onSyncNow: () => void sync.handleSyncNow(),
+            onLoadSnapshot: () => void sync.handleLoadServerSnapshot(),
+            onStayLocal: sync.handleStayLocalOnly,
             onOpenAuth: () => {
-              setIsDataModalOpen(false);
-              setIsAuthModalOpen(true);
+              ui.setIsDataModalOpen(false);
+              ui.setIsAuthModalOpen(true);
             },
-            onExportBackup: handleExportBackup
+            onExportBackup: budget.handleExportBackup
           }}
           sharing={{
-            serverSession,
-            members,
-            invitations,
-            sentInvitations,
-            acceptTokens,
-            inviteEmail,
-            inviteRole,
-            visibleCreatedInvitation,
-            canManageCurrentWorkspace,
-            isServerBusy,
+            serverSession: auth.serverSession,
+            members: sync.members,
+            invitations: sync.invitations,
+            sentInvitations: sync.sentInvitations,
+            acceptTokens: sync.acceptTokens,
+            inviteEmail: sync.inviteEmail,
+            inviteRole: sync.inviteRole,
+            visibleCreatedInvitation: sync.visibleCreatedInvitation,
+            canManageCurrentWorkspace: sync.canManageCurrentWorkspace,
+            isServerBusy: auth.isServerBusy,
             onAcceptTokenChange: (invitationId, value) =>
-              setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: value })),
-            onAcceptInvitation: (invitationId) => void handleAcceptInvitation(invitationId),
-            onRefreshSharing: () => void refreshSharing(),
-            onCreateInvitation: () => void handleCreateInvitation(),
-            onInviteEmailChange: setInviteEmail,
-            onInviteRoleChange: setInviteRole,
-            onUpdateMemberRole: (memberId, role) => void handleUpdateMemberRole(memberId, role),
-            onDeleteMember: (memberId) => void handleDeleteMember(memberId),
-            onRevokeInvitation: (invitationId) => void handleRevokeInvitation(invitationId)
+              sync.setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: value })),
+            onAcceptInvitation: (invitationId) => void sync.handleAcceptInvitation(invitationId),
+            onRefreshSharing: () => void sync.refreshSharing(),
+            onCreateInvitation: () => void sync.handleCreateInvitation(),
+            onInviteEmailChange: sync.setInviteEmail,
+            onInviteRoleChange: sync.setInviteRole,
+            onUpdateMemberRole: (memberId, role) => void sync.handleUpdateMemberRole(memberId, role),
+            onDeleteMember: (memberId) => void sync.handleDeleteMember(memberId),
+            onRevokeInvitation: (invitationId) => void sync.handleRevokeInvitation(invitationId)
           }}
         />
 
       <AuthModal
-          opened={isAuthModalOpen}
-          hasServerApi={Boolean(serverApi)}
-          initialSession={bootServerSession}
-          isServerBusy={isServerBusy}
-          serverStatus={serverStatus}
-          serverErrorKind={serverErrorKind}
-          loginRequest={authLoginRequest}
-          onSubmit={handleServerAuthSubmit}
-          onForgotSubmit={(email) => void handleForgotPassword(email)}
+          opened={ui.isAuthModalOpen}
+          hasServerApi={Boolean(auth.serverApi)}
+          initialSession={auth.bootServerSession}
+          isServerBusy={auth.isServerBusy}
+          serverStatus={auth.serverStatus}
+          serverErrorKind={auth.serverErrorKind}
+          loginRequest={auth.authLoginRequest}
+          onSubmit={auth.handleServerAuthSubmit}
+          onForgotSubmit={(email) => void auth.handleForgotPassword(email)}
           onViewChange={(view) => {
             if (view === "forgot") {
-              setServerStatus("");
+              auth.setServerStatus("");
             }
           }}
-          onClose={() => setIsAuthModalOpen(false)}
+          onClose={() => ui.setIsAuthModalOpen(false)}
         />
 
       <ResetPasswordModal
-          opened={resetToken !== null}
-          isServerBusy={isServerBusy}
-          serverStatus={serverStatus}
-          serverErrorKind={serverErrorKind}
-          onSubmit={handleResetPassword}
-          onClose={() => {
-            setResetToken(null);
-            clearAuthQueryParam("reset_token");
-          }}
+          opened={auth.resetToken !== null}
+          isServerBusy={auth.isServerBusy}
+          serverStatus={auth.serverStatus}
+          serverErrorKind={auth.serverErrorKind}
+          onSubmit={auth.handleResetPassword}
+          onClose={auth.closeResetModal}
         />
 
       <VerifyEmailNoticeModal
-          opened={verifyNoticeEmail !== null}
-          email={verifyNoticeEmail ?? ""}
-          isServerBusy={isServerBusy}
-          serverStatus={serverStatus}
-          serverErrorKind={serverErrorKind}
-          onResend={() => void handleResendVerification()}
+          opened={auth.verifyNoticeEmail !== null}
+          email={auth.verifyNoticeEmail ?? ""}
+          isServerBusy={auth.isServerBusy}
+          serverStatus={auth.serverStatus}
+          serverErrorKind={auth.serverErrorKind}
+          onResend={() => void auth.handleResendVerification()}
           onContinue={() => {
-            setVerifyNoticeEmail(null);
-            setServerStatus("");
-            setServerErrorKind(null);
-            setIsDataModalOpen(true);
+            auth.setVerifyNoticeEmail(null);
+            auth.setServerStatus("");
+            auth.setServerErrorKind(null);
+            ui.setIsDataModalOpen(true);
           }}
           onClose={() => {
-            setVerifyNoticeEmail(null);
-            setServerStatus("");
-            setServerErrorKind(null);
+            auth.setVerifyNoticeEmail(null);
+            auth.setServerStatus("");
+            auth.setServerErrorKind(null);
           }}
         />
 
       <CoachModal
-          opened={isCoachModalOpen}
+          opened={coach.isCoachModalOpen}
           webGpuAvailable={isWebGpuAvailable()}
-          hasData={coachHasData}
+          hasData={coach.coachHasData}
           approxMb={COACH_MODEL_APPROX_MB}
-          status={coachStatus}
-          loadProgress={coachProgress}
-          loadText={coachProgressText}
-          coaching={coachingText}
-          errorMessage={coachError}
-          fallbackHeadline={coachFallbackHeadline}
-          onStart={() => void runCoaching()}
-          onRegenerate={() => void runCoaching()}
-          onClose={() => setIsCoachModalOpen(false)}
+          status={coach.coachStatus}
+          loadProgress={coach.coachProgress}
+          loadText={coach.coachProgressText}
+          coaching={coach.coachingText}
+          errorMessage={coach.coachError}
+          fallbackHeadline={coach.coachFallbackHeadline}
+          onStart={() => void coach.runCoaching()}
+          onRegenerate={() => void coach.runCoaching()}
+          onClose={() => coach.setIsCoachModalOpen(false)}
         />
 
       <CategoryModal
-          opened={isCategoryModalOpen}
-          categories={categories}
-          onAdd={handleAddCategory}
-          onRename={handleRenameCategory}
-          onDelete={handleDeleteCategory}
-          onClose={() => setIsCategoryModalOpen(false)}
+          opened={ui.isCategoryModalOpen}
+          categories={budget.categories}
+          onAdd={budget.handleAddCategory}
+          onRename={budget.handleRenameCategory}
+          onDelete={budget.handleDeleteCategory}
+          onClose={() => ui.setIsCategoryModalOpen(false)}
         />
 
       <CardModal
-          opened={isCardModalOpen}
-          cards={cards}
-          onAdd={handleAddCard}
-          onRename={handleRenameCard}
-          onUpdateBillingDay={handleUpdateCardBillingDay}
-          onUpdateEndOfMonth={handleUpdateCardEndOfMonth}
-          onDelete={handleDeleteCard}
-          onClose={() => setIsCardModalOpen(false)}
+          opened={ui.isCardModalOpen}
+          cards={budget.cards}
+          onAdd={budget.handleAddCard}
+          onRename={budget.handleRenameCard}
+          onUpdateBillingDay={budget.handleUpdateCardBillingDay}
+          onUpdateEndOfMonth={budget.handleUpdateCardEndOfMonth}
+          onDelete={budget.handleDeleteCard}
+          onClose={() => ui.setIsCardModalOpen(false)}
         />
     </main>
   );
-}
-
-function parseBudgetSnapshot(stored: string | null): { snapshot: BudgetSnapshot; recovered: boolean } {
-  const fallback = sampleBudgetSnapshot;
-
-  if (!stored) {
-    return { snapshot: fallback, recovered: false };
-  }
-
-  try {
-    const parsed = JSON.parse(stored) as {
-      monthlyIncome?: number;
-      fixedCosts?: FixedCost[];
-      categories?: Category[];
-      cards?: PaymentCard[];
-    };
-
-    return {
-      snapshot: {
-      monthlyIncome: typeof parsed.monthlyIncome === "number" ? Math.max(0, Math.round(parsed.monthlyIncome)) : fallback.monthlyIncome,
-      fixedCosts: Array.isArray(parsed.fixedCosts) ? parsed.fixedCosts.map((item) => createFixedCost(item)) : fallback.fixedCosts,
-      categories: Array.isArray(parsed.categories) ? mergeCategories(DEFAULT_CATEGORIES, parsed.categories) : fallback.categories,
-      cards: Array.isArray(parsed.cards) ? mergeCards(DEFAULT_CARDS, parsed.cards) : fallback.cards
-      },
-      recovered: false
-    };
-  } catch {
-    return { snapshot: fallback, recovered: true };
-  }
-}
-
-function readJson<T>(key: string, fallback: T): T {
-  const stored = window.localStorage.getItem(key);
-  if (!stored) {
-    return fallback;
-  }
-
-  try {
-    return JSON.parse(stored) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function getCurrentBudgetSnapshotFromState(snapshot: BudgetSnapshot): LocalBudgetSnapshot {
-  return {
-    monthlyIncome: snapshot.monthlyIncome,
-    categories: snapshot.categories,
-    cards: snapshot.cards,
-    fixedCosts: snapshot.fixedCosts
-  };
-}
-
-function buildSnapshotKey(snapshot: LocalBudgetSnapshot) {
-  return JSON.stringify({
-    monthlyIncome: Math.max(0, Math.round(snapshot.monthlyIncome)),
-    categories: snapshot.categories.map((category) => ({
-      id: category.id,
-      label: category.label
-    })),
-    cards: snapshot.cards.map((card) => ({
-      id: card.id,
-      label: card.label,
-      billingDay: card.billingDay
-    })),
-    fixedCosts: snapshot.fixedCosts.map((item) => ({
-      id: item.id,
-      name: item.name,
-      categoryId: item.categoryId,
-      paymentMethodId: item.paymentMethodId,
-      paymentOptionId: item.paymentOptionId,
-      amount: item.amount,
-      periodMonths: item.periodMonths,
-      billingDay: item.billingDay
-    }))
-  });
-}
-
-function isServerSession(value: ServerSession | null): value is ServerSession {
-  return (
-    !!value &&
-    typeof value.token === "string" &&
-    value.token.length > 0 &&
-    typeof value.refreshToken === "string" &&
-    value.refreshToken.length > 0 &&
-    typeof value.user?.id === "string" &&
-    typeof value.user?.email === "string" &&
-    typeof value.user?.name === "string"
-  );
-}
-
-function clearAuthQueryParam(key: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  const url = new URL(window.location.href);
-  url.searchParams.delete(key);
-  window.history.replaceState({}, "", url.pathname + url.search + url.hash);
-}
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof ServerApiError) {
-    const mapped = mapServerErrorMessage(error);
-    if (mapped) {
-      return mapped;
-    }
-  }
-  return error instanceof Error ? error.message : "서버 요청에 실패했습니다.";
-}
-
-// Map server-side English/technical messages (and bare status codes) to friendly
-// Korean copy so developer messages like "Invalid request body" never surface to users.
-function mapServerErrorMessage(error: ServerApiError): string | null {
-  if (error.status === 400) {
-    return "입력값을 확인해주세요.";
-  }
-  if (error.status === 409) {
-    return "이미 가입된 이메일입니다.";
-  }
-  if (error.status === 429) {
-    return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
-  }
-  if (error.status >= 500) {
-    return "서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
-  }
-  return null;
-}
-
-function getServerSyncErrorMessage(error: unknown) {
-  if (isEmailNotVerifiedError(error)) {
-    return "이메일 인증 후에 클라우드 저장(동기화)을 사용할 수 있습니다. 가입 시 받은 인증 메일의 링크를 확인해 주세요.";
-  }
-  if (isServerAuthFailure(error)) {
-    return "서버 세션이 만료되었거나 권한이 없습니다. 다시 로그인해 주세요.";
-  }
-
-  return getErrorMessage(error);
 }
