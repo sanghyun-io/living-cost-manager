@@ -1,13 +1,17 @@
-import { Button, Group, Stack, Text, TextInput } from "@mantine/core";
+import { useState } from "react";
+import { Button, Group, Stack, TextInput } from "@mantine/core";
 import { isDefaultCategory, type Category } from "../../lib/budget";
 import { ModalShell } from "./ModalShell";
 
 interface CategoryModalProps {
   opened: boolean;
   categories: Category[];
-  newCategoryLabel: string;
-  onLabelChange: (value: string) => void;
-  onAdd: () => void;
+  /**
+   * The draft label lives inside this modal. The wrapper component itself is
+   * always mounted by the page (only Mantine's content unmounts on close), so
+   * the draft persists across open/close exactly like the old page-level state.
+   */
+  onAdd: (label: string) => void;
   onRename: (id: string, label: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -16,13 +20,18 @@ interface CategoryModalProps {
 export function CategoryModal({
   opened,
   categories,
-  newCategoryLabel,
-  onLabelChange,
   onAdd,
   onRename,
   onDelete,
   onClose
 }: CategoryModalProps) {
+  const [newCategoryLabel, setNewCategoryLabel] = useState("");
+
+  function handleAdd() {
+    onAdd(newCategoryLabel);
+    setNewCategoryLabel("");
+  }
+
   return (
     <ModalShell opened={opened} sectionLabel="관리" title="카테고리 관리" onClose={onClose}>
       <Group align="flex-end" gap="xs">
@@ -30,14 +39,14 @@ export function CategoryModal({
           label="새 카테고리"
           style={{ flex: 1 }}
           value={newCategoryLabel}
-          onChange={(event) => onLabelChange(event.currentTarget.value)}
+          onChange={(event) => setNewCategoryLabel(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
-              onAdd();
+              handleAdd();
             }
           }}
         />
-        <Button variant="default" onClick={onAdd}>
+        <Button variant="default" onClick={handleAdd}>
           추가
         </Button>
       </Group>

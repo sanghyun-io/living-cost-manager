@@ -62,6 +62,7 @@ import {
   parseCurrencyInput
 } from "./lib/formatting";
 import type { BudgetSnapshot } from "./lib/pageTypes";
+import { validateEmail, validateName, validatePassword } from "./lib/validation";
 import { emptyBudgetSnapshot, sampleBudgetSnapshot, seedFixedCosts } from "./lib/seedData";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
@@ -69,8 +70,8 @@ import { MetricGrid } from "./components/MetricGrid";
 import { ChartSection } from "./components/ChartSection";
 import { FixedCostTable } from "./components/FixedCostTable";
 import { CategoryModal } from "./components/modals/CategoryModal";
-import { CardModal } from "./components/modals/CardModal";
-import { AuthModal } from "./components/modals/AuthModal";
+import { CardModal, type CardDraft } from "./components/modals/CardModal";
+import { AuthModal, type AuthFormValues } from "./components/modals/AuthModal";
 import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
 import { VerifyEmailNoticeModal } from "./components/modals/VerifyEmailNoticeModal";
 import { CoachModal, type CoachStatus } from "./components/modals/CoachModal";
@@ -96,10 +97,6 @@ export default function Home() {
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(seedFixedCosts);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [cards, setCards] = useState<PaymentCard[]>(DEFAULT_CARDS);
-  const [newCategoryLabel, setNewCategoryLabel] = useState("");
-  const [newCardLabel, setNewCardLabel] = useState("");
-  const [newCardBillingDay, setNewCardBillingDay] = useState(1);
-  const [newCardIsEndOfMonth, setNewCardIsEndOfMonth] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
@@ -111,12 +108,12 @@ export default function Home() {
   const [coachProgressText, setCoachProgressText] = useState("");
   const [coachingText, setCoachingText] = useState("");
   const [coachError, setCoachError] = useState("");
-  // "login" | "register" lives in serverAuthMode; this adds the forgot-password view.
-  const [authView, setAuthView] = useState<"auth" | "forgot">("auth");
   const [resetToken, setResetToken] = useState<string | null>(null);
+  // Bumped after a successful password reset to reopen AuthModal in login mode
+  // (the form mode/view itself now lives inside AuthModal).
+  const [authLoginRequest, setAuthLoginRequest] = useState(0);
   // Post-signup "check your email" notice. Holds the address we sent to.
   const [verifyNoticeEmail, setVerifyNoticeEmail] = useState<string | null>(null);
-  const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [changeCurrentPassword, setChangeCurrentPassword] = useState("");
   const [changeNewPassword, setChangeNewPassword] = useState("");
   const [chartMode, setChartMode] = useState<"bar" | "pie">("bar");
@@ -131,17 +128,9 @@ export default function Home() {
   const [isBootLoaded, setIsBootLoaded] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [serverSession, setServerSession] = useState<ServerSession | null>(null);
-  const [serverAuthMode, setServerAuthMode] = useState<"login" | "register">("login");
-  const [serverEmail, setServerEmail] = useState("");
-  const [serverPassword, setServerPassword] = useState("");
-  const [serverName, setServerName] = useState("");
-  // Track which auth fields the user has left (blurred) so we only surface
-  // validation errors after they finish typing a field, not while typing.
-  // Name is optional (falls back to email), so it has no validation entry.
-  const [authTouched, setAuthTouched] = useState<{ email: boolean; password: boolean }>({
-    email: false,
-    password: false,
-  });
+  // The session restored at boot, handed to AuthModal once to prefill the
+  // email/name drafts (old boot-effect behavior, now owned by the modal).
+  const [bootServerSession, setBootServerSession] = useState<ServerSession | null>(null);
   const [serverStatus, setServerStatus] = useState("");
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
   // 서버 동기화 히스토리로 계산한 월간 추세(지난달 대비). 코치의 추세 조각 입력.
@@ -191,8 +180,7 @@ export default function Home() {
     setCurrentUser(startupUser.user);
     if (validServerSession) {
       setServerSession(validServerSession);
-      setServerEmail(validServerSession.user.email);
-      setServerName(validServerSession.user.name);
+      setBootServerSession(validServerSession);
     }
     setIsBootLoaded(true);
   }, []);
@@ -503,10 +491,11 @@ export default function Home() {
     setImportMessage(deleteCount + "개 항목을 삭제했습니다.");
   }
 
-  function handleAddCategory() {
-    const nextCategory = createCategory(newCategoryLabel);
+  // The draft label is owned by CategoryModal and handed up on submit; the modal
+  // clears its own draft (see components/modals/CategoryModal.tsx).
+  function handleAddCategory(label: string) {
+    const nextCategory = createCategory(label);
     setCategories((currentCategories) => mergeCategories(currentCategories, [nextCategory]));
-    setNewCategoryLabel("");
   }
 
   function handleRenameCategory(categoryId: string, label: string) {
@@ -524,12 +513,10 @@ export default function Home() {
     }
   }
 
-  function handleAddCard() {
-    const nextCard = createPaymentCard(newCardLabel, newCardBillingDay, newCardIsEndOfMonth);
+  // CardModal owns the new-card draft fields and hands them up on submit.
+  function handleAddCard(draft: CardDraft) {
+    const nextCard = createPaymentCard(draft.label, draft.billingDay, draft.isEndOfMonth);
     setCards((currentCards) => mergeCards(currentCards, [nextCard]));
-    setNewCardLabel("");
-    setNewCardBillingDay(1);
-    setNewCardIsEndOfMonth(false);
   }
 
   function handleRenameCard(cardId: string, label: string) {
@@ -603,54 +590,23 @@ export default function Home() {
     setSelectedDeleteIds([]);
   }
 
-  // Auth form validation. Rules mirror the shared Zod schema
-  // (registerRequestSchema / loginRequestSchema): valid email format and
-  // a password of at least 8 characters. Errors are only shown for fields the
-  // user has already blurred (see authTouched) so we don't nag while typing.
-  const trimmedAuthEmail = serverEmail.trim();
-  const authEmailError =
-    trimmedAuthEmail.length === 0
-      ? "이메일을 입력해 주세요."
-      : !EMAIL_PATTERN.test(trimmedAuthEmail)
-        ? "올바른 이메일 형식이 아닙니다."
-        : null;
-  const authPasswordError =
-    serverPassword.length === 0
-      ? "비밀번호를 입력해 주세요."
-      : serverPassword.length < 8
-        ? "비밀번호는 8자 이상이어야 합니다."
-        : null;
-  // Name is optional at submit time (falls back to email), so it never blocks.
-  const isAuthFormValid = !authEmailError && !authPasswordError;
-
-  function markAuthFieldTouched(field: "email" | "password") {
-    setAuthTouched((current) => (current[field] ? current : { ...current, [field]: true }));
-  }
-
-  function resetAuthTouched() {
-    setAuthTouched({ email: false, password: false });
-  }
-
-  async function handleServerAuthSubmit() {
+  // Auth form drafts, blur-time validation and mode/view switching now live
+  // inside AuthModal. The parent only runs the server request with the values
+  // it hands up, resolving true so the modal can clear the password draft.
+  async function handleServerAuthSubmit(values: AuthFormValues): Promise<boolean> {
     if (!serverApi) {
       setServerStatus("서버 API URL이 없어 로컬 전용으로 동작합니다.");
-      return;
-    }
-    // Guard against programmatic/Enter submits when the form is invalid, and
-    // reveal any outstanding errors by marking the relevant fields touched.
-    if (!isAuthFormValid) {
-      setAuthTouched({ email: true, password: true });
-      return;
+      return false;
     }
 
     const validationError =
-      validateEmail(serverEmail) ??
-      validatePassword(serverPassword) ??
-      (serverAuthMode === "register" ? validateName(serverName) : null);
+      validateEmail(values.email) ??
+      validatePassword(values.password) ??
+      (values.mode === "register" ? validateName(values.name) : null);
     if (validationError) {
       setServerErrorKind("request");
       setServerStatus(validationError);
-      return;
+      return false;
     }
 
     setIsServerBusy(true);
@@ -659,21 +615,24 @@ export default function Home() {
 
     try {
       const authResult =
-        serverAuthMode === "register"
-          ? await serverApi.register({ email: serverEmail, password: serverPassword, name: serverName || serverEmail })
-          : await serverApi.login({ email: serverEmail, password: serverPassword });
+        values.mode === "register"
+          ? await serverApi.register({
+              email: values.email,
+              password: values.password,
+              name: values.name || values.email
+            })
+          : await serverApi.login({ email: values.email, password: values.password });
       const nextSession = await resolveAndStoreServerSession({
         ...authResult,
         workspace: authResult.workspace ?? serverSession?.workspace ?? null
       });
 
       serverRestoreCheckedRef.current = true;
-      setServerPassword("");
       // After signup, walk the user through email verification instead of
       // dropping them straight into the data modal. Cloud writes are gated on
       // verification, so the "check your email" notice sets expectations.
       const justRegisteredUnverified =
-        serverAuthMode === "register" && nextSession.user.emailVerified !== true;
+        values.mode === "register" && nextSession.user.emailVerified !== true;
       if (isAuthModalOpen) {
         setIsAuthModalOpen(false);
         if (justRegisteredUnverified) {
@@ -687,9 +646,11 @@ export default function Home() {
       await prepareServerSyncDecision(nextSession);
       await refreshSharing(nextSession);
       handleLogin(nextSession.user.name || nextSession.user.email);
+      return true;
     } catch (error) {
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getErrorMessage(error));
+      return false;
     } finally {
       setIsServerBusy(false);
     }
@@ -717,11 +678,11 @@ export default function Home() {
     setServerStatus("서버 연결을 해제했습니다. 브라우저 데이터는 유지됩니다.");
   }
 
-  async function handleForgotPassword() {
+  async function handleForgotPassword(email: string) {
     if (!serverApi) {
       return;
     }
-    const validationError = validateEmail(serverEmail);
+    const validationError = validateEmail(email);
     if (validationError) {
       setServerErrorKind("request");
       setServerStatus(validationError);
@@ -731,7 +692,7 @@ export default function Home() {
     setServerStatus("");
     setServerErrorKind(null);
     try {
-      await serverApi.forgotPassword(serverEmail);
+      await serverApi.forgotPassword(email);
       setServerStatus("입력하신 이메일이 가입되어 있다면 재설정 링크를 보냈습니다. 메일함을 확인하세요.");
     } catch (error) {
       setServerErrorKind("request");
@@ -741,31 +702,33 @@ export default function Home() {
     }
   }
 
-  async function handleResetPassword() {
+  // Returns true on success so ResetPasswordModal can clear its own draft
+  // (the old page-level state was cleared here; now the modal mirrors that).
+  async function handleResetPassword(password: string): Promise<boolean> {
     if (!serverApi || !resetToken) {
-      return;
+      return false;
     }
-    const validationError = validatePassword(resetPasswordValue);
+    const validationError = validatePassword(password);
     if (validationError) {
       setServerErrorKind("request");
       setServerStatus(validationError);
-      return;
+      return false;
     }
     setIsServerBusy(true);
     setServerStatus("");
     setServerErrorKind(null);
     try {
-      await serverApi.resetPassword(resetToken, resetPasswordValue);
-      setResetPasswordValue("");
+      await serverApi.resetPassword(resetToken, password);
       setResetToken(null);
       clearAuthQueryParam("reset_token");
-      setServerAuthMode("login");
-      setAuthView("auth");
+      setAuthLoginRequest((count) => count + 1);
       setIsAuthModalOpen(true);
       setServerStatus("비밀번호를 재설정했습니다. 새 비밀번호로 로그인하세요.");
+      return true;
     } catch (error) {
       setServerErrorKind("request");
       setServerStatus(getErrorMessage(error));
+      return false;
     } finally {
       setIsServerBusy(false);
     }
@@ -1576,45 +1539,27 @@ export default function Home() {
       <AuthModal
           opened={isAuthModalOpen}
           hasServerApi={Boolean(serverApi)}
-          authView={authView}
-          serverAuthMode={serverAuthMode}
-          serverEmail={serverEmail}
-          serverPassword={serverPassword}
-          serverName={serverName}
+          initialSession={bootServerSession}
           isServerBusy={isServerBusy}
           serverStatus={serverStatus}
           serverErrorKind={serverErrorKind}
-          authTouched={authTouched}
-          authEmailError={authEmailError}
-          authPasswordError={authPasswordError}
-          isAuthFormValid={isAuthFormValid}
-          onEmailChange={setServerEmail}
-          onPasswordChange={setServerPassword}
-          onNameChange={setServerName}
-          onBlurField={markAuthFieldTouched}
-          onModeChange={(mode) => {
-            setServerAuthMode(mode);
-            resetAuthTouched();
-          }}
+          loginRequest={authLoginRequest}
+          onSubmit={handleServerAuthSubmit}
+          onForgotSubmit={(email) => void handleForgotPassword(email)}
           onViewChange={(view) => {
-            setAuthView(view);
             if (view === "forgot") {
               setServerStatus("");
             }
           }}
-          onSubmit={() => void handleServerAuthSubmit()}
-          onForgotSubmit={() => void handleForgotPassword()}
           onClose={() => setIsAuthModalOpen(false)}
         />
 
       <ResetPasswordModal
           opened={resetToken !== null}
-          resetPasswordValue={resetPasswordValue}
           isServerBusy={isServerBusy}
           serverStatus={serverStatus}
           serverErrorKind={serverErrorKind}
-          onPasswordChange={setResetPasswordValue}
-          onSubmit={() => void handleResetPassword()}
+          onSubmit={handleResetPassword}
           onClose={() => {
             setResetToken(null);
             clearAuthQueryParam("reset_token");
@@ -1660,8 +1605,6 @@ export default function Home() {
       <CategoryModal
           opened={isCategoryModalOpen}
           categories={categories}
-          newCategoryLabel={newCategoryLabel}
-          onLabelChange={setNewCategoryLabel}
           onAdd={handleAddCategory}
           onRename={handleRenameCategory}
           onDelete={handleDeleteCategory}
@@ -1671,12 +1614,6 @@ export default function Home() {
       <CardModal
           opened={isCardModalOpen}
           cards={cards}
-          newCardLabel={newCardLabel}
-          newCardBillingDay={newCardBillingDay}
-          newCardIsEndOfMonth={newCardIsEndOfMonth}
-          onLabelChange={setNewCardLabel}
-          onBillingDayChange={setNewCardBillingDay}
-          onNewCardEndOfMonthChange={setNewCardIsEndOfMonth}
           onAdd={handleAddCard}
           onRename={handleRenameCard}
           onUpdateBillingDay={handleUpdateCardBillingDay}
@@ -1823,36 +1760,4 @@ function getServerSyncErrorMessage(error: unknown) {
   }
 
   return getErrorMessage(error);
-}
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Client-side pre-submit validation mirroring the shared Zod schemas
-// (registerRequestSchema etc.): email format, password min 8, name min 1.
-// Returns a friendly Korean message, or null when the input is valid.
-function validateEmail(email: string): string | null {
-  if (!email.trim()) {
-    return "이메일을 입력해주세요.";
-  }
-  if (!EMAIL_PATTERN.test(email.trim())) {
-    return "올바른 이메일 형식이 아닙니다.";
-  }
-  return null;
-}
-
-function validatePassword(password: string): string | null {
-  if (!password) {
-    return "비밀번호를 입력해주세요.";
-  }
-  if (password.length < 8) {
-    return "비밀번호는 8자 이상이어야 합니다.";
-  }
-  return null;
-}
-
-function validateName(name: string): string | null {
-  if (!name.trim()) {
-    return "이름을 입력해주세요.";
-  }
-  return null;
 }

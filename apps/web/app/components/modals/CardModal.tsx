@@ -1,17 +1,20 @@
+import { useState } from "react";
 import { Button, Checkbox, Group, NumberInput, Stack, TextInput } from "@mantine/core";
 import { isDefaultCard, type PaymentCard } from "../../lib/cards";
 import { ModalShell } from "./ModalShell";
 
+/** Draft values for the "new card" row, owned by the modal itself. */
+export interface CardDraft {
+  label: string;
+  billingDay: number;
+  isEndOfMonth: boolean;
+}
+
 interface CardModalProps {
   opened: boolean;
   cards: PaymentCard[];
-  newCardLabel: string;
-  newCardBillingDay: number;
-  newCardIsEndOfMonth: boolean;
-  onLabelChange: (value: string) => void;
-  onBillingDayChange: (value: number) => void;
-  onNewCardEndOfMonthChange: (value: boolean) => void;
-  onAdd: () => void;
+  /** The draft fields live inside this modal (see CategoryModal for lifetime notes). */
+  onAdd: (draft: CardDraft) => void;
   onRename: (id: string, label: string) => void;
   onUpdateBillingDay: (id: string, billingDay: number) => void;
   onUpdateEndOfMonth: (id: string, value: boolean) => void;
@@ -26,12 +29,6 @@ function toNumber(value: number | string, fallback: number): number {
 export function CardModal({
   opened,
   cards,
-  newCardLabel,
-  newCardBillingDay,
-  newCardIsEndOfMonth,
-  onLabelChange,
-  onBillingDayChange,
-  onNewCardEndOfMonthChange,
   onAdd,
   onRename,
   onUpdateBillingDay,
@@ -39,6 +36,17 @@ export function CardModal({
   onDelete,
   onClose
 }: CardModalProps) {
+  const [newCardLabel, setNewCardLabel] = useState("");
+  const [newCardBillingDay, setNewCardBillingDay] = useState(1);
+  const [newCardIsEndOfMonth, setNewCardIsEndOfMonth] = useState(false);
+
+  function handleAdd() {
+    onAdd({ label: newCardLabel, billingDay: newCardBillingDay, isEndOfMonth: newCardIsEndOfMonth });
+    setNewCardLabel("");
+    setNewCardBillingDay(1);
+    setNewCardIsEndOfMonth(false);
+  }
+
   return (
     <ModalShell opened={opened} sectionLabel="관리" title="카드 관리" onClose={onClose}>
       <Group align="flex-end" gap="xs">
@@ -46,10 +54,10 @@ export function CardModal({
           label="카드 이름"
           style={{ flex: 1 }}
           value={newCardLabel}
-          onChange={(event) => onLabelChange(event.currentTarget.value)}
+          onChange={(event) => setNewCardLabel(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
-              onAdd();
+              handleAdd();
             }
           }}
         />
@@ -62,15 +70,15 @@ export function CardModal({
           clampBehavior="strict"
           disabled={newCardIsEndOfMonth}
           value={newCardBillingDay}
-          onChange={(value) => onBillingDayChange(toNumber(value, 1))}
+          onChange={(value) => setNewCardBillingDay(toNumber(value, 1))}
         />
         <Checkbox
           label="말일"
           size="sm"
           checked={newCardIsEndOfMonth}
-          onChange={(event) => onNewCardEndOfMonthChange(event.currentTarget.checked)}
+          onChange={(event) => setNewCardIsEndOfMonth(event.currentTarget.checked)}
         />
-        <Button variant="default" onClick={onAdd}>
+        <Button variant="default" onClick={handleAdd}>
           추가
         </Button>
       </Group>
