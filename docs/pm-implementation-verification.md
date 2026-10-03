@@ -1,5 +1,7 @@
 # PM 우선순위 구현·검증 기록
 
+> 아래는 로컬 구현 당시 기록이다. 이후 승인된 운영 배포와 332개 테스트·실서비스 검증은 [2026-10-03 운영 배포 기록](./production-release-20261003.md)을 따른다.
+
 계획/수락 조건: [pm-subscription-readiness.md](./pm-subscription-readiness.md)
 
 ## 로컬 구현 완료
