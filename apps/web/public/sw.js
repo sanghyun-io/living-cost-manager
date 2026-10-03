@@ -1,6 +1,6 @@
 // 캐시 버전을 올리면 activate 단계에서 이전 캐시가 정리된다.
-// v2: cross-origin(API) 요청을 캐싱 대상에서 제외하도록 fetch 핸들러 수정.
-const cacheName = "living-cost-manager-v2";
+// v3: 성공 응답만 캐시하고 릴리스 식별 정보는 항상 네트워크로 확인한다.
+const cacheName = "living-cost-manager-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -30,15 +30,31 @@ self.addEventListener("fetch", (event) => {
   if (requestUrl.origin !== self.location.origin) {
     return; // 브라우저 기본 네트워크 처리에 맡긴다.
   }
+  if (requestUrl.pathname.endsWith("/release-meta.json")) {
+    event.respondWith(fetch(event.request, { cache: "no-store" }));
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(cacheName).then((cache) => cache.put(event.request, copy));
+      .then(async (response) => {
+        if (response.ok) {
+          try {
+            const cache = await caches.open(cacheName);
+            await cache.put(event.request, response.clone());
+          } catch (_) { /* 저장 실패가 정상 네트워크 응답을 가리지 않도록 한다. */ }
+        }
         return response;
       })
-      .catch(() => caches.match(event.request).then((response) => response || caches.match("./")))
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (event.request.mode === "navigate") {
+          const shell = await caches.match("./");
+          if (shell) return shell;
+        }
+        return Response.error();
+      })
   );
 });
 

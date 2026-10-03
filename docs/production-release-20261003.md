@@ -83,3 +83,27 @@ gamja-ops `verify-assets.rb` 통과. `check-local-drift.rb`는 기존 다른 서
 - 검색 노출/순위/실제 유입 성과는 배포만으로 입증되지 않는다. 현재 중앙 analytics 수집이나 새 유료 리소스는 도입하지 않았다.
 - 미래 자동 배포를 재개하려면 릴리스 source branch와 원격 main의 기존 배포 소유권 변경을 검토하여 통합해야 한다. 현재 production identity는 위 고정 SHA이며 GitHub Actions 완료를 주장하지 않는다.
 - 이전 FE rollback deployment는 위 baseline 항목에 있다. DB 필드 보존을 위해 FE rollback 중에도 호환 API를 유지한다. 정상 고객 쓰기가 있는 상태에서 이전 DB dump를 복원하지 않는다.
+# Durability follow-up (2026-10-04 KST)
+
+This section supersedes the initial release's unresolved registry/main notes below.
+At recheck the SHA85 API returned `{"ok":true}`; its release SHA was in the
+`X-Release-Sha` header, not its JSON body. FE metadata matched that header.
+
+- A clean worktree merges both release history and remote main `1232c2c`.
+  Upstream removal of standalone frontend deployment is retained. The only
+  remaining GitHub workflow validates API tests.
+- Cloudflare project API reports `source: null`, production branch `main`.
+  This is direct upload, not a verified Git-triggered deployment pipeline.
+- OCI systemd/container inventories contain no livingcost deployer. July Mac
+  ownership instructions are historical; updated `DEPLOYMENT_MIGRATION.md`
+  describes explicit paired OCI/Pages promotion and recovery.
+- SHA85 was pushed to existing OCIR and remote manifest plus digest pull succeeded:
+  `yny.ocir.io/axuouply2298/livingcost/backend@sha256:d7f9463d45645d11d75a54ad193833b66d07dc2f3f16abd723545d387c907d1a`,
+  platform `linux/arm64`. Existing Docker credentials were stale; a short-lived
+  token from the existing GAMJA OCI API profile worked in isolated Docker config.
+- Independent audit found no inspected SEO/UI blockers; all five guides returned
+  200, the dashboard was noindex, and unknown guides returned 404. Recovery and
+  maintenance limitations are now explicit. Service-worker caching is corrected
+  to avoid stale offline release metadata and HTML fallback for missing assets.
+- Follow-up validation: shared 92, web 113, health 6 and service-worker 3 tests
+  passed; API and frontend production builds passed. No new migration is needed.

@@ -99,8 +99,13 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(snapshotRoutes);
     await api.register(pushRoutes);
     api.get("/health", async (_request, reply) => {
-      if (process.env.RELEASE_SHA) reply.header("X-Release-Sha", process.env.RELEASE_SHA);
-      return { ok: true };
+      const commitSha = env.RELEASE_SHA ?? env.LCM_COMMIT_SHA ?? "development";
+      if (commitSha !== "development") reply.header("X-Release-Sha", commitSha);
+      return {
+        ok: true,
+        releaseId: env.RELEASE_SHA ? `lcm-${env.RELEASE_SHA}` : env.LCM_RELEASE_ID ?? "development",
+        commitSha
+      };
     });
   };
 

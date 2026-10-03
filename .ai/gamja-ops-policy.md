@@ -1,6 +1,6 @@
 <!-- GENERATED FROM sanghyun-io/gamja-ops. DO NOT EDIT MANUALLY. -->
 <!-- Source file: policies/agent-infra-registry-policy.md -->
-<!-- Source commit: 4dbabfa2c73a2ccf04106f6bdd7674df1de2eb1a -->
+<!-- Source commit: 0a6ec99f0b53b3cbe6eb300396aa9f8528b945d8 -->
 
 # Gamja Ops Infrastructure Registry Policy
 
@@ -39,6 +39,28 @@ Update `gamja-ops` when changing any of these:
 
 Do not update `gamja-ops` for purely internal code changes that do not affect
 deployment, routing, data ownership, secrets, backups, or provider configuration.
+
+## OCI Management Access
+
+The routine OCI management path is private SSH through NordVPN Meshnet:
+
+```bash
+ssh gamja-oci
+```
+
+`ssh gamja-oci-bastion` is the OCI Bastion break-glass path and is used only
+when Meshnet is unavailable. Do not add Meshnet addresses from `100.64.0.0/10`
+to the Bastion client-CIDR allowlist: that allowlist accepts the connecting
+client's actual public egress `/32`. Do not open public TCP/22 as an
+alternative.
+
+`nordvpn status` reporting `Disconnected` means the commercial VPN tunnel is
+not connected; it does not prove that Meshnet is disabled. Check Meshnet
+settings, peer state, and an actual SSH connection together.
+
+Connectivity does not authorize infrastructure mutations. Obtain the required
+approval before changing OCI resources, network rules, services, or data. The
+central procedure is the [OCI management access runbook](https://github.com/sanghyun-io/gamja-ops/blob/main/runbooks/oci-bastion-access.md).
 
 ## Files To Update In `gamja-ops`
 

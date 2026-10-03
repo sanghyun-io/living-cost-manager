@@ -11,7 +11,6 @@
     "test:api": "pnpm --filter @living-cost-manager/api test",
     "test:web": "pnpm --filter @living-cost-manager/web test",
     "smoke:public": "pwsh -NoProfile -File scripts/public-smoke.ps1",
-    "deploy:oci-api": "pwsh -NoProfile -File scripts/deploy-oci-api.ps1",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db": "prisma studio"

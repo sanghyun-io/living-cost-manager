@@ -14,6 +14,28 @@ const prisma = {
 } as unknown as PrismaClient;
 const app = await buildApp({ env, prisma });
 
+test("OCI build identity takes precedence and agrees with the header", async () => {
+  const sha = "a".repeat(40);
+  const releaseApp = await buildApp({ env: { ...env, RELEASE_SHA: sha,
+    LCM_COMMIT_SHA: "old", LCM_RELEASE_ID: "old-release" }, prisma });
+  try {
+    const response = await releaseApp.inject({ method: "GET", url: "/health" });
+    expect(response.headers["x-release-sha"]).toBe(sha);
+    expect(response.json()).toEqual({ ok: true, commitSha: sha, releaseId: `lcm-${sha}` });
+  } finally { await releaseApp.close(); }
+});
+
+test("legacy deployment identity remains supported", async () => {
+  const sha = "b".repeat(40);
+  const releaseApp = await buildApp({ env: { ...env,
+    LCM_COMMIT_SHA: sha, LCM_RELEASE_ID: "legacy-release" }, prisma });
+  try {
+    const response = await releaseApp.inject({ method: "GET", url: "/health" });
+    expect(response.headers["x-release-sha"]).toBe(sha);
+    expect(response.json()).toEqual({ ok: true, commitSha: sha, releaseId: "legacy-release" });
+  } finally { await releaseApp.close(); }
+});
+
 afterAll(async () => {
   await app.close();
 });
@@ -25,7 +47,11 @@ test("GET /health returns ok", async () => {
   });
 
   expect(response.statusCode).toBe(200);
-  expect(response.json()).toEqual({ ok: true });
+  expect(response.json()).toEqual({
+    ok: true,
+    releaseId: "development",
+    commitSha: "development"
+  });
 });
 
 test("응답에 helmet 보안 헤더가 포함된다", async () => {
@@ -78,7 +104,11 @@ test("serves health under configured API base path", async () => {
     });
 
     expect(prefixed.statusCode).toBe(200);
-    expect(prefixed.json()).toEqual({ ok: true });
+    expect(prefixed.json()).toEqual({
+      ok: true,
+      releaseId: "development",
+      commitSha: "development"
+    });
     expect(root.statusCode).toBe(404);
   } finally {
     await prefixedApp.close();

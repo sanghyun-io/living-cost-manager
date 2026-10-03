@@ -1,6 +1,6 @@
 # Living Cost Manager
 
-생활비와 고정비를 관리하는 모노레포 프로젝트입니다. 프론트엔드는 GitHub Pages에 정적 파일로 배포하고, 공유/동기화 기능은 별도의 API 서버와 Postgres를 사용합니다.
+생활비와 고정비를 관리하는 모노레포 프로젝트입니다. 프론트엔드는 Cloudflare Pages, API와 PostgreSQL은 OCI에서 운영합니다. 현재 배포·복구 절차는 [DEPLOYMENT_MIGRATION.md](DEPLOYMENT_MIGRATION.md)를 기준으로 합니다.
 
 ## 모노레포 구조
 
@@ -35,7 +35,7 @@ pnpm test
 pnpm build
 ```
 
-GitHub Pages 프론트엔드는 계속 정적 export 방식입니다. 서버 공유 기능을 사용할 빌드에서는 웹 빌드 시점에 `NEXT_PUBLIC_API_BASE_URL`을 API 공개 URL로 설정해야 합니다.
+프론트엔드는 정적 export 방식입니다. 서버 공유 기능을 사용할 빌드에서는 웹 빌드 시점에 `NEXT_PUBLIC_API_BASE_URL`을 API 공개 URL로 설정해야 합니다.
 
 ## 프론트 배포 제공자 호환성
 
@@ -74,33 +74,11 @@ API_TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/living_cost_manager?s
 
 ## OCI/백엔드 배포 개요
 
-API 컨테이너는 `apps/api/Dockerfile`로 빌드합니다. 운영 Compose 예시는 `docker-compose.prod.yml`입니다.
+API는 정확한 Git SHA와 `apps/api/Dockerfile`로 빌드하며 `--build-arg RELEASE_SHA=<full SHA>`가 필요합니다. 실제 운영 Compose는 OCI의 `/opt/livingcost/docker-compose.yml`입니다. 저장소의 Compose 파일을 운영 파일에 덮어쓰지 마세요.
 
-```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml run --rm api ./node_modules/.bin/prisma migrate deploy
-docker compose -f docker-compose.prod.yml up -d
-```
+배포는 검증한 OCIR digest와 동일 SHA의 Cloudflare Pages 산출물을 명시적으로 활성화합니다. 자동 FE 배포는 폐기된 상태이며, 현재 Pages 프로젝트는 Git 연동 없는 direct upload 방식입니다. Mac은 개발/CI/필요 시 staging 전용입니다.
 
-컨테이너 시작 명령은 migration을 자동 실행하지 않습니다. 새 버전을 올리기 전에 `prisma migrate deploy`를 먼저 실행하는 전략을 사용하세요.
-
-OCI의 기존 PostgreSQL 인스턴스를 사용할 때는 `docker-compose.oci.yml`을 사용합니다. 이 Compose 파일은 API 컨테이너만 실행하고, `.env.oci`에서 `DATABASE_URL`과 `JWT_SECRET`을 읽습니다. `.env.oci`는 절대 커밋하지 않습니다.
-
-```bash
-docker compose -f docker-compose.oci.yml build api
-docker compose -f docker-compose.oci.yml run --rm api ./node_modules/.bin/prisma migrate deploy
-docker compose -f docker-compose.oci.yml up -d api
-```
-
-현재 VM은 Docker 없이 systemd 서비스로 운영할 수 있습니다. repo 관리형 배포 절차는 `scripts/deploy-oci-api.ps1`에 있으며, 비밀값은 로컬 셸 환경 변수로만 전달합니다.
-
-```powershell
-$env:LCM_DATABASE_URL = "<credentials sheet에서 읽은 값>"
-$env:LCM_JWT_SECRET = "<충분히 긴 JWT secret>"
-pnpm deploy:oci-api -- -WriteEnv
-```
-
-평상시 코드만 갱신할 때는 `-WriteEnv` 없이 실행합니다. 이 스크립트는 원격에서 `git fetch`, `pnpm install`, API build, `prisma migrate deploy`, systemd 재시작, 내부/public health 확인을 순서대로 수행합니다. 비밀값은 출력하지 않습니다.
+컨테이너 시작은 migration을 실행하지 않습니다. 스키마 변경이 있을 때만 별도 승인·백업 절차에 따라 additive migration을 실행합니다. 상세한 복구·검증은 [현재 배포 절차](DEPLOYMENT_MIGRATION.md)를 참고하세요.
 
 현재 OCI API gateway에서는 공개 API base URL을 다음 형식으로 둡니다.
 

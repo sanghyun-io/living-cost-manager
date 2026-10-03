@@ -3,6 +3,9 @@ import { z } from "zod";
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
+  RELEASE_SHA: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  LCM_RELEASE_ID: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/).optional(),
+  LCM_COMMIT_SHA: z.string().regex(/^[0-9a-f]{40}$/).optional(),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   // Comma-separated list of allowed origins (supports running github.io and the
