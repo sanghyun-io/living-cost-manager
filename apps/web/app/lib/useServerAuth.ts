@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { DELETE_ACCOUNT_CONFLICT_CODE } from "@living-cost-manager/shared";
 import {
   createServerApiClient,
   isServerAuthFailure,
   resolveServerSessionWorkspace,
   SERVER_SESSION_STORAGE_KEY,
+  ServerApiError,
   type ServerSession
 } from "./serverApi";
 import { getErrorMessage, getServerSyncErrorMessage } from "./serverMessages";
@@ -15,6 +17,7 @@ import type { AuthFormValues } from "../components/modals/AuthModal";
 import type { UIStateApi } from "./useUIState";
 import type { LocalUsersApi } from "./useLocalUsers";
 import type { WorkspaceSyncApi } from "./useWorkspaceSync";
+import { clearEvents } from "./analytics";
 
 interface UseServerAuthOptions {
   ui: UIStateApi;
@@ -33,7 +36,19 @@ interface UseServerAuthOptions {
  * channel every server-touching flow reports through.
  */
 export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
-  const [serverSession, setServerSession] = useState<ServerSession | null>(null);
+  const [serverSession, updateServerSession] = useState<ServerSession | null>(null);
+  const sessionRef = useRef<ServerSession | null>(null);
+  const authGeneration = useRef(0);
+  function commitSession(session: ServerSession | null) {
+    sessionRef.current = session;
+    updateServerSession(session);
+  }
+  function setServerSession(action: SetStateAction<ServerSession | null>) {
+    authGeneration.current += 1;
+    commitSession(typeof action === "function" ? action(sessionRef.current) : action);
+    setIsServerBusy(false);
+  }
+  function isCurrent(generation: number) { return generation === authGeneration.current; }
   // Snapshot of the session exactly as restored at boot; handed to AuthModal
   // for a one-time email/name draft prefill.
   const [bootServerSession, setBootServerSession] = useState<ServerSession | null>(null);
@@ -71,27 +86,28 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
 
     const verify = params.get("verify_token");
     if (verify) {
+      const generation = authGeneration.current;
       clearAuthQueryParam("verify_token");
       void serverApi
         .verifyEmail(verify)
         .then(() => {
+          if (!isCurrent(generation)) return;
           setServerStatus("이메일 인증이 완료되었습니다.");
           // If the post-signup notice is still open, dismiss it now.
           setVerifyNoticeEmail(null);
-          setServerSession((current) => {
-            if (!current) {
-              return current;
-            }
+          const current = sessionRef.current;
+          if (current) {
             const updated = { ...current, user: { ...current.user, emailVerified: true } };
             saveServerSession(updated);
-            return updated;
-          });
+            commitSession(updated);
+          }
         })
         .catch(() => {
+          if (!isCurrent(generation)) return;
           setServerStatus("이메일 인증 링크가 유효하지 않거나 만료되었습니다.");
         })
         .finally(() => {
-          ui.setIsDataModalOpen(true);
+          if (isCurrent(generation)) ui.setIsDataModalOpen(true);
         });
     }
     // ui.setIsDataModalOpen is a stable setter; the original effect only
@@ -101,6 +117,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
   // Boot seeds the session inside the local-users effect so the first painted
   // frame has it; AuthModal prefills its drafts from bootServerSession.
   function applyBootSession(session: ServerSession) {
+    if (authGeneration.current !== 0) return;
     setServerSession(session);
     setBootServerSession(session);
   }
@@ -116,20 +133,26 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
     clearAuthQueryParam("reset_token");
   }
 
-  async function resolveAndStoreServerSession(session: ServerSession) {
+  async function resolveAndStoreServerSession(session: ServerSession, generation = authGeneration.current) {
+    if (!isCurrent(generation)) throw new Error("Stale auth response");
     if (!serverApi) {
       saveServerSession(session);
-      setServerSession(session);
+      commitSession(session);
       getSync().setIsServerSnapshotChecked(false);
       return session;
     }
 
     const nextSession = await resolveServerSessionWorkspace(serverApi, session);
+    if (!isCurrent(generation)) throw new Error("Stale auth response");
+    // Commit the local identity before exposing the session. Later list/network
+    // failures must never leave account B paired with account A's local budget.
+    getUsers().handleLogin(nextSession.user.name || nextSession.user.email, "server", nextSession.user);
     saveServerSession(nextSession);
-    setServerSession(nextSession);
+    commitSession(nextSession);
     setServerErrorKind(null);
     getSync().setIsServerSnapshotChecked(false);
     await getSync().loadServerWorkspaces(nextSession);
+    if (!isCurrent(generation)) throw new Error("Stale auth response");
     return nextSession;
   }
 
@@ -149,6 +172,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
       return false;
     }
 
+    const generation = ++authGeneration.current;
     setIsServerBusy(true);
     setServerStatus("");
     setServerErrorKind(null);
@@ -162,10 +186,11 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
               name: values.name || values.email
             })
           : await serverApi.login({ email: values.email, password: values.password });
+      if (!isCurrent(generation)) return false;
       const nextSession = await resolveAndStoreServerSession({
         ...authResult,
-        workspace: authResult.workspace ?? serverSession?.workspace ?? null
-      });
+        workspace: authResult.workspace ?? null
+      }, generation);
 
       serverRestoreCheckedRef.current = true;
       // After signup, walk the user through email verification instead of
@@ -184,25 +209,29 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
         }
       }
       await getSync().prepareServerSyncDecision(nextSession);
+      if (!isCurrent(generation)) return false;
       await getSync().refreshSharing(nextSession);
-      getUsers().handleLogin(nextSession.user.name || nextSession.user.email);
+      if (!isCurrent(generation)) return false;
       return true;
     } catch (error) {
+      if (!isCurrent(generation)) return false;
       setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       setServerStatus(getErrorMessage(error));
       return false;
     } finally {
-      setIsServerBusy(false);
+      if (isCurrent(generation)) setIsServerBusy(false);
     }
   }
 
   function handleServerLogout() {
+    authGeneration.current += 1;
+    setIsServerBusy(false);
     // Best-effort server-side logout (invalidates refresh tokens); ignore failures.
-    if (serverApi && serverSession) {
-      void serverApi.logout(serverSession.token).catch(() => undefined);
+    if (serverApi && sessionRef.current) {
+      void serverApi.logout(sessionRef.current.token).catch(() => undefined);
     }
     window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
-    setServerSession(null);
+    commitSession(null);
     // Everything server-workspace-scoped (snapshot, checked flag, workspaces,
     // members, invitations, sync stamps, trend cache) is wiped there.
     getSync().resetOnServerLogout();
@@ -211,6 +240,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
   }
 
   async function handleForgotPassword(email: string) {
+    const generation = authGeneration.current;
     if (!serverApi) {
       return;
     }
@@ -225,18 +255,21 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
     setServerErrorKind(null);
     try {
       await serverApi.forgotPassword(email);
+      if (!isCurrent(generation)) return;
       setServerStatus("입력하신 이메일이 가입되어 있다면 재설정 링크를 보냈습니다. 메일함을 확인하세요.");
     } catch (error) {
+      if (!isCurrent(generation)) return;
       setServerErrorKind("request");
       setServerStatus(getErrorMessage(error));
     } finally {
-      setIsServerBusy(false);
+      if (isCurrent(generation)) setIsServerBusy(false);
     }
   }
 
   // Returns true on success so ResetPasswordModal can clear its own draft
   // (the old page-level state was cleared here; now the modal mirrors that).
   async function handleResetPassword(password: string): Promise<boolean> {
+    const generation = authGeneration.current;
     if (!serverApi || !resetToken) {
       return false;
     }
@@ -251,6 +284,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
     setServerErrorKind(null);
     try {
       await serverApi.resetPassword(resetToken, password);
+      if (!isCurrent(generation)) return false;
       setResetToken(null);
       clearAuthQueryParam("reset_token");
       setAuthLoginRequest((count) => count + 1);
@@ -258,15 +292,17 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
       setServerStatus("비밀번호를 재설정했습니다. 새 비밀번호로 로그인하세요.");
       return true;
     } catch (error) {
+      if (!isCurrent(generation)) return false;
       setServerErrorKind("request");
       setServerStatus(getErrorMessage(error));
       return false;
     } finally {
-      setIsServerBusy(false);
+      if (isCurrent(generation)) setIsServerBusy(false);
     }
   }
 
   async function handleChangePassword() {
+    const generation = authGeneration.current;
     if (!serverApi || !serverSession) {
       return;
     }
@@ -290,26 +326,36 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
         changeNewPassword,
         serverSession.token
       );
+      if (!isCurrent(generation)) return;
       // change-password bumps tokenVersion and returns fresh tokens; keep workspace.
       const nextSession = await resolveAndStoreServerSession({
         ...updated,
         workspace: updated.workspace ?? serverSession.workspace ?? null
-      });
-      setServerSession(nextSession);
+      }, generation);
+      commitSession(nextSession);
       setChangeCurrentPassword("");
       setChangeNewPassword("");
       setServerStatus("비밀번호를 변경했습니다.");
     } catch (error) {
-      setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
-      setServerStatus(
-        isServerAuthFailure(error) ? "현재 비밀번호가 올바르지 않습니다." : getErrorMessage(error)
-      );
+      if (!isCurrent(generation)) return;
+      const wrongPassword = error instanceof ServerApiError && error.status === 401 && error.message === "Invalid credentials";
+      if (isServerAuthFailure(error) && !wrongPassword) {
+        window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
+        commitSession(null);
+        getSync().dropSessionOnAuthFailure();
+        setServerErrorKind("auth");
+        setServerStatus("서버 세션이 만료되었습니다. 다시 로그인해 주세요.");
+      } else {
+        setServerErrorKind("request");
+        setServerStatus(wrongPassword ? "현재 비밀번호가 올바르지 않습니다." : getErrorMessage(error));
+      }
     } finally {
-      setIsServerBusy(false);
+      if (isCurrent(generation)) setIsServerBusy(false);
     }
   }
 
   async function handleResendVerification() {
+    const generation = authGeneration.current;
     if (!serverApi || !serverSession) {
       return;
     }
@@ -317,17 +363,95 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
     setServerStatus("");
     try {
       await serverApi.resendVerification(serverSession.token);
+      if (!isCurrent(generation)) return;
       setServerStatus("인증 메일을 다시 보냈습니다. 메일함을 확인하세요.");
     } catch (error) {
+      if (!isCurrent(generation)) return;
       setServerErrorKind("request");
       setServerStatus(getErrorMessage(error));
     } finally {
-      setIsServerBusy(false);
+      if (isCurrent(generation)) setIsServerBusy(false);
+    }
+  }
+
+  /**
+   * Outcome of DELETE /account for DeleteAccountModal: the modal closes only
+   * on "deleted"; the other results keep it open with an inline error so the
+   * user can correct the password or resolve workspace ownership first.
+   */
+  async function handleDeleteAccount(password: string): Promise<"deleted" | "error"> {
+    const deletingSession = sessionRef.current;
+    const removedUserId = deletingSession
+      ? getUsers().knownUsers?.find((user) => user.serverUserId === deletingSession.user.id)?.id ?? "server:" + deletingSession.user.id
+      : undefined;
+    if (!serverApi || !deletingSession || !removedUserId) {
+      setServerErrorKind("request");
+      setServerStatus("로그인이 필요합니다.");
+      return "error";
+    }
+    if (password.length < 8) {
+      setServerErrorKind("request");
+      setServerStatus("비밀번호를 입력해주세요.");
+      return "error";
+    }
+
+    const generation = ++authGeneration.current;
+    setIsServerBusy(true);
+    setServerStatus("");
+    setServerErrorKind(null);
+    try {
+      await serverApi.deleteAccount(password, deletingSession.token);
+
+      // The account row is gone server-side (all issued tokens died with it).
+      // Wipe every local trace of it and bounce the UI back to the login form.
+      getUsers().handleAccountDeleted(removedUserId);
+      void clearEvents();
+      if (!isCurrent(generation)) return "deleted";
+      window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
+      commitSession(null);
+      // Everything server-workspace-scoped (snapshot, workspaces, members,
+      // invitations, trend cache) is reset here, same as a full logout.
+      getSync().resetOnServerLogout();
+      setChangeCurrentPassword("");
+      setChangeNewPassword("");
+      setAuthLoginRequest((count) => count + 1);
+      ui.setIsAuthModalOpen(true);
+      setServerStatus("계정을 삭제했습니다. 서버에 있던 모든 데이터가 영구적으로 제거되었습니다.");
+      return "deleted";
+    } catch (error) {
+      if (!isCurrent(generation)) return "error";
+      if (error instanceof ServerApiError && error.status === 401 && error.message === "Invalid credentials") {
+        // Password re-confirmation failed — keep the session usable.
+        setServerErrorKind("request");
+        setServerStatus("비밀번호가 올바르지 않습니다.");
+        return "error";
+      }
+      if (error instanceof ServerApiError && error.code === DELETE_ACCOUNT_CONFLICT_CODE) {
+        setServerErrorKind("request");
+        setServerStatus("공동 워크스페이스의 소유권부터 이전해야 계정을 삭제할 수 있습니다.");
+        return "error";
+      }
+      if (isServerAuthFailure(error)) {
+        // Session died while we were deleting: treat exactly like the boot
+        // restore's auth-failure path so the UI never keeps a stale session.
+        window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
+        commitSession(null);
+        getSync().dropSessionOnAuthFailure();
+        setServerErrorKind("auth");
+        setServerStatus("서버 세션이 만료되었습니다. 다시 로그인해 주세요.");
+        return "error";
+      }
+      setServerErrorKind("request");
+      setServerStatus(getErrorMessage(error));
+      return "error";
+    } finally {
+      if (isCurrent(generation)) setIsServerBusy(false);
     }
   }
 
   async function refreshRestoredServerSession(session: ServerSession) {
-    if (!serverApi) {
+    const generation = authGeneration.current;
+    if (!serverApi || sessionRef.current?.token !== session.token) {
       return;
     }
 
@@ -336,42 +460,49 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
     let activeSession = session;
     try {
       await serverApi.me(session.token);
+      if (!isCurrent(generation)) return;
     } catch (probeError) {
+      if (!isCurrent(generation)) return;
       if (isServerAuthFailure(probeError)) {
         try {
           const refreshed = await serverApi.refresh(session.refreshToken);
+          if (!isCurrent(generation)) return;
           activeSession = { ...refreshed, workspace: refreshed.workspace ?? session.workspace };
           saveServerSession(activeSession);
-          setServerSession(activeSession);
+          commitSession(activeSession);
         } catch {
           // refresh token also invalid -> fall through to the catch below via me()
         }
       }
     }
 
+    if (!isCurrent(generation)) return;
     try {
       const [{ user }, nextSession] = await Promise.all([
         serverApi.me(activeSession.token),
         resolveServerSessionWorkspace(serverApi, activeSession)
       ]);
+      if (!isCurrent(generation)) return;
       const restoredSession = {
         ...nextSession,
         user
       };
 
       saveServerSession(restoredSession);
-      setServerSession(restoredSession);
+      commitSession(restoredSession);
       setServerErrorKind(null);
       await getSync().loadServerWorkspaces(restoredSession);
+      if (!isCurrent(generation)) return;
       if (restoredSession.workspace) {
         await getSync().prepareServerSyncDecision(restoredSession);
       } else {
         setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
       }
     } catch (error) {
+      if (!isCurrent(generation)) return;
       if (isServerAuthFailure(error)) {
         window.localStorage.removeItem(SERVER_SESSION_STORAGE_KEY);
-        setServerSession(null);
+        commitSession(null);
         getSync().dropSessionOnAuthFailure();
         return;
       }
@@ -410,6 +541,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
     handleForgotPassword,
     handleResetPassword,
     handleChangePassword,
+    handleDeleteAccount,
     handleResendVerification
   };
 }

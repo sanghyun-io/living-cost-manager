@@ -117,6 +117,10 @@ function buildSnapshot(workspaceId: string, syncVersion = 0): WorkspaceSnapshot 
         amount: 300000,
         periodMonths: 2.5,
         billingDay: 15,
+        billingAnchorDate: null,
+        renewalStatus: "unreviewed",
+        potentialMonthlySavings: 0,
+        confirmedMonthlySavings: 0,
         isEndOfMonth: false
       },
       {
@@ -129,6 +133,10 @@ function buildSnapshot(workspaceId: string, syncVersion = 0): WorkspaceSnapshot 
         amount: 1200000,
         periodMonths: 1,
         billingDay: 25,
+        billingAnchorDate: "2026-01-31",
+        renewalStatus: "completed",
+        potentialMonthlySavings: 0,
+        confirmedMonthlySavings: 10000,
         isEndOfMonth: true
       }
     ]
@@ -275,6 +283,158 @@ afterAll(async () => {
 });
 
 describe("workspace snapshot routes", () => {
+  test("legacy snapshot without billing fields remains unknown with zero confirmed savings", async () => {
+    const owner = await registerTestUser("Legacy owner");
+    const snapshot = buildSnapshot(owner.workspace.id);
+    for (const cost of snapshot.fixedCosts) {
+      delete cost.billingAnchorDate;
+      delete cost.renewalStatus;
+      delete cost.potentialMonthlySavings;
+      delete cost.confirmedMonthlySavings;
+    }
+    const response = await putSnapshot(owner.token, snapshot);
+    expect(response.statusCode).toBe(200);
+    for (const cost of response.json<WorkspaceSnapshot>().fixedCosts) {
+      expect(cost).toMatchObject({ billingAnchorDate: null, renewalStatus: "unreviewed", potentialMonthlySavings: 0, confirmedMonthlySavings: 0 });
+    }
+  });
+
+  test("current-version legacy PUT preserves populated billing fields and backup history by ID", async () => {
+    const owner = await registerTestUser("Legacy Replacement Owner");
+    const snapshot = buildSnapshot(owner.workspace.id);
+    Object.assign(snapshot.fixedCosts[0], {
+      billingAnchorDate: "2026-02-15",
+      renewalStatus: "cancel-planned",
+      potentialMonthlySavings: 12000
+    });
+    expect((await putSnapshot(owner.token, snapshot)).statusCode).toBe(200);
+
+    const legacy = structuredClone(snapshot);
+    legacy.syncVersion = 1;
+    legacy.monthlyIncome = 4300000;
+    legacy.fixedCosts.reverse();
+    for (const cost of legacy.fixedCosts) {
+      delete cost.billingAnchorDate;
+      delete cost.renewalStatus;
+      delete cost.potentialMonthlySavings;
+      delete cost.confirmedMonthlySavings;
+      cost.name += " edited";
+    }
+    const expectedCosts = snapshot.fixedCosts.map((cost) => ({
+      ...cost,
+      name: `${cost.name} edited`
+    }));
+    const response = await putSnapshot(owner.token, legacy);
+    expect(response.statusCode).toBe(200);
+    const expected = { ...legacy, syncVersion: 2, fixedCosts: expectedCosts };
+    expect(response.json()).toEqual(expected);
+    expect((await getSnapshot(owner.token, owner.workspace.id)).json()).toEqual(expected);
+
+    const history = await getSnapshotHistory(owner.token, owner.workspace.id);
+    expect(history.statusCode).toBe(200);
+    const entries = history.json<{ entries: Array<{ id: string }> }>().entries;
+    expect(entries).toHaveLength(2);
+    const backups = await prisma.backupSnapshot.findMany({
+      where: { workspaceId: owner.workspace.id }
+    });
+    const payloads = backups.map((backup) => backup.payload as unknown as WorkspaceSnapshot);
+    expect(payloads).toContainEqual(snapshot);
+    expect(payloads).toContainEqual({ ...legacy, fixedCosts: [...expectedCosts].reverse() });
+    expect(entries.map((entry) => entry.id).sort()).toEqual(backups.map((backup) => backup.id).sort());
+  });
+
+  test("explicit null and zero clear populated billing fields while omitted fields survive", async () => {
+    const owner = await registerTestUser("Billing Clear Owner");
+    const snapshot = buildSnapshot(owner.workspace.id);
+    snapshot.fixedCosts[1].potentialMonthlySavings = 5000;
+    expect((await putSnapshot(owner.token, snapshot)).statusCode).toBe(200);
+
+    const replacement = structuredClone(snapshot);
+    replacement.syncVersion = 1;
+    Object.assign(replacement.fixedCosts[1], {
+      billingAnchorDate: null,
+      potentialMonthlySavings: 0,
+      confirmedMonthlySavings: 0
+    });
+    delete replacement.fixedCosts[1].renewalStatus;
+    const response = await putSnapshot(owner.token, replacement);
+    expect(response.statusCode).toBe(200);
+    expect(response.json<WorkspaceSnapshot>().fixedCosts[1]).toEqual({
+      ...replacement.fixedCosts[1], renewalStatus: "completed"
+    });
+
+    replacement.syncVersion = 2;
+    replacement.fixedCosts[1].renewalStatus = "unreviewed";
+    expect((await putSnapshot(owner.token, replacement)).statusCode).toBe(200);
+    expect((await getSnapshot(owner.token, owner.workspace.id)).json()).toEqual({
+      ...replacement, syncVersion: 3
+    });
+  });
+
+  test("partial savings updates validate against the preserved renewal status", async () => {
+    const owner = await registerTestUser("Partial Savings Owner");
+    const snapshot = buildSnapshot(owner.workspace.id);
+    expect((await putSnapshot(owner.token, snapshot)).statusCode).toBe(200);
+
+    const replacement = structuredClone(snapshot);
+    replacement.syncVersion = 1;
+    delete replacement.fixedCosts[1].renewalStatus;
+    replacement.fixedCosts[1].confirmedMonthlySavings = 20000;
+    const response = await putSnapshot(owner.token, replacement);
+    expect(response.statusCode).toBe(200);
+    const expected = response.json<WorkspaceSnapshot>();
+    expect(expected.fixedCosts[1]).toEqual({
+      ...replacement.fixedCosts[1], renewalStatus: "completed"
+    });
+
+    replacement.syncVersion = 2;
+    delete replacement.fixedCosts[0].renewalStatus;
+    replacement.fixedCosts[0].confirmedMonthlySavings = 500;
+    const rejected = await putSnapshot(owner.token, replacement);
+    expectSanitizedBadRequest(rejected);
+    expect(rejected.json()).toMatchObject({ message: "Invalid snapshot" });
+    expect((await getSnapshot(owner.token, owner.workspace.id)).json()).toEqual(expected);
+    expect(await prisma.backupSnapshot.count({
+      where: { workspaceId: owner.workspace.id }
+    })).toBe(2);
+  });
+
+  test.each(["keep", "unreviewed", "cancel-planned", "change-review"] as const)(
+    "partial renewal change to %s conflicts with preserved confirmed savings and rolls back atomically",
+    async (renewalStatus) => {
+      const owner = await registerTestUser("Partial Billing Owner");
+      const snapshot = buildSnapshot(owner.workspace.id);
+      expect((await putSnapshot(owner.token, snapshot)).statusCode).toBe(200);
+      const backupsBefore = await prisma.backupSnapshot.findMany({
+        where: { workspaceId: owner.workspace.id }
+      });
+
+      const replacement = structuredClone(snapshot);
+      replacement.syncVersion = 1;
+      replacement.monthlyIncome = 9900000;
+      replacement.categories[0].label = "Changed";
+      replacement.cards[0].label = "Changed";
+      replacement.fixedCosts[0].amount = 999;
+      replacement.fixedCosts[1].renewalStatus = renewalStatus;
+      delete replacement.fixedCosts[1].confirmedMonthlySavings;
+      const response = await putSnapshot(owner.token, replacement);
+      expectSanitizedBadRequest(response);
+      expect(response.json()).toMatchObject({ message: "Invalid snapshot" });
+      expect((await getSnapshot(owner.token, owner.workspace.id)).json()).toEqual({
+        ...snapshot, syncVersion: 1
+      });
+      expect(await prisma.backupSnapshot.findMany({
+        where: { workspaceId: owner.workspace.id }
+      })).toEqual(backupsBefore);
+
+      // Explicitly clearing the conflicting savings makes the same version valid.
+      replacement.fixedCosts[1].confirmedMonthlySavings = 0;
+      const retry = await putSnapshot(owner.token, replacement);
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toEqual({ ...replacement, syncVersion: 2 });
+    }
+  );
+
   test("owner can PUT then GET the same snapshot including decimal period months", async () => {
     const owner = await registerTestUser("Owner");
     const snapshot = buildSnapshot(owner.workspace.id);

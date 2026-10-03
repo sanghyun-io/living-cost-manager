@@ -1,16 +1,8 @@
 @import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 
-/*
- * Modern-fintech redesign (Banksalad/Toss calm). Layout, chart, and shared
- * utility styles; buttons/inputs/modals come from Mantine. Design tokens are
- * bridged onto Mantine CSS variables and scheme-scoped so light/dark both work.
- *
- * Depth comes from soft (teal-tinted) shadows on a tinted canvas, not 1px
- * borders. Numbers use tabular figures (.tnum). The inline-edit table grid
- * columns are intentionally left untouched — this is a visual restyle only.
- */
+/* Quiet surfaces, clear editing controls, and scheme-aware data cues. */
 :root {
-  --app-bg: #f4f7f6; /* tinted canvas, not pure white */
+  --app-bg: #f7f7f6;
   --background: var(--mantine-color-body);
   --surface: var(--mantine-color-default);
   --surface-muted: var(--mantine-color-default-hover);
@@ -23,21 +15,21 @@
   --rose: var(--mantine-color-rose-6);
   --amber-fg: var(--mantine-color-amber-7);
   --amber-bg: rgba(243, 173, 34, 0.14);
-  --shadow-card: 0 1px 4px rgba(15, 158, 134, 0.06), 0 4px 16px rgba(0, 0, 0, 0.06);
-  --shadow-card-hover: 0 4px 20px rgba(15, 158, 134, 0.14), 0 12px 40px rgba(0, 0, 0, 0.12);
-  --hero-accent: linear-gradient(120deg, #0f9e86 0%, #17c8aa 55%, #2ecba6 100%);
+  --shadow-card: none;
+  --shadow-card-hover: none;
+  --hero-accent: var(--mantine-color-teal-8);
   --shadow: var(--shadow-card);
   --shadow-lg: var(--shadow-card-hover);
-  --radius: 14px;
+  --radius: 8px;
 }
 
 [data-mantine-color-scheme="dark"] {
-  --app-bg: #161b1a;
+  --app-bg: #191a1b;
   --amber-fg: var(--mantine-color-amber-4);
   --amber-bg: rgba(243, 173, 34, 0.18);
-  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-card-hover: 0 2px 8px rgba(0, 0, 0, 0.36), 0 8px 24px rgba(0, 0, 0, 0.44);
-  --hero-accent: linear-gradient(120deg, #0a806c 0%, #0f9e86 55%, #17b899 100%);
+  --hero-accent: var(--mantine-color-teal-4);
+  --accent-strong: var(--mantine-color-teal-3);
+  --rose: var(--mantine-color-rose-4);
 }
 
 * {
@@ -66,7 +58,7 @@ body {
 .page-shell {
   width: min(1240px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 36px 0 56px;
+  padding: 0 0 40px;
 }
 
 /* Full-bleed header strip with a hairline divider. */
@@ -81,20 +73,17 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  width: min(1240px, calc(100% - 40px));
+  width: 100%;
   margin: 0 auto;
   padding: 12px 0;
 }
 
 .local-note {
-  border: 1px solid var(--mantine-color-blue-light-color);
-  border-radius: var(--radius);
-  background: var(--mantine-color-blue-light);
-  color: var(--mantine-color-blue-light-color);
-  margin: 16px 0 0;
-  padding: 10px 12px;
+  color: var(--muted);
+  margin: 8px 0 0;
+  padding: 0;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   line-height: 1.5;
 }
 
@@ -102,26 +91,21 @@ body {
   max-width: 620px;
 }
 
-/* Section label as a soft teal pill instead of bare uppercase text. */
+/* Supporting labels remain plain text. */
 .section-label {
   display: inline-block;
   margin: 0 0 8px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--mantine-color-teal-light);
-  color: var(--mantine-color-teal-light-color);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
-/* HERO — single full-width strip card with a gradient left accent. */
+/* Compact dashboard heading and income control. */
 .hero {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .hero-strip {
@@ -131,23 +115,17 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  min-height: 120px;
-  padding: 24px 28px;
-  border-radius: 20px;
-  background: var(--surface);
-  border-left: 4px solid transparent;
-  border-image: var(--hero-accent) 1;
-  box-shadow: var(--shadow-card);
+  padding: 24px 0 8px;
 }
 
 .hero-left {
   flex: 1 1 360px;
-  min-width: 280px;
+  min-width: 0;
 }
 
 .hero-right {
   flex: 0 1 320px;
-  min-width: 260px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -161,12 +139,12 @@ body {
   line-height: 1.7;
 }
 
-/* Surface cards float on shadow; borders removed. */
+/* Shared work surfaces. */
 .summary-panel,
 .cost-list,
 .diagram {
-  border: none;
-  border-radius: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-card);
 }
@@ -181,7 +159,7 @@ body {
 
 .cost-list,
 .diagram {
-  padding: 24px 28px;
+  padding: 20px;
 }
 
 /* METRIC BAND — five KPI cells in one continuous card. */
@@ -189,16 +167,18 @@ body {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
-  margin-bottom: 24px;
-  border: none;
-  border-radius: 20px;
+  margin-bottom: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
 .metric-cell {
-  padding: 20px 24px;
+  padding: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: transparent;
   border-right: 1px solid var(--line);
 }
@@ -207,19 +187,10 @@ body {
   border-right: none;
 }
 
-.metric-cell:first-child {
-  border-left: 3px solid var(--mantine-color-teal-6);
-  padding-left: 21px;
-}
-
-[data-mantine-color-scheme="dark"] .metric-cell:first-child {
-  border-left-color: var(--mantine-color-teal-4);
-}
-
-.metric-value {
-  font-size: 26px;
-  font-weight: 800;
-  line-height: 1.15;
+.metric-cell .metric-value {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .metric-value.is-danger {
@@ -252,7 +223,7 @@ body {
   align-items: flex-end;
   justify-content: flex-end;
   border: none;
-  border-radius: 14px;
+  border-radius: 6px;
   background: var(--surface-subtle);
   box-shadow: var(--shadow);
   margin-bottom: 12px;
@@ -270,10 +241,10 @@ body {
   gap: 8px;
 }
 
-/* Grid columns intentionally unchanged — visual restyle only. */
+/* Keep date entry readable; narrower screens use stacked editing fields. */
 .table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 92px 112px;
+  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 148px 104px 92px 112px;
   gap: 12px;
   align-items: center;
   min-height: 68px;
@@ -282,16 +253,15 @@ body {
   padding: 12px 16px;
   background: var(--surface);
   overflow: visible; /* keep input focus rings from being clipped by the radius */
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color 140ms ease;
 }
 
 .table-row:hover {
-  border-color: var(--mantine-color-teal-4);
-  box-shadow: 0 2px 8px rgba(15, 158, 134, 0.1);
+  border-color: var(--muted);
 }
 
 .table-row.delete-mode {
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 70px 104px 92px 112px 64px;
+  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 148px 104px 92px 112px 64px;
 }
 
 .table-empty {
@@ -329,7 +299,14 @@ body {
 }
 
 .monthly-equivalent-cell {
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.monthly-equivalent-cell > .tnum { white-space: nowrap; }
+.stacked-field-label { display: none; }
+@media (max-width: 1239px) {
+  .stacked-field-label { display: block; }
 }
 
 .bars {
@@ -498,7 +475,7 @@ body {
 @media (max-width: 860px) {
   .page-shell {
     width: min(100% - 28px, 720px);
-    padding-top: 28px;
+    padding-top: 0;
   }
 
   .hero,
@@ -513,6 +490,10 @@ body {
   }
 
   .hero-right {
+    flex: 1 1 auto;
+  }
+
+  .hero-left {
     flex: 1 1 auto;
   }
 
@@ -534,10 +515,6 @@ body {
   .metric-cell:last-child {
     border-right: none;
     border-bottom: none;
-  }
-
-  .metric-cell:first-child {
-    border-left: 3px solid var(--mantine-color-teal-6);
   }
 
   .bars,
@@ -566,16 +543,17 @@ body {
 
 @media (max-width: 560px) {
   .metric-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .metric-cell {
-    border-right: none;
+    padding: 12px;
     border-bottom: 1px solid var(--line);
   }
 
   .metric-cell:last-child {
     border-bottom: none;
+    grid-column: 1 / -1;
   }
 
   .table-row,
@@ -605,5 +583,128 @@ body {
 
   .pie-legend-row small {
     grid-column: 2 / -1;
+  }
+}
+
+.app-header .app-brand {
+  margin-right: auto;
+}
+
+.guide-link {
+  color: var(--accent-strong);
+  text-underline-offset: 3px;
+  font-size: 13px;
+}
+
+:where(a, button, summary, input):focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+
+.workspace-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+  margin-bottom: 12px;
+}
+
+.insights-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.insights-block {
+  min-width: 0;
+}
+
+.insights-block > * + * {
+  margin-top: 8px;
+}
+
+.insights-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.insights-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.insights-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.insights-row-amount {
+  white-space: nowrap;
+}
+
+.insights-details {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.insights-details summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.insights-details .insights-block {
+  margin-top: 20px;
+}
+
+@media (max-width: 860px) {
+  .insights-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 861px) and (max-width: 1239px) {
+  .table-row,
+  .table-row.delete-mode {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .table-head {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-brand {
+    flex-basis: 100%;
+  }
+
+  .cost-list,
+  .diagram,
+  .insights-panel {
+    padding: 14px;
+  }
+
+  .metric-cell .metric-value {
+    font-size: 18px;
+  }
+
+  .insights-row {
+    gap: 8px;
   }
 }

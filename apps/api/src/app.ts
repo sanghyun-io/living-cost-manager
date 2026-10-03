@@ -9,6 +9,7 @@ import Fastify from "fastify";
 import { type Env, loadEnv } from "./env.js";
 import { authPlugin } from "./plugins/auth.js";
 import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
+import { accountRoutes } from "./routes/account.js";
 import { authRoutes } from "./routes/auth.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { memberRoutes } from "./routes/members.js";
@@ -91,12 +92,16 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   const registerApiRoutes = async (api: FastifyInstance) => {
     await api.register(authRoutes);
+    await api.register(accountRoutes);
     await api.register(workspaceRoutes);
     await api.register(invitationRoutes);
     await api.register(memberRoutes);
     await api.register(snapshotRoutes);
     await api.register(pushRoutes);
-    api.get("/health", async () => ({ ok: true }));
+    api.get("/health", async (_request, reply) => {
+      if (process.env.RELEASE_SHA) reply.header("X-Release-Sha", process.env.RELEASE_SHA);
+      return { ok: true };
+    });
   };
 
   if (env.API_BASE_PATH) {

@@ -1,4 +1,4 @@
-import { workspaceSnapshotSchema } from "@living-cost-manager/shared";
+import { fixedCostDtoSchema, workspaceSnapshotSchema } from "@living-cost-manager/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
@@ -13,6 +13,12 @@ import {
 
 const snapshotParamsSchema = z.object({
   workspaceId: z.string().min(1)
+});
+
+// Validate field shapes here; billing cross-field invariants must be checked
+// after the service merges omitted fields with the locked existing snapshot.
+const snapshotWriteSchema = workspaceSnapshotSchema.extend({
+  fixedCosts: z.array(z.object(fixedCostDtoSchema.shape))
 });
 
 const historyQuerySchema = z.object({
@@ -84,7 +90,7 @@ export async function snapshotRoutes(app: FastifyInstance) {
         "editor"
       ]);
 
-      const parsedBody = workspaceSnapshotSchema.safeParse(request.body);
+      const parsedBody = snapshotWriteSchema.safeParse(request.body);
 
       if (!parsedBody.success) {
         throw app.httpErrors.badRequest("Invalid request body");

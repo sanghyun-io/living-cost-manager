@@ -1,6 +1,7 @@
 import type {
   AuthResponse,
   CreateInvitationRequest,
+  DeleteAccountResponse,
   InvitationRole,
   LoginRequest,
   RegisterRequest,
@@ -57,6 +58,7 @@ export type ServerApiClient = {
   acceptInvitation(invitationId: string, tokenValue: string, token: string): Promise<AcceptInvitationResponse>;
   updateMemberRole(workspaceId: string, memberId: string, role: WorkspaceRole, token: string): Promise<WorkspaceMemberDto>;
   deleteMember(workspaceId: string, memberId: string, token: string): Promise<void>;
+  deleteAccount(password: string, token: string): Promise<DeleteAccountResponse>;
 };
 
 export class ServerApiError extends Error {
@@ -255,6 +257,16 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
       await request<void>("/workspaces/" + encodeURIComponent(workspaceId) + "/members/" + encodeURIComponent(memberId), {
         method: "DELETE",
         token
+      });
+    },
+    async deleteAccount(password, token) {
+      // 204 No Content on success. 401 = password re-confirmation failed,
+      // 409 (code WORKSPACE_HAS_OTHER_MEMBERS) = still owning shared
+      // workspaces — callers branch on ServerApiError.code.
+      await request<DeleteAccountResponse>("/account", {
+        method: "DELETE",
+        token,
+        body: { password }
       });
     }
   };

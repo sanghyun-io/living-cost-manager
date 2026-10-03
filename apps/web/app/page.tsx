@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Button, Text } from "@mantine/core";
 import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
+import { track } from "./lib/analytics";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
+import { InsightsPanel } from "./components/InsightsPanel";
 import { ChartSection } from "./components/ChartSection";
 import { FixedCostTable } from "./components/FixedCostTable";
 import { CategoryModal } from "./components/modals/CategoryModal";
@@ -14,6 +17,7 @@ import { ResetPasswordModal } from "./components/modals/ResetPasswordModal";
 import { VerifyEmailNoticeModal } from "./components/modals/VerifyEmailNoticeModal";
 import { CoachModal } from "./components/modals/CoachModal";
 import { DataModal } from "./components/modals/DataModal";
+import { DeleteAccountModal } from "./components/modals/DeleteAccountModal";
 import { useUIState } from "./lib/useUIState";
 import { useServerAuth } from "./lib/useServerAuth";
 import { useLocalUsers } from "./lib/useLocalUsers";
@@ -46,11 +50,19 @@ export default function Home() {
   });
   const budget = useBudgetData({ users, ui });
   const coach = useCoach({ budget, serverApi: auth.serverApi });
-  const sync = useWorkspaceSync({ ui, auth, budget, coach });
+  const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: users.currentUser?.id ?? null,
+    isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
 
   usersRef.current = users;
   budgetRef.current = budget;
   syncRef.current = sync;
+
+  useEffect(() => {
+    if (auth.serverSession && budget.localScopeKey && !users.isSampleMode) {
+      void syncRef.current?.prepareServerSyncDecision(auth.serverSession);
+      void syncRef.current?.loadServerWorkspaces(auth.serverSession).catch(() => undefined);
+    }
+  }, [auth.serverSession?.user.id, auth.serverSession?.workspace?.id, budget.localScopeKey, users.isSampleMode]);
 
   // Service worker: production-only, registered after load (see note inside).
   useEffect(() => {
@@ -72,6 +84,33 @@ export default function Home() {
     window.addEventListener("load", registerWorker);
     return () => window.removeEventListener("load", registerWorker);
   }, []);
+
+  // 온디바이스 애널리틱스: 화면 방문 (mount 1회, IndexedDB 로컬 저장만).
+  useEffect(() => {
+    track({ type: "app.page_view", timestamp: Date.now(), data: { path: window.location.pathname } });
+  }, []);
+
+  // 내보내기/공유 핸들러의 애널리틱스 래퍼. 클릭 1회 = 이벤트 1건 (백업
+  // 내보내기 버튼은 두 곳에 노출되지만 같은 래퍼를 거쳐 중복 없다).
+  function handleExportCsv() {
+    track({ type: "export.csv", timestamp: Date.now(), data: {} });
+    budget.handleExportTemplate();
+  }
+
+  function handleExportBackupWithTracking() {
+    track({ type: "export.backup", timestamp: Date.now(), data: {} });
+    budget.handleExportBackup();
+  }
+
+  function handleCreateInvitationWithTracking() {
+    track({ type: "share.invite", timestamp: Date.now(), data: { role: sync.inviteRole } });
+    void sync.handleCreateInvitation();
+  }
+
+  function handleAcceptInvitationWithTracking(invitationId: string) {
+    track({ type: "share.accept", timestamp: Date.now(), data: {} });
+    void sync.handleAcceptInvitation(invitationId);
+  }
 
   if (!users.isBootLoaded || !users.isLoaded) {
     return (
@@ -106,9 +145,18 @@ export default function Home() {
         onIncomeChange={budget.handleIncomeChange}
       />
 
-      <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
+      <section className="workspace-note" aria-label="시작 방식">
+        <Text size="sm">{users.isSampleMode ? "샘플 체험 중 · 내 데이터와 분리된 예시입니다." : "내 데이터 · 기준 납부일을 입력하면 다음 30일 예정액을 확인할 수 있습니다."}</Text>
+        <Button variant="default" size="xs" onClick={() => users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample")}>
+          {users.isSampleMode ? "내 데이터로 시작 / 돌아가기" : "분리된 샘플 체험"}
+        </Button>
+        <Text size="xs" c="dimmed">공간 전환 시 서버 연결을 해제합니다. 기존 내 데이터는 보존됩니다.</Text>
+        <Button variant="subtle" color={budget.localRecoveryRequired ? "rose" : "gray"} size="xs" onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? "저장 원본 내보내기" : "최근 교체 전 복구본 내보내기"}</Button>
+      </section>
 
-      <section className="workspace">
+      <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
+
+      <section className="workspace" id="fixed-costs" aria-label="고정비 편집">
         <FixedCostTable
           categories={budget.categories}
           cards={budget.cards}
@@ -133,6 +181,7 @@ export default function Home() {
           onOpenData={() => ui.setIsDataModalOpen(true)}
         />
 
+        <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
         <ChartSection
           chartMode={ui.chartMode}
           buckets={budget.buckets}
@@ -153,11 +202,14 @@ export default function Home() {
           importFileRef={budget.importFileRef}
           backupFileRef={budget.backupFileRef}
           onClose={() => ui.setIsDataModalOpen(false)}
-          onExportTemplate={budget.handleExportTemplate}
+          onExportTemplate={handleExportCsv}
           onImportTemplate={(file) => void budget.handleImportTemplate(file)}
-          onExportBackup={budget.handleExportBackup}
+          onExportBackup={handleExportBackupWithTracking}
           onImportBackup={(file) => void budget.handleImportBackup(file)}
           sync={{
+            autoSyncEnabled: sync.autoSyncEnabled,
+            canEnableAutoSync: sync.canEnableAutoSync,
+            onAutoSyncChange: sync.setAutoSyncEnabled,
             serverSession: auth.serverSession,
             syncStateView: sync.syncStateView,
             displayedSyncState: sync.displayedSyncState,
@@ -193,7 +245,8 @@ export default function Home() {
               ui.setIsDataModalOpen(false);
               ui.setIsAuthModalOpen(true);
             },
-            onExportBackup: budget.handleExportBackup
+            onOpenDeleteAccount: () => ui.setIsDeleteAccountModalOpen(true),
+            onExportBackup: handleExportBackupWithTracking
           }}
           sharing={{
             serverSession: auth.serverSession,
@@ -208,9 +261,9 @@ export default function Home() {
             isServerBusy: auth.isServerBusy,
             onAcceptTokenChange: (invitationId, value) =>
               sync.setAcceptTokens((tokens) => ({ ...tokens, [invitationId]: value })),
-            onAcceptInvitation: (invitationId) => void sync.handleAcceptInvitation(invitationId),
+            onAcceptInvitation: handleAcceptInvitationWithTracking,
             onRefreshSharing: () => void sync.refreshSharing(),
-            onCreateInvitation: () => void sync.handleCreateInvitation(),
+            onCreateInvitation: handleCreateInvitationWithTracking,
             onInviteEmailChange: sync.setInviteEmail,
             onInviteRoleChange: sync.setInviteRole,
             onUpdateMemberRole: (memberId, role) => void sync.handleUpdateMemberRole(memberId, role),
@@ -218,6 +271,17 @@ export default function Home() {
             onRevokeInvitation: (invitationId) => void sync.handleRevokeInvitation(invitationId)
           }}
         />
+
+      <DeleteAccountModal
+        opened={ui.isDeleteAccountModalOpen}
+        email={auth.serverSession?.user.email ?? ""}
+        hasSharedWorkspaces={sync.serverWorkspaces.some((workspace) => workspace.role !== "owner")}
+        isBusy={auth.isServerBusy}
+        statusMessage={auth.serverStatus}
+        statusError={auth.serverErrorKind !== null}
+        onConfirm={auth.handleDeleteAccount}
+        onClose={() => ui.setIsDeleteAccountModalOpen(false)}
+      />
 
       <AuthModal
           opened={ui.isAuthModalOpen}

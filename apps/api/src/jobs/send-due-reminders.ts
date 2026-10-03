@@ -78,6 +78,7 @@ export async function runDueReminders(
         name: true,
         amount: true,
         periodMonths: true,
+        billingAnchorDate: true,
         billingDay: true,
         isEndOfMonth: true,
         categoryId: true
@@ -86,7 +87,7 @@ export async function runDueReminders(
 
     // D-1 항목만 추린다.
     const dueTomorrow = fixedCosts.filter(
-      (fc) => getDaysUntilDue(fc, now) === DUE_WITHIN_DAYS
+      (fc) => fc.amount > 0 && getDaysUntilDue(fc, now) === DUE_WITHIN_DAYS
     );
 
     if (dueTomorrow.length === 0) {
@@ -97,6 +98,7 @@ export async function runDueReminders(
 
     // 묶음이므로 dedupeKey 는 도래일(내일) 단위. 모든 D-1 항목은 같은 도래일.
     const dueDate = computeNextDueDate(dueTomorrow[0], now);
+    if (!dueDate) continue;
     const dedupeKey = dueReminderDedupeKey(dueDate);
 
     // 먼저 이력을 선점(create)한다. unique 위반이면 이미 발송됨 → skip.

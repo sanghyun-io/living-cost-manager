@@ -2,6 +2,7 @@ import { Alert, Button, Card, Group, SimpleGrid, Text } from "@mantine/core";
 import type { DataModalProps } from "../../lib/pageTypes";
 import { ModalShell } from "./ModalShell";
 import { ServerSyncPanel } from "./ServerSyncPanel";
+import { AnalyticsDashboard } from "../AnalyticsDashboard";
 
 export function DataModal({
   opened,
@@ -58,6 +59,8 @@ export function DataModal({
           </Button>
         </Alert>
       )}
+      {/* 설정 > 애널리틱스: 서버 전송 없는 온디바이스 사용 통계 패널. */}
+      <AnalyticsDashboard />
       <Text size="xs" c="dimmed">
         브라우저 저장은 항상 유지됩니다. 서버 동기화와 별도로 기기를 바꾸기 전에는 전체 Export로 백업하세요.
       </Text>

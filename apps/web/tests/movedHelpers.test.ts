@@ -17,10 +17,11 @@ import { DEFAULT_CATEGORIES } from "../app/lib/budget";
 // here guards the refactor's "behavior preserved" promise.
 
 describe("parseBudgetSnapshot", () => {
-  test("falls back to the sample snapshot when nothing is stored", () => {
+  test("starts empty when nothing is stored", () => {
     const result = parseBudgetSnapshot(null);
     expect(result.recovered).toBe(false);
-    expect(result.snapshot.monthlyIncome).toBe(3_000_000);
+    expect(result.snapshot.monthlyIncome).toBe(0);
+    expect(result.snapshot.fixedCosts).toEqual([]);
   });
 
   test("marks recovery for corrupt JSON", () => {

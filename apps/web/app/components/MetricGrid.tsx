@@ -27,7 +27,7 @@ function MetricCell({
 }) {
   return (
     <div className="metric-cell">
-      <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: "0.04em" }}>
+      <Text size="xs" fw={600} c="dimmed">
         {label}
       </Text>
       <Text

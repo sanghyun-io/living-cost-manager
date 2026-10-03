@@ -9,7 +9,7 @@ import {
 } from "./budget";
 import { DEFAULT_CARDS, type PaymentCard } from "./cards";
 import { mergeCards, mergeCategories } from "./formatting";
-import { sampleBudgetSnapshot } from "./seedData";
+import { emptyBudgetSnapshot } from "./seedData";
 import type { BudgetSnapshot } from "./pageTypes";
 import type { ServerSession } from "./serverApi";
 
@@ -32,7 +32,7 @@ export function readJson<T>(key: string, fallback: T): T {
 }
 
 export function parseBudgetSnapshot(stored: string | null): { snapshot: BudgetSnapshot; recovered: boolean } {
-  const fallback = sampleBudgetSnapshot;
+  const fallback = emptyBudgetSnapshot;
 
   if (!stored) {
     return { snapshot: fallback, recovered: false };

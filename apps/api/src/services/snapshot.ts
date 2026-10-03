@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { billingFieldsSchema } from "@living-cost-manager/shared";
 import type {
   FixedCostDto,
   SnapshotHistoryEntry,
@@ -17,6 +18,10 @@ function toFixedCostDto(fixedCost: {
   periodMonths: number;
   billingDay: number;
   isEndOfMonth: boolean;
+  billingAnchorDate: string | null;
+  renewalStatus: string;
+  potentialMonthlySavings: number;
+  confirmedMonthlySavings: number;
 }): FixedCostDto {
   return {
     id: fixedCost.id,
@@ -31,7 +36,11 @@ function toFixedCostDto(fixedCost: {
     amount: fixedCost.amount,
     periodMonths: fixedCost.periodMonths,
     billingDay: fixedCost.billingDay,
-    isEndOfMonth: fixedCost.isEndOfMonth
+    isEndOfMonth: fixedCost.isEndOfMonth,
+    billingAnchorDate: fixedCost.billingAnchorDate,
+    renewalStatus: fixedCost.renewalStatus as FixedCostDto["renewalStatus"],
+    potentialMonthlySavings: fixedCost.potentialMonthlySavings,
+    confirmedMonthlySavings: fixedCost.confirmedMonthlySavings
   };
 }
 
@@ -49,14 +58,21 @@ function toFixedCostCreateData(fixedCost: FixedCostDto) {
     amount: fixedCost.amount,
     periodMonths: fixedCost.periodMonths,
     billingDay: fixedCost.billingDay,
-    isEndOfMonth: fixedCost.isEndOfMonth
+    isEndOfMonth: fixedCost.isEndOfMonth,
+    billingAnchorDate: fixedCost.billingAnchorDate ?? null,
+    renewalStatus: fixedCost.renewalStatus ?? "unreviewed",
+    potentialMonthlySavings: fixedCost.potentialMonthlySavings ?? 0,
+    confirmedMonthlySavings: fixedCost.confirmedMonthlySavings ?? 0
   };
 }
 
+class SnapshotWriteValidationError extends Error {}
+
 export function isSnapshotWriteValidationError(error: unknown): boolean {
   return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    ["P2002", "P2003"].includes(error.code)
+    error instanceof SnapshotWriteValidationError ||
+    (error instanceof Prisma.PrismaClientKnownRequestError &&
+      ["P2002", "P2003"].includes(error.code))
   );
 }
 
@@ -124,6 +140,10 @@ export async function getWorkspaceSnapshot(
           paymentOptionKey: true,
           amount: true,
           periodMonths: true,
+          billingAnchorDate: true,
+          renewalStatus: true,
+          potentialMonthlySavings: true,
+          confirmedMonthlySavings: true,
           billingDay: true,
           isEndOfMonth: true
         }
@@ -168,6 +188,44 @@ export async function replaceWorkspaceSnapshot(
       throw new SnapshotVersionConflictError(current.syncVersion);
     }
 
+    // Read under the version lock: older clients omit billing fields even when
+    // writing the current version. Preserve those fields by workspace-local ID.
+    const existingCosts = await tx.fixedCost.findMany({
+      where: { workspaceId: snapshot.workspaceId },
+      select: {
+        id: true,
+        billingAnchorDate: true,
+        renewalStatus: true,
+        potentialMonthlySavings: true,
+        confirmedMonthlySavings: true
+      }
+    });
+    const existingById = new Map(existingCosts.map((cost) => [cost.id, cost]));
+    const effectiveSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      fixedCosts: snapshot.fixedCosts.map((cost) => {
+        const existing = existingById.get(cost.id);
+        const billing = billingFieldsSchema.safeParse({
+          billingAnchorDate: cost.billingAnchorDate === undefined
+            ? existing?.billingAnchorDate ?? null
+            : cost.billingAnchorDate,
+          renewalStatus: cost.renewalStatus === undefined
+            ? existing?.renewalStatus ?? "unreviewed"
+            : cost.renewalStatus,
+          potentialMonthlySavings: cost.potentialMonthlySavings === undefined
+            ? existing?.potentialMonthlySavings ?? 0
+            : cost.potentialMonthlySavings,
+          confirmedMonthlySavings: cost.confirmedMonthlySavings === undefined
+            ? existing?.confirmedMonthlySavings ?? 0
+            : cost.confirmedMonthlySavings
+        });
+        if (!billing.success) {
+          throw new SnapshotWriteValidationError("Invalid snapshot");
+        }
+        return { ...cost, ...billing.data };
+      })
+    };
+
     await tx.fixedCost.deleteMany({
       where: {
         workspaceId: snapshot.workspaceId
@@ -198,14 +256,14 @@ export async function replaceWorkspaceSnapshot(
 
     if (snapshot.fixedCosts.length > 0) {
       await tx.fixedCost.createMany({
-        data: snapshot.fixedCosts.map(toFixedCostCreateData)
+        data: effectiveSnapshot.fixedCosts.map(toFixedCostCreateData)
       });
     }
 
     await tx.backupSnapshot.create({
       data: {
         workspaceId: snapshot.workspaceId,
-        payload: snapshot as Prisma.InputJsonValue
+        payload: effectiveSnapshot as Prisma.InputJsonValue
       }
     });
 

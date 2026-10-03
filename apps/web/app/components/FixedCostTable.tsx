@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
-import { suggestCategoryId } from "@living-cost-manager/shared";
+import { suggestCategoryId, computeNextDueDate, billingDateSchema } from "@living-cost-manager/shared";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
 import { formatWon, getPaymentOptions } from "../lib/formatting";
@@ -162,8 +162,8 @@ export function FixedCostTable({
         <Text size="sm">{visibleFixedCosts.length}개 항목</Text>
         <Text size="sm" fw={700} className="tnum">월 환산 {formatWon(visibleFixedCostTotal)}</Text>
       </div>
-      <div className="table" role="table" aria-label="고정비 목록">
-        <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} role="row">
+      <div className="table" role="group" aria-label="고정비 목록">
+        <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} aria-hidden="true">
           <span>항목</span>
           <span>카테고리</span>
           <span>결제수단</span>
@@ -199,10 +199,11 @@ export function FixedCostTable({
               ? categories.find((c) => c.id === suggestedCategoryId) ?? null
               : null;
           return (
-            <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="row" key={item.id}>
+            <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="group" aria-label={item.name} key={item.id}>
               <span>
                 <TextInput
                   aria-label="항목명"
+                  label="항목명" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   value={item.name}
                   onChange={(event) => onItemChange(item.id, { name: event.currentTarget.value })}
@@ -217,6 +218,7 @@ export function FixedCostTable({
                   />
                   <Select
                     aria-label="카테고리"
+                    label="카테고리" classNames={{ label: "stacked-field-label" }}
                     size="xs"
                     style={{ flex: 1 }}
                     data={categoryData}
@@ -240,6 +242,7 @@ export function FixedCostTable({
               <span>
                 <Select
                   aria-label="결제수단"
+                  label="결제수단" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   data={methodData}
                   value={item.paymentMethodId}
@@ -250,6 +253,7 @@ export function FixedCostTable({
               <span>
                 <Select
                   aria-label="결제 옵션"
+                  label="결제 옵션" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   data={optionData}
                   value={item.paymentOptionId || null}
@@ -259,17 +263,21 @@ export function FixedCostTable({
                 />
               </span>
               <span>
-                <NumberInput
-                  aria-label="납부일"
+                <TextInput
+                  type="date"
+                  label="기준 납부일"
+                  aria-label={`${item.name} 기준 납부일`}
                   size="xs"
-                  min={1}
-                  max={31}
-                  hideControls
-                  clampBehavior="strict"
-                  disabled={item.isEndOfMonth || (item.paymentMethodId === "credit-card" && item.paymentOptionId.length > 0)}
-                  value={item.billingDay}
-                  onChange={(value) => onItemChange(item.id, { billingDay: toNumber(value, item.billingDay) })}
+                  value={item.billingAnchorDate ?? ""}
+                  onChange={(event) => {
+                    const date = event.currentTarget.value;
+                    if (!date || billingDateSchema.safeParse(date).success) onItemChange(item.id, { billingAnchorDate: date || null });
+                  }}
                 />
+                <Text size="xs" c="dimmed">{(() => {
+                  const due = computeNextDueDate(item, new Date());
+                  return due ? `다음 ${due.getFullYear()}/${due.getMonth() + 1}/${due.getDate()}` : "다음 납부일 미확인";
+                })()}</Text>
                 <Checkbox
                   aria-label="말일"
                   label="말일"
@@ -282,6 +290,7 @@ export function FixedCostTable({
               <span>
                 <NumberInput
                   aria-label="금액"
+                  label="금액" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   min={0}
                   thousandSeparator=","
@@ -295,6 +304,7 @@ export function FixedCostTable({
               <span>
                 <NumberInput
                   aria-label="주기"
+                  label="주기" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   min={0}
                   max={120}
@@ -310,6 +320,31 @@ export function FixedCostTable({
               <span className="monthly-equivalent-cell">
                 <Text fw={700} size="sm" className="tnum">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
                 <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
+                <Select size="xs" label="갱신 검토" value={item.renewalStatus ?? "unreviewed"}
+                  allowDeselect={false}
+                  data={[
+                    { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" },
+                    { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" },
+                    { value: "completed", label: "검토 완료" }
+                  ]}
+                  onChange={(value) => onItemChange(item.id, { renewalStatus: value as FixedCost["renewalStatus"] })} />
+                {["cancel-planned", "change-review"].includes(item.renewalStatus ?? "") ? (
+                  <NumberInput size="xs" label="예상 월 절감액" min={0} max={2147483647} allowDecimal={false}
+                    value={item.potentialMonthlySavings ?? 0}
+                    onChange={(value) => onItemChange(item.id, { potentialMonthlySavings: toNumber(value, 0) })} />
+                ) : null}
+                {item.renewalStatus === "cancel-planned" ? (
+                  <Button size="compact-xs" variant="light" mt={4} onClick={() => {
+                    if (window.confirm("해지가 실제로 완료되었나요? 금액을 0원으로 바꾸고 현재 월 환산액을 확정 절감으로 기록합니다.")) {
+                      onItemChange(item.id, { renewalStatus: "completed", confirmedMonthlySavings: getMonthlyEquivalentAmount(item), amount: 0, billingAnchorDate: null });
+                    }
+                  }}>해지 완료 확인</Button>
+                ) : null}
+                {item.renewalStatus === "completed" ? (
+                  <NumberInput size="xs" label="직접 확인한 월 절감액" description="완료만으로 청구가 중단되지 않아요. 해지·변경 후 금액과 일정을 수정하세요."
+                    min={0} max={2147483647} allowDecimal={false} value={item.confirmedMonthlySavings ?? 0}
+                    onChange={(value) => onItemChange(item.id, { confirmedMonthlySavings: toNumber(value, 0) })} />
+                ) : null}
               </span>
               {isDeleteMode ? (
                 <span className="delete-select-cell">

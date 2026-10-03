@@ -50,6 +50,9 @@ jobs:
           NEXT_PUBLIC_COACH_MODEL_BASE_URL: ${{ vars.NEXT_PUBLIC_COACH_MODEL_BASE_URL }}
         run: pnpm --filter @living-cost-manager/web... build
 
+      - name: Record static release identity
+        run: node -e 'require("node:fs").writeFileSync("apps/web/out/release-meta.json", JSON.stringify({commit: process.env.GITHUB_SHA}))'
+
       # Run wrangler from an isolated dir via npx. Running it inside the repo
       # makes npm choke on the pnpm workspace ("Cannot read properties of null").
       - name: Deploy to Cloudflare Pages

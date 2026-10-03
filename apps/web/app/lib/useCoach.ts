@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { buildInsuranceCheck, buildMonthlyReport, buildSavingsInsights, getUpcomingDues, type MonthlyReport } from "@living-cost-manager/shared";
 import { getCoachEngine, streamCoaching, type CoachInput } from "./coach";
 import { isCoachOptedIn, isWebGpuAvailable, setCoachOptIn } from "./coachModel";
+import { track } from "./analytics";
 import type { CoachStatus } from "../components/modals/CoachModal";
 import type { ServerSession, ServerApiClient } from "./serverApi";
 import type { BudgetDataApi } from "./useBudgetData";
@@ -81,6 +82,8 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
 
   // 코칭 생성: 엔진을 (필요시) 로드한 뒤 스트리밍으로 멘트를 만든다.
   async function runCoaching() {
+    // 요청 자체가 이벤트(결과/실패 여부는 추적하지 않는다 — 온디바이스 지표용).
+    track({ type: "coach.request", timestamp: Date.now(), data: {} });
     if (!isWebGpuAvailable()) {
       setCoachStatus("error");
       setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");

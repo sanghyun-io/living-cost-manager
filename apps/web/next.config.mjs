@@ -3,6 +3,7 @@ const nextConfig = {
   // Static export deployed to Cloudflare Pages at the domain root
   // (living-cost-manager.gamja.top), so no basePath/assetPrefix is needed.
   output: "export",
+  trailingSlash: true,
   images: {
     unoptimized: true
   }

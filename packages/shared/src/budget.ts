@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { billingFieldsSchema } from "./billing.js";
 
 const idSchema = z.string().min(1);
 const billingDaySchema = z.number().int().min(1).max(31);
@@ -28,7 +29,7 @@ export const paymentCardDtoSchema = z.object({
   isEndOfMonth: z.boolean(),
 });
 
-export const fixedCostDtoSchema = z.object({
+export const fixedCostDtoSchema = billingFieldsSchema.safeExtend({
   id: idSchema,
   workspaceId: idSchema,
   name: z.string().min(1),

@@ -88,7 +88,8 @@ export function buildSnapshotKey(snapshot: LocalBudgetSnapshot) {
     cards: snapshot.cards.map((card) => ({
       id: card.id,
       label: card.label,
-      billingDay: card.billingDay
+      billingDay: card.billingDay,
+      isEndOfMonth: card.isEndOfMonth
     })),
     fixedCosts: snapshot.fixedCosts.map((item) => ({
       id: item.id,
@@ -98,7 +99,12 @@ export function buildSnapshotKey(snapshot: LocalBudgetSnapshot) {
       paymentOptionId: item.paymentOptionId,
       amount: item.amount,
       periodMonths: item.periodMonths,
-      billingDay: item.billingDay
+      billingDay: item.billingDay,
+      isEndOfMonth: item.isEndOfMonth,
+      billingAnchorDate: item.billingAnchorDate ?? null,
+      renewalStatus: item.renewalStatus ?? "unreviewed",
+      potentialMonthlySavings: item.potentialMonthlySavings ?? 0,
+      confirmedMonthlySavings: item.confirmedMonthlySavings ?? 0
     }))
   });
 }

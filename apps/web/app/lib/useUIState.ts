@@ -18,6 +18,7 @@ export function useUIState() {
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
   const [chartMode, setChartMode] = useState<ChartMode>("bar");
   const [activePieSegment, setActivePieSegment] = useState<CategoryPieSegment | null>(null);
   const [pieTooltipPosition, setPieTooltipPosition] = useState({ x: 0, y: 0 });
@@ -54,6 +55,7 @@ export function useUIState() {
     setIsCategoryModalOpen(false);
     setIsCardModalOpen(false);
     setIsDataModalOpen(false);
+    setIsDeleteAccountModalOpen(false);
   }
 
   return {
@@ -65,6 +67,8 @@ export function useUIState() {
     setIsDataModalOpen,
     isAuthModalOpen,
     setIsAuthModalOpen,
+    isDeleteAccountModalOpen,
+    setIsDeleteAccountModalOpen,
     chartMode,
     setChartMode,
     activePieSegment,

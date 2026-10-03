@@ -1,0 +1,30 @@
+.shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px clamp(20px, 5vw, 48px) 64px;
+  font-size: 17px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.shell a { color: var(--mantine-color-teal-8); text-underline-offset: 4px; }
+:global([data-mantine-color-scheme="dark"]) .shell a { color: var(--mantine-color-teal-3); }
+.shell a:focus-visible { outline: 3px solid currentColor; outline-offset: 5px; }
+.header { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.nav { display: flex; flex-wrap: wrap; gap: 20px; }
+.brand { font-weight: 750; }
+.skip { display: inline-block; margin-bottom: 16px; font-size: 14px; }
+.main { padding-top: 40px; }
+.main h1 { font-size: clamp(30px, 5vw, 46px); letter-spacing: -0.035em; line-height: 1.3; margin: 12px 0 24px; }
+.main h2 { font-size: 25px; line-height: 1.5; margin: 0 0 16px; letter-spacing: -0.02em; }
+.main h3 { font-size: 20px; line-height: 1.5; margin: 0 0 10px; }
+.main p { margin: 0 0 18px; }
+.main li { margin-bottom: 10px; }
+.eyebrow { font-size: 14px; font-weight: 700; color: var(--muted); }
+.lead { font-size: 20px; line-height: 1.8; }
+.section { margin-top: 44px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 20px; }
+.card { padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.shell .cta { display: inline-block; padding: 12px 22px; border-radius: 8px; background: #116b58; color: #fff; font-weight: 700; text-decoration: none; }
+.note { padding: 20px; border-left: 3px solid var(--accent); background: var(--surface); }
+.breadcrumbs { font-size: 14px; margin-bottom: 24px; }
+.footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 14px; }

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Text, Title } from "@mantine/core";
+import { Button, Text, Title } from "@mantine/core";
 import {
   buildMonthlyReport,
   buildSavingsInsights,
   buildShareSummary,
   getUpcomingDues,
+  buildThirtyDayDueSummary,
+  summarizeRenewalSavings,
   type SavingsInsight,
   type SnapshotHistoryEntry,
   type UpcomingDue
@@ -22,7 +24,7 @@ interface InsightsPanelProps {
   topCategoryAmount?: number;
 }
 
-const UPCOMING_WINDOW_DAYS = 14;
+const UPCOMING_WINDOW_DAYS = 29;
 const UPCOMING_MAX = 5;
 const TREND_MAX = 6;
 
@@ -66,13 +68,16 @@ export function InsightsPanel({
   const trend = (history ?? []).slice(0, TREND_MAX);
   const monthlyReport = (history ?? []).length > 0 ? buildMonthlyReport(history ?? []) : null;
   const canShare = monthlyExpense > 0;
+  const dueSummary = buildThirtyDayDueSummary(fixedCosts, new Date());
+  const savings = summarizeRenewalSavings(fixedCosts);
 
   if (
     upcoming.length === 0 &&
     insights.length === 0 &&
     trend.length === 0 &&
     !monthlyReport &&
-    !canShare
+    !canShare &&
+    fixedCosts.length === 0
   ) {
     return null;
   }
@@ -105,19 +110,25 @@ export function InsightsPanel({
 
   return (
     <section className="insights-panel" aria-label="예측 및 절감 인사이트">
+      <div className="insights-block">
+        <Title order={2} size="h4">앞으로 30일 실제 납부 예정</Title>
+        <Text fw={700} size="xl" className="tnum">{formatWon(dueSummary.total)} · {dueSummary.dues.length}회</Text>
+        <Text size="sm">등록한 일정 기준 예상 청구액입니다. 월 환산 비용은 {formatWon(dueSummary.monthlyNormalized)}입니다.</Text>
+        {dueSummary.unknownCount > 0 ? <Text size="sm" c="dimmed">일정 미확인 {dueSummary.unknownCount}건은 합계와 알림에서 제외됩니다. 기준 납부일과 정수 개월 주기를 입력하세요.</Text> : null}
+        <a className="guide-link" href="#fixed-costs">납부일·갱신 계획 수정</a>
+      </div>
       {upcoming.length > 0 ? (
         <div className="insights-block">
-          <Text className="section-label">다가오는 납부</Text>
-          <Title order={3} mb="sm">{UPCOMING_WINDOW_DAYS}일 이내 예정</Title>
+          <Title order={3} size="h5" mb="sm">가까운 납부 · 최대 5건</Title>
           <ul className="insights-list">
             {upcoming.map(({ item, daysUntil }) => {
               const label = dueLabel(daysUntil);
               return (
                 <li key={item.id} className="insights-row">
                   <span className="insights-row-name">{item.name}</span>
-                  <Badge color={label.urgent ? "red" : "blue"} variant="light" size="sm">
+                  <Text span size="sm" fw={label.urgent ? 700 : 400} c={label.urgent ? "rose" : "dimmed"}>
                     {label.text}
-                  </Badge>
+                  </Text>
                   <span className="insights-row-amount">{formatWon(item.amount)}</span>
                 </li>
               );
@@ -126,17 +137,17 @@ export function InsightsPanel({
         </div>
       ) : null}
 
+      <details className="insights-details">
+        <summary>절감 검토와 고정비 요약</summary>
+        <Text size="sm" mt="sm">예상 월 절감 {formatWon(savings.potential)} · 완료 후 직접 확인한 월 절감 {formatWon(savings.confirmed)}</Text>
       {insights.length > 0 ? (
         <div className="insights-block">
-          <Text className="section-label">절감 인사이트</Text>
           <Title order={3} mb="sm">아낄 수 있는 곳</Title>
           <ul className="insights-list">
             {insights.map((insight, idx) => (
               <li key={`${insight.kind}-${idx}`} className="insights-row insights-row-insight">
                 <span className="insights-row-name">{insight.title}</span>
-                <Badge color={insight.kind === "duplicate" ? "orange" : "teal"} variant="light" size="sm">
-                  월 -{formatWon(insight.monthlySavings)}
-                </Badge>
+                <Text span size="sm" c="dimmed">예상 월 절감 {formatWon(insight.monthlySavings)}</Text>
               </li>
             ))}
           </ul>
@@ -145,7 +156,6 @@ export function InsightsPanel({
 
       {monthlyReport ? (
         <div className="insights-block">
-          <Text className="section-label">월간 리포트</Text>
           <Title order={3} mb="sm">이번 달 요약</Title>
           <Text size="sm" className="insights-report-headline">{monthlyReport.headline}</Text>
         </div>
@@ -153,7 +163,6 @@ export function InsightsPanel({
 
       {trend.length > 0 ? (
         <div className="insights-block">
-          <Text className="section-label">동기화 추세</Text>
           <Title order={3} mb="sm">최근 월 고정비 변화</Title>
           <ul className="insights-list">
             {trend.map((entry) => (
@@ -168,12 +177,11 @@ export function InsightsPanel({
 
       {canShare ? (
         <div className="insights-block">
-          <Text className="section-label">공유</Text>
           <Title order={3} mb="sm">요약 카드 공유</Title>
           <Text size="sm" c="dimmed" mb="sm">
-            수입 절대액은 빼고 비율로만 공유해요.
+            월 고정비 합계를 공유합니다. 수입과 수입 대비 비율은 포함하지 않습니다.
           </Text>
-          <Button variant="light" size="sm" onClick={handleShare}>
+          <Button variant="default" size="sm" onClick={handleShare}>
             고정비 요약 공유하기
           </Button>
           {shareStatus ? (
@@ -181,6 +189,7 @@ export function InsightsPanel({
           ) : null}
         </div>
       ) : null}
+      </details>
     </section>
   );
 }

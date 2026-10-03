@@ -11,7 +11,7 @@ describe("expenseRatioPercent", () => {
 });
 
 describe("buildShareSummary", () => {
-  test("고정비 + 비율 + Top 카테고리 포함", () => {
+  test("고정비와 카테고리를 공유하되 수입 역산에 쓰이는 비율은 제외", () => {
     const text = buildShareSummary({
       monthlyIncome: 3000000,
       monthlyExpense: 1039000,
@@ -19,7 +19,9 @@ describe("buildShareSummary", () => {
       topCategoryAmount: 650000
     });
     expect(text).toContain("월 고정비 1,039,000원");
-    expect(text).toContain("수입 대비 34.6%");
+    expect(text).not.toContain("수입 대비");
+    expect(text).not.toContain("%");
+    expect(text).toBe(buildShareSummary({ monthlyIncome: 9000000, monthlyExpense: 1039000, topCategoryLabel: "주거", topCategoryAmount: 650000 }));
     expect(text).toContain("가장 큰 항목: 주거 650,000원");
     expect(text).toContain("Living Cost Manager");
   });

@@ -29,6 +29,10 @@ RUN cd /prod/api && ./node_modules/.bin/prisma generate --schema=./prisma/schema
 
 FROM node:24-alpine AS runtime
 
+ARG RELEASE_SHA=unknown
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
+ENV RELEASE_SHA=$RELEASE_SHA
+
 WORKDIR /app
 
 ENV NODE_ENV="production"

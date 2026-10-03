@@ -75,6 +75,7 @@ async function addFixedCost(
       paymentMethodId: "bank-transfer",
       amount,
       periodMonths: 1,
+      billingAnchorDate: `2026-01-${String(billingDay).padStart(2, "0")}`,
       billingDay,
       isEndOfMonth: false
     }

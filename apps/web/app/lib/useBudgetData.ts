@@ -26,11 +26,12 @@ import {
 import { buildFixedCostCsvTemplate, parseFixedCostCsvTemplate } from "./budgetImportExport";
 import { buildLivingCostBackup, parseLivingCostBackup } from "./backup";
 import { buildPieBackground, clampBillingDay, mergeCards, mergeCategories } from "./formatting";
-import { getUserDataKey } from "./users";
+import { getUserDataKey, getUserErasureKey } from "./users";
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, parseBudgetSnapshot } from "./storage";
-import { seedFixedCosts } from "./seedData";
+import { seedFixedCosts, emptyBudgetSnapshot } from "./seedData";
 import { parseFixedCostInput } from "@living-cost-manager/shared";
 import { getCurrentBudgetSnapshotFromState } from "./snapshot";
+import { track } from "./analytics";
 import type { LocalBudgetSnapshot } from "./snapshot";
 import type { CardDraft } from "../components/modals/CardModal";
 import type { UIStateApi } from "./useUIState";
@@ -53,11 +54,28 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [cards, setCards] = useState<PaymentCard[]>(DEFAULT_CARDS);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState("");
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
+  const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
+  const activeUserRef = useRef<string | null>(null);
+  activeUserRef.current = users.currentUser?.id ?? null;
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
 
   const { currentUser, isBootLoaded, isLoaded, setIsLoaded } = users;
   const { categoryFilterId, setCategoryFilterId, selectedDeleteIds, setIsDeleteMode, setSelectedDeleteIds, setImportMessage } = ui;
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const erase = () => {
+      if (!window.localStorage.getItem(getUserErasureKey(currentUser.id))) return;
+      applyBudgetSnapshot(emptyBudgetSnapshot);
+      setBlockedSaveUserId(currentUser.id);
+      setSaveError("다른 탭에서 계정이 삭제되어 저장과 동기화를 중단했습니다.");
+    };
+    window.addEventListener("storage", erase);
+    erase();
+    return () => window.removeEventListener("storage", erase);
+  }, [currentUser?.id]);
 
   // ── per-user localStorage load / save ────────────────────────────────
   useEffect(() => {
@@ -75,13 +93,14 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = parseBudgetSnapshot(stored ?? legacyStored);
 
+    let recoveryFailed = false;
     if (parsed.recovered && stored) {
       try {
         window.localStorage.setItem(getUserDataKey(currentUser.id) + ":corrupt:" + Date.now().toString(36), stored);
       } catch {
-        // Recovery should continue even if the browser refuses the extra copy.
+        recoveryFailed = true;
       }
-      setImportMessage("저장 데이터가 손상되어 기본값으로 복구했습니다. 가능하면 전체 백업을 내보내세요.");
+      setImportMessage("저장 데이터를 읽지 못했습니다. 원본 복구 사본을 확인하고 정상 백업을 가져오세요.");
     }
 
     setMonthlyIncome(parsed.snapshot.monthlyIncome);
@@ -89,23 +108,26 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     setCards(parsed.snapshot.cards);
     setFixedCosts(parsed.snapshot.fixedCosts);
     setLastSavedAt(null);
-    setSaveError("");
+    setBlockedSaveUserId(parsed.recovered ? currentUser.id : null);
+    setSaveError(parsed.recovered ? (recoveryFailed ? "복구 사본을 저장하지 못해 원본 보호를 위해 자동 저장을 중단했습니다. 저장 공간을 확보하고 다시 불러오세요." : "저장 데이터를 읽지 못해 자동 저장을 중단했습니다. 원본을 내보내고 정상 백업을 가져오세요.") : "");
+    setLoadedUserId(currentUser.id);
     setIsLoaded(true);
   }, [currentUser, isBootLoaded]);
 
   useEffect(() => {
-    if (!isBootLoaded || !isLoaded || !currentUser) {
+    if (!isBootLoaded || !isLoaded || !currentUser || loadedUserId !== currentUser.id || blockedSaveUserId === currentUser.id) {
       return;
     }
 
     try {
+      if (window.localStorage.getItem(getUserErasureKey(currentUser.id))) return;
       window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
       setLastSavedAt(new Date());
       setSaveError("");
     } catch {
       setSaveError("브라우저 저장 공간에 저장하지 못했습니다. 전체 백업을 먼저 내보내세요.");
     }
-  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, monthlyIncome]);
+  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, loadedUserId, blockedSaveUserId, monthlyIncome]);
 
   // ── derived views ────────────────────────────────────────────────────
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
@@ -124,6 +146,40 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     () => getCurrentBudgetSnapshotFromState({ monthlyIncome, categories, cards, fixedCosts }),
     [cards, categories, fixedCosts, monthlyIncome]
   );
+  const snapshotRef = useRef(currentBudgetSnapshot);
+  snapshotRef.current = currentBudgetSnapshot;
+
+  function importStillCurrent(userId: string | null, before: string): boolean {
+    return userId !== null && activeUserRef.current === userId && JSON.stringify(snapshotRef.current) === before;
+  }
+
+  function preserveBeforeImport(userId: string, snapshot: string) {
+    if (window.localStorage.getItem(getUserErasureKey(userId))) throw new Error("Account erased");
+    // Abort replacement if storage is full: recovery is a precondition, not best effort.
+    if (blockedSaveUserId === userId) {
+      const original = window.localStorage.getItem(getUserDataKey(userId));
+      if (original) window.localStorage.setItem(getUserDataKey(userId) + ":corrupt:" + Date.now().toString(36), original);
+    }
+    window.localStorage.setItem(getUserDataKey(userId) + ":recovery:" + Date.now() + ":import", buildLivingCostBackup(JSON.parse(snapshot)));
+    setBlockedSaveUserId(null);
+  }
+
+  function handleExportRecovery() {
+    if (!currentUser) return;
+    const rawOriginal = blockedSaveUserId === currentUser.id ? window.localStorage.getItem(getUserDataKey(currentUser.id)) : null;
+    const prefix = getUserDataKey(currentUser.id) + ":recovery:";
+    const keys = Object.keys(window.localStorage).filter((key) => key.startsWith(prefix))
+      .sort((a, b) => Number(b.slice(prefix.length).split(":")[0]) - Number(a.slice(prefix.length).split(":")[0]));
+    const backup = rawOriginal ?? (keys[0] ? window.localStorage.getItem(keys[0]) : null);
+    if (!backup) { setImportMessage("이 공간에는 교체 전 복구본이 없습니다."); return; }
+    const url = URL.createObjectURL(new Blob([backup], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = rawOriginal ? "living-cost-unreadable-original.json" : "living-cost-recovery.lcm";
+    link.click();
+    URL.revokeObjectURL(url);
+    setImportMessage(rawOriginal ? "읽지 못한 원본 JSON을 그대로 내보냈습니다. 파일을 보관한 뒤 데이터를 복구하세요." : "최근 교체 전 복구본을 내보냈습니다. 데이터 관리의 전체 Import로 복원할 수 있습니다.");
+  }
 
   // ── income & fixed-cost handlers ─────────────────────────────────────
   function handleIncomeChange(value: number) {
@@ -135,56 +191,44 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function handlePaymentMethodChange(item: FixedCost, paymentMethodId: FixedCost["paymentMethodId"]) {
-    const selectedCard = paymentMethodId === "credit-card" ? cards.find((card) => card.id === item.paymentOptionId) : null;
-    handleItemChange(item.id, {
-      paymentMethodId,
-      billingDay: selectedCard?.billingDay ?? item.billingDay,
-      isEndOfMonth: selectedCard?.isEndOfMonth ?? item.isEndOfMonth
-    });
+    handleItemChange(item.id, { paymentMethodId });
   }
 
   function handlePaymentOptionChange(item: FixedCost, paymentOptionId: string) {
-    const selectedCard = item.paymentMethodId === "credit-card" ? cards.find((card) => card.id === paymentOptionId) : null;
-    handleItemChange(item.id, {
-      paymentOptionId,
-      billingDay: selectedCard?.billingDay ?? item.billingDay,
-      isEndOfMonth: selectedCard?.isEndOfMonth ?? item.isEndOfMonth
-    });
+    handleItemChange(item.id, { paymentOptionId });
   }
 
   function handleAddItem() {
-    setFixedCosts((items) => [
-      ...items,
-      createFixedCost({
-        id: "cost-" + Date.now().toString(36),
-        name: "새 고정비",
-        categoryId: categories[0]?.id ?? "other",
-        paymentMethodId: "bank-transfer",
-        paymentOptionId: "auto-transfer",
-        amount: 0,
-        periodMonths: 1,
-        billingDay: 1
-      })
-    ]);
+    const nextItem = createFixedCost({
+      id: "cost-" + Date.now().toString(36),
+      name: "새 고정비",
+      categoryId: categories[0]?.id ?? "other",
+      paymentMethodId: "bank-transfer",
+      paymentOptionId: "auto-transfer",
+      amount: 0,
+      periodMonths: 1,
+      billingDay: 1
+    });
+    setFixedCosts((items) => [...items, nextItem]);
+    track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
   }
 
   // 자연어 한 줄("넷플릭스 17000원 매달")을 파싱해 고정비를 추가한다.
   // 추출 실패한 필드는 handleAddItem 과 동일한 기본값으로 폴백한다.
   function handleQuickAdd(text: string) {
     const parsed = parseFixedCostInput(text);
-    setFixedCosts((items) => [
-      ...items,
-      createFixedCost({
-        id: "cost-" + Date.now().toString(36),
-        name: parsed.name ?? "새 고정비",
-        categoryId: categories[0]?.id ?? "other",
-        paymentMethodId: "bank-transfer",
-        paymentOptionId: "auto-transfer",
-        amount: parsed.amount ?? 0,
-        periodMonths: parsed.periodMonths ?? 1,
-        billingDay: 1
-      })
-    ]);
+    const nextItem = createFixedCost({
+      id: "cost-" + Date.now().toString(36),
+      name: parsed.name ?? "새 고정비",
+      categoryId: categories[0]?.id ?? "other",
+      paymentMethodId: "bank-transfer",
+      paymentOptionId: "auto-transfer",
+      amount: parsed.amount ?? 0,
+      periodMonths: parsed.periodMonths ?? 1,
+      billingDay: 1
+    });
+    setFixedCosts((items) => [...items, nextItem]);
+    track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
   }
 
   // ── delete mode ──────────────────────────────────────────────────────
@@ -215,10 +259,16 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       return;
     }
 
+    // 삭제 대상의 카테고리 정보를 state 필터로 미리 뽑아 두었다가 이벤트로 남긴다
+    // (업데이터 안에서 side-effect 를 내면 StrictMode 이중 실행 시 중복 추적됨).
+    const removedItems = fixedCosts.filter((item) => selectedDeleteIds.includes(item.id));
     setFixedCosts((items) => items.filter((item) => !selectedDeleteIds.includes(item.id)));
     setSelectedDeleteIds([]);
     setIsDeleteMode(false);
     setImportMessage(deleteCount + "개 항목을 삭제했습니다.");
+    for (const item of removedItems) {
+      track({ type: "budget.fixed_cost_delete", timestamp: Date.now(), data: { categoryId: item.categoryId } });
+    }
   }
 
   // ── categories ───────────────────────────────────────────────────────
@@ -226,6 +276,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   function handleAddCategory(label: string) {
     const nextCategory = createCategory(label);
     setCategories((currentCategories) => mergeCategories(currentCategories, [nextCategory]));
+    track({ type: "budget.category_create", timestamp: Date.now(), data: {} });
   }
 
   function handleRenameCategory(categoryId: string, label: string) {
@@ -248,6 +299,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   function handleAddCard(draft: CardDraft) {
     const nextCard = createPaymentCard(draft.label, draft.billingDay, draft.isEndOfMonth);
     setCards((currentCards) => mergeCards(currentCards, [nextCard]));
+    track({ type: "budget.card_create", timestamp: Date.now(), data: {} });
   }
 
   function handleRenameCard(cardId: string, label: string) {
@@ -256,26 +308,12 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
   function handleUpdateCardEndOfMonth(cardId: string, isEndOfMonth: boolean) {
     setCards((currentCards) => updatePaymentCard(currentCards, cardId, { isEndOfMonth }));
-    // Propagate to fixed costs paying via this card so their billing date stays in sync.
-    setFixedCosts((items) =>
-      items.map((item) =>
-        item.paymentMethodId === "credit-card" && item.paymentOptionId === cardId
-          ? updateFixedCost(item, { isEndOfMonth })
-          : item
-      )
-    );
+    // Card settlement date is separate from a subscription merchant charge date.
   }
 
   function handleUpdateCardBillingDay(cardId: string, billingDay: number) {
     const nextBillingDay = clampBillingDay(billingDay);
     setCards((currentCards) => updatePaymentCard(currentCards, cardId, { billingDay: nextBillingDay }));
-    setFixedCosts((items) =>
-      items.map((item) =>
-        item.paymentMethodId === "credit-card" && item.paymentOptionId === cardId
-          ? updateFixedCost(item, { billingDay: nextBillingDay })
-          : item
-      )
-    );
   }
 
   function handleDeleteCard(cardId: string) {
@@ -322,12 +360,19 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       return;
     }
 
+    const importingUserId = activeUserRef.current;
+    const before = JSON.stringify(snapshotRef.current);
     try {
+      const csv = await file.text();
+      if (!importStillCurrent(importingUserId, before)) return;
       const result = parseFixedCostCsvTemplate({
-        csv: await file.text(),
+        csv,
         categories,
         cards
       });
+
+      if (!window.confirm("현재 항목을 CSV 내용으로 교체할까요? 복구용 사본을 브라우저에 보관합니다.")) return;
+      preserveBeforeImport(importingUserId!, before);
 
       setCategories(result.categories);
       setCards(result.cards);
@@ -347,8 +392,14 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       return;
     }
 
+    const importingUserId = activeUserRef.current;
+    const before = JSON.stringify(snapshotRef.current);
     try {
-      const result = parseLivingCostBackup(await file.text());
+      const text = await file.text();
+      if (!importStillCurrent(importingUserId, before)) return;
+      const result = parseLivingCostBackup(text);
+      if (!window.confirm("현재 데이터를 백업 파일의 내용으로 교체할까요? 복구용 사본을 브라우저에 보관합니다.")) return;
+      preserveBeforeImport(importingUserId!, before);
 
       setMonthlyIncome(result.monthlyIncome);
       setCategories(result.categories);
@@ -394,6 +445,8 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     cards,
     lastSavedAt,
     saveError,
+    localScopeKey: loadedUserId === currentUser?.id && isLoaded ? loadedUserId : null,
+    localRecoveryRequired: blockedSaveUserId === currentUser?.id,
     importFileRef,
     backupFileRef,
     // derived
@@ -425,6 +478,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     handleDeleteCard,
     handleExportTemplate,
     handleExportBackup,
+    handleExportRecovery,
     handleImportTemplate,
     handleImportBackup,
     getCurrentBudgetSnapshot,

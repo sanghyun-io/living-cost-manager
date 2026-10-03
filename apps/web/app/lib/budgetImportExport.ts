@@ -41,7 +41,7 @@ const columns = [
   "결제옵션",
   "납부일",
   "금액",
-  "주기"
+  "주기", "기준납부일", "갱신검토", "예상월절감", "확정월절감"
 ];
 
 export function buildFixedCostCsvTemplate({ fixedCosts, categories, cards }: ExportInput): string {
@@ -63,7 +63,8 @@ export function buildFixedCostCsvTemplate({ fixedCosts, categories, cards }: Exp
       paymentOption?.label ?? "",
       item.isEndOfMonth ? "말일" : String(item.billingDay),
       String(item.amount),
-      String(item.periodMonths)
+      String(item.periodMonths), item.billingAnchorDate ?? "", item.renewalStatus ?? "unreviewed",
+      String(item.potentialMonthlySavings ?? 0), String(item.confirmedMonthlySavings ?? 0)
     ];
   });
 
@@ -74,12 +75,16 @@ export function parseFixedCostCsvTemplate({ csv, categories, cards }: ImportInpu
   const parsedRows = parseCsv(csv);
   const [headerRow, ...dataRows] = parsedRows;
   const headerMap = buildHeaderMap(headerRow ?? []);
+  if (!["항목", "금액"].every((column) => (headerRow ?? []).some((value) => value.trim() === column))) {
+    throw new Error("CSV 항목/금액 헤더가 필요합니다.");
+  }
   const nextCategories = [...categories];
   const nextCards = [...cards];
   const fixedCosts: FixedCost[] = [];
   let skippedCount = 0;
 
   dataRows.forEach((row, index) => {
+    if (row.length !== headerRow.length) throw new Error("CSV 열 개수가 헤더와 다릅니다.");
     const name = getCell(row, headerMap, "항목");
     const amount = parseCurrencyAmount(getCell(row, headerMap, "금액"));
 
@@ -123,10 +128,17 @@ export function parseFixedCostCsvTemplate({ csv, categories, cards }: ImportInpu
         billingDay,
         isEndOfMonth,
         amount,
-        periodMonths: parsePeriodMonths(getCell(row, headerMap, "주기"))
+        periodMonths: parsePeriodMonths(getCell(row, headerMap, "주기")),
+        billingAnchorDate: getCell(row, headerMap, "기준납부일") || null,
+        renewalStatus: (getCell(row, headerMap, "갱신검토") || "unreviewed") as FixedCost["renewalStatus"],
+        potentialMonthlySavings: Number(getCell(row, headerMap, "예상월절감") || 0),
+        confirmedMonthlySavings: Number(getCell(row, headerMap, "확정월절감") || 0)
       })
     );
   });
+
+  if (dataRows.some((row) => row.some((cell) => cell.trim())) && fixedCosts.length === 0) throw new Error("유효한 CSV 항목이 없습니다.");
+  if (new Set(fixedCosts.map((item) => item.id)).size !== fixedCosts.length) throw new Error("중복 항목 ID입니다.");
 
   return {
     fixedCosts,
@@ -264,6 +276,7 @@ function parseCsv(csv: string): string[][] {
     cell += char;
   }
 
+  if (inQuotes) throw new Error("닫히지 않은 CSV 인용부호입니다.");
   if (cell.length > 0 || row.length > 0) {
     row.push(cell);
     rows.push(row);
@@ -285,7 +298,7 @@ function parsePeriodMonths(value: string): number {
     return 1;
   }
 
-  return Math.max(1, Math.round(parsed * 10) / 10);
+  return value.trim() === "" ? 1 : Math.max(0, Math.round(parsed * 10) / 10);
 }
 
 function sanitizeImportId(value: string, index: number): string {

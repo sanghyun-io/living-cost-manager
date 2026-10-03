@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, Group, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
+import { ActionIcon, Button, Group, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { LOCAL_USER_NAME } from "../lib/users";
 import { formatSaveTime } from "../lib/formatting";
 import type { ServerSession } from "../lib/serverApi";
@@ -32,44 +32,41 @@ export function AppHeader({
   return (
     <div className="app-header-shell">
       <Group component="header" className="app-header" justify="flex-end" gap="sm" wrap="wrap">
+        <Text fw={700} className="app-brand">생활비 관리자</Text>
+        <a className="guide-link" href="/guide/">사용 안내</a>
         <ActionIcon
           variant="subtle"
           color="teal"
           size="lg"
-          radius="xl"
           aria-label="색상 모드 전환"
           onClick={() => setColorScheme(computed === "dark" ? "light" : "dark")}
         >
-          {computed === "dark" ? "☀️" : "🌙"}
+          <span aria-hidden="true">{computed === "dark" ? "☀" : "☾"}</span>
         </ActionIcon>
-        <Button variant="light" color="teal" radius="xl" onClick={onOpenCoach}>
-          AI 코치
-        </Button>
-        <Badge variant="light" color={saveError ? "rose" : "teal"} size="sm" radius="xl">
+        <Text size="xs" c={saveError ? "rose" : "dimmed"} role={saveError ? "alert" : undefined}>
           {saveLabel}
-        </Badge>
+        </Text>
         {serverSession ? (
-          <Button variant="light" color="teal" radius="xl" onClick={onOpenData}>
+          <Button variant="default" onClick={onOpenData}>
             서버 연결됨 · 동기화 관리
           </Button>
         ) : (
           <>
-            <Button variant="default" radius="xl" onClick={onOpenData}>
+            <Button variant="default" onClick={onOpenData}>
               데이터 관리
             </Button>
             <Button
-              variant="gradient"
-              gradient={{ from: "teal.6", to: "teal.4", deg: 120 }}
-              radius="xl"
+              variant="subtle"
               onClick={onOpenAuth}
             >
-              클라우드에 저장하기
+              로그인
             </Button>
           </>
         )}
-        <Text fw={700}>{currentUserName ?? LOCAL_USER_NAME}</Text>
+        <Text size="sm" c="dimmed">{currentUserName ?? LOCAL_USER_NAME}</Text>
+        <Button variant="subtle" color="gray" size="xs" onClick={onOpenCoach}>AI 코치</Button>
         {serverSession ? (
-          <Button variant="default" radius="xl" onClick={onServerLogout}>
+          <Button variant="default" onClick={onServerLogout}>
             서버 로그아웃
           </Button>
         ) : null}

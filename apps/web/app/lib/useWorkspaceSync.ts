@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   InvitationRole,
   WorkspaceDto,
@@ -10,7 +10,6 @@ import type {
 } from "@living-cost-manager/shared";
 import {
   buildWorkspaceSnapshot,
-  buildSnapshotKey,
   hasLocalBudgetData,
   hydrateWorkspaceSnapshot,
   isWorkspaceSnapshotEmpty
@@ -19,17 +18,24 @@ import { type CreatedInvitation, ServerApiError, type ServerSession, isServerAut
 import { getServerSyncErrorMessage } from "./serverMessages";
 import { canManageSharing, canSyncWorkspace, findCurrentMember } from "./sharing";
 import { getAccountSyncState, getSyncStateView, summarizeBudgetSnapshot } from "./syncStatus";
+import { track } from "./analytics";
 import type { AccountSyncState } from "./syncStatus";
 import type { UIStateApi } from "./useUIState";
 import type { ServerAuthApi } from "./useServerAuth";
 import type { BudgetDataApi } from "./useBudgetData";
 import type { CoachApi } from "./useCoach";
+import { buildLivingCostBackup } from "./backup";
+import { getUserDataKey } from "./users";
+import { blockSync, canAutoSync, canReplaceLocal, createSyncSafety, establishSyncBaseline, syncScope, syncSnapshotKey as buildSnapshotKey } from "./syncSafety";
 
 interface UseWorkspaceSyncOptions {
   ui: UIStateApi;
   auth: ServerAuthApi;
   budget: BudgetDataApi;
   coach: CoachApi;
+  /** Required for sync: identity and readiness of the local budget being edited. */
+  localUserId?: string | null;
+  isLocalDataReady?: boolean;
 }
 
 /**
@@ -37,11 +43,10 @@ interface UseWorkspaceSyncOptions {
  * download, workspace switching, sharing (members & invitations), plus the
  * derived sync-state view the DataModal renders.
  */
-export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOptions) {
+export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, isLocalDataReady = false }: UseWorkspaceSyncOptions) {
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
   const [lastServerSyncedAt, setLastServerSyncedAt] = useState<Date | null>(null);
-  const [lastSyncedSnapshotKey, setLastSyncedSnapshotKey] = useState("");
   const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceDto[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDto[]>([]);
   const [invitations, setInvitations] = useState<WorkspaceInvitationDto[]>([]);
@@ -52,6 +57,32 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
   const [createdInvitation, setCreatedInvitation] = useState<CreatedInvitation | null>(null);
 
   const { serverApi, serverSession } = auth;
+  const scope = syncScope(localUserId, isLocalDataReady, serverSession?.user.id, serverSession?.workspace?.id);
+  const safety = useRef(createSyncSafety(scope));
+  const latestBudget = useRef(budget);
+  latestBudget.current = budget;
+  const latestSession = useRef(serverSession);
+  latestSession.current = serverSession;
+  const latestLocal = useRef({ localUserId, isLocalDataReady });
+  latestLocal.current = { localUserId, isLocalDataReady };
+  const [, renderSafety] = useState(0);
+  const notifySafety = () => renderSafety((value) => value + 1);
+  if (safety.current.scope !== scope) safety.current = createSyncSafety(scope);
+  const checkedScope = useRef<ReturnType<typeof createSyncSafety> | null>(null);
+  const sharingScope = useRef<ReturnType<typeof createSyncSafety> | null>(null);
+  const decisionRequest = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; safety.current = createSyncSafety(""); };
+  }, []);
+  useEffect(() => {
+    if (!safety.current.busy) auth.setIsServerBusy(false);
+  }, [scope]);
+  const isActive = (ticket: ReturnType<typeof createSyncSafety>) => mounted.current && safety.current === ticket;
+  const isCurrentSession = (session: ServerSession) =>
+    latestSession.current?.user.id === session.user.id && latestSession.current?.workspace?.id === session.workspace?.id;
+  const isChecked = isServerSnapshotChecked && checkedScope.current === safety.current && !!scope;
 
   // Refresh the sharing lists while either modal that shows them is open.
   useEffect(() => {
@@ -64,12 +95,12 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
 
   // ── derived ──────────────────────────────────────────────────────────
   const currentServerMember = useMemo(
-    () => findCurrentMember(members, serverSession?.user.id),
-    [members, serverSession?.user.id]
+    () => sharingScope.current === safety.current ? findCurrentMember(members, serverSession?.user.id) : undefined,
+    [members, serverSession?.user.id, scope]
   );
   const currentWorkspaceRole = currentServerMember?.role ?? serverSession?.workspace?.role ?? null;
   const canManageCurrentWorkspace = canManageSharing(currentWorkspaceRole);
-  const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole) && isServerSnapshotChecked;
+  const canUploadServerSnapshot = canSyncWorkspace(currentWorkspaceRole) && isChecked && !safety.current.blocked;
   const visibleCreatedInvitation =
     canManageCurrentWorkspace && createdInvitation?.workspaceId === serverSession?.workspace?.id ? createdInvitation : null;
   const localSnapshotSummary = useMemo(
@@ -77,23 +108,23 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
     [budget.currentBudgetSnapshot]
   );
   const serverSnapshotSummary = useMemo(
-    () => (serverSnapshot ? summarizeBudgetSnapshot(hydrateWorkspaceSnapshot(serverSnapshot)) : null),
-    [serverSnapshot]
+    () => (isChecked && serverSnapshot ? summarizeBudgetSnapshot(hydrateWorkspaceSnapshot(serverSnapshot)) : null),
+    [serverSnapshot, isChecked]
   );
   const hasRemoteDecision =
-    !!serverSnapshot &&
+    isChecked && !!serverSnapshot &&
     (!isWorkspaceSnapshotEmpty(serverSnapshot) || hasLocalBudgetData(budget.currentBudgetSnapshot));
   const currentSnapshotKey = useMemo(
     () => buildSnapshotKey(budget.currentBudgetSnapshot),
     [budget.currentBudgetSnapshot]
   );
-  const isServerSyncCurrent = !!lastSyncedSnapshotKey && currentSnapshotKey === lastSyncedSnapshotKey;
+  const isServerSyncCurrent = safety.current.baseline !== null && currentSnapshotKey === safety.current.baseline;
   const accountSyncState = getAccountSyncState({
     hasServerApi: !!serverApi,
     hasSession: !!serverSession,
     hasWorkspace: !!serverSession?.workspace,
     isBusy: auth.isServerBusy,
-    isSnapshotChecked: isServerSnapshotChecked,
+    isSnapshotChecked: isChecked,
     hasServerSnapshot: hasRemoteDecision,
     hasAuthFailure: auth.serverErrorKind === "auth",
     hasError: auth.serverErrorKind !== null
@@ -104,9 +135,25 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
 
   // Precomputed here (page used to inline these for the sync panel).
   const showUploadButton = Boolean(
-    serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(budget.getCurrentBudgetSnapshot())
+    isChecked && serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(budget.getCurrentBudgetSnapshot())
   );
-  const showLoadButton = Boolean(serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot));
+  const showLoadButton = Boolean(isChecked && serverSnapshot && (!isWorkspaceSnapshotEmpty(serverSnapshot) || safety.current.blocked));
+
+  function setAutoSyncEnabled(enabled: boolean) {
+    const state = safety.current;
+    state.enabled = enabled && !!state.scope && state.baseline !== null && !state.blocked && isChecked && canSyncWorkspace(currentWorkspaceRole);
+    if (enabled && !state.enabled) auth.setServerStatus("먼저 직접 업로드하거나 서버 데이터를 불러온 뒤 자동 동기화를 켜세요.");
+    notifySafety();
+  }
+
+  useEffect(() => {
+    if (!canUploadServerSnapshot || auth.isServerBusy || !canAutoSync(safety.current, currentSnapshotKey)) return;
+    const ticket = safety.current;
+    const timer = window.setTimeout(() => {
+      if (isActive(ticket) && canAutoSync(ticket, buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot()))) void uploadSnapshot(true);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [scope, currentSnapshotKey, canUploadServerSnapshot, auth.isServerBusy, safety.current.enabled, safety.current.busy]);
 
   // ── workspaces & sync decision ───────────────────────────────────────
   async function loadServerWorkspaces(session = serverSession) {
@@ -115,17 +162,27 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return [];
     }
 
+    const ticket = safety.current;
     const workspaces = await serverApi.listWorkspaces(session.token);
+    if (!isActive(ticket) || !isCurrentSession(session)) return [];
     setServerWorkspaces(workspaces);
     return workspaces;
   }
 
   async function prepareServerSyncDecision(session: ServerSession) {
+    if (latestLocal.current.localUserId !== localUserId || latestLocal.current.isLocalDataReady !== isLocalDataReady) return false;
     if (!serverApi) {
       setIsServerSnapshotChecked(false);
       return false;
     }
 
+    const request = ++decisionRequest.current;
+    const localScope = localUserId;
+    const expectedScope = syncScope(localScope, isLocalDataReady, session.user.id, session.workspace?.id);
+    // Session setters may not have rendered yet; establish the new generation now.
+    if (safety.current.scope !== expectedScope) safety.current = createSyncSafety(expectedScope);
+    const startingTicket = safety.current;
+    startingTicket.enabled = false;
     setIsServerSnapshotChecked(false);
     setServerSnapshot(null);
     // 워크스페이스/세션이 바뀔 수 있는 진입점이므로 세대를 올려 이전 워크스페이스의
@@ -141,6 +198,10 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
 
     try {
       const remoteSnapshot = await serverApi.getWorkspaceSnapshot(session.workspace.id, session.token);
+      if (!isActive(startingTicket) || request !== decisionRequest.current || !expectedScope) return false;
+      if (safety.current.baseline !== null && safety.current.version !== remoteSnapshot.syncVersion) blockSync(safety.current);
+      if (safety.current.baseline === null && !safety.current.blocked) safety.current.version = remoteSnapshot.syncVersion;
+      checkedScope.current = safety.current;
       setServerSnapshot(remoteSnapshot);
       setIsServerSnapshotChecked(true);
       // 추세 조각용 히스토리를 백그라운드로 갱신(대기하지 않음 — 동기화 흐름 안 막음).
@@ -159,6 +220,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       auth.setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
       return true;
     } catch (error) {
+      if (!isActive(startingTicket) || request !== decisionRequest.current) return false;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error) + " 서버 상태 확인 전에는 업로드를 막습니다. 로컬 저장은 계속 유지됩니다.");
       return false;
@@ -176,6 +238,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       workspace
     };
 
+    safety.current = createSyncSafety("");
     auth.saveServerSession(nextSession);
     auth.setServerSession(nextSession);
     setIsServerSnapshotChecked(false);
@@ -188,53 +251,62 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
     // 이 같은 scope 로 다시 설정; 없는 경로는 null 로 남아 어떤 응답도 커밋 안 됨).
     coach.invalidateMonthlyReport(nextSession);
     if (workspace) {
-      await prepareServerSyncDecision(nextSession);
-      await refreshSharing(nextSession);
+      if (await prepareServerSyncDecision(nextSession)) await refreshSharing(nextSession);
     } else {
       auth.setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
     }
   }
 
   async function handleSyncNow() {
+    await uploadSnapshot(false);
+  }
+
+  async function uploadSnapshot(automatic: boolean) {
     if (!serverApi || !serverSession?.workspace) {
       auth.setServerStatus("동기화할 서버 워크스페이스가 없습니다.");
       return;
     }
 
-    if (!canUploadServerSnapshot) {
-      auth.setServerStatus(isServerSnapshotChecked ? "보기 전용 권한은 서버에 업로드할 수 없습니다." : "서버 상태 확인이 끝난 뒤 업로드할 수 있습니다.");
+    const ticket = safety.current;
+    if (ticket.busy || auth.isServerBusy) return;
+    if (!canUploadServerSnapshot || !ticket.scope || ticket.blocked || ticket.version === null) {
+      auth.setServerStatus(ticket.blocked ? "동기화가 중단되었습니다. 로컬 데이터를 백업한 뒤 서버 데이터를 다시 불러오세요." : isChecked ? "보기 전용 권한은 서버에 업로드할 수 없습니다." : "로컬 사용자와 서버 상태 확인이 끝난 뒤 업로드할 수 있습니다.");
       return;
     }
 
+    if (automatic && !canAutoSync(ticket, buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot()))) return;
+    if (!automatic && ticket.baseline === null && serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot) &&
+        !window.confirm("서버의 전체 데이터를 현재 브라우저 데이터로 교체할까요? 다른 기기의 데이터도 교체됩니다.")) return;
+    ticket.busy = true;
+    const outgoing = latestBudget.current.getCurrentBudgetSnapshot();
+    const outgoingKey = buildSnapshotKey(outgoing);
     auth.setIsServerBusy(true);
     try {
       // 마지막으로 읽은 서버 버전을 실어 보낸다. 서버가 이 값과 현재 DB 값을
       // 비교해 동시 편집 충돌(409)을 판정한다.
       const nextSnapshot = buildWorkspaceSnapshot(
         serverSession.workspace.id,
-        budget.getCurrentBudgetSnapshot(),
-        serverSnapshot?.syncVersion ?? 0
+        outgoing,
+        ticket.version
       );
       const savedSnapshot = await serverApi.putWorkspaceSnapshot(serverSession.workspace.id, nextSnapshot, serverSession.token);
+      if (!isActive(ticket)) return;
+      establishSyncBaseline(ticket, outgoingKey, savedSnapshot.syncVersion);
       setServerSnapshot(savedSnapshot);
       setLastServerSyncedAt(new Date());
-      setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(savedSnapshot)));
       auth.setServerErrorKind(null);
       auth.setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
+      track({ type: "sync.push", timestamp: Date.now(), data: { workspaceId: serverSession.workspace.id } });
       // 방금 업로드가 새 히스토리 엔트리가 되므로 추세를 다시 계산해 둔다.
       // (업로드 await 중 전환이 있었다면 serverSession 의 scope 가 활성 scope 와
       //  달라 refreshMonthlyReport 가 커밋 단계에서 스스로 폐기한다.)
       void coach.refreshMonthlyReport(serverSession);
     } catch (error) {
-      // 충돌(409): 다른 기기/멤버가 먼저 저장함. 서버 최신본을 다시 받아와
-      // serverSnapshot 을 갱신하고, 사용자에게 다시 불러온 뒤 동기화하도록 안내.
+      if (!isActive(ticket)) return;
+      // Do not adopt a new version and retry a whole-snapshot overwrite.
+      blockSync(ticket);
+      // A conflict stays blocked until an explicit fresh load establishes a baseline.
       if (error instanceof ServerApiError && error.status === 409) {
-        try {
-          const latest = await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token);
-          setServerSnapshot(latest);
-        } catch {
-          // 최신본 재조회 실패는 무시 — 아래 충돌 안내는 그대로 표시한다.
-        }
         auth.setServerErrorKind("request");
         auth.setServerStatus("다른 기기나 멤버가 먼저 저장해 충돌이 났습니다. 서버 데이터를 다시 불러온 뒤 동기화하세요. 로컬 저장은 계속 유지됩니다.");
         return;
@@ -242,7 +314,8 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error) + " 로컬 저장은 계속 유지됩니다.");
     } finally {
-      auth.setIsServerBusy(false);
+      ticket.busy = false;
+      if (isActive(ticket)) { auth.setIsServerBusy(false); notifySafety(); }
     }
   }
 
@@ -252,31 +325,56 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return;
     }
 
+    const ticket = safety.current;
+    if (!ticket.scope || ticket.busy || auth.isServerBusy) return;
+    if (!window.confirm("현재 브라우저 데이터를 복구용 백업으로 저장한 뒤 서버 데이터로 교체할까요?")) return;
+    ticket.enabled = false;
+    ticket.busy = true;
+    const before = buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot());
     auth.setIsServerBusy(true);
     try {
-      const nextSnapshot = serverSnapshot ?? (await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token));
-      budget.applyBudgetSnapshot(hydrateWorkspaceSnapshot(nextSnapshot));
+      const nextSnapshot = await serverApi.getWorkspaceSnapshot(serverSession.workspace.id, serverSession.token);
+      if (!isActive(ticket)) return;
+      const local = latestBudget.current.getCurrentBudgetSnapshot();
+      if (!canReplaceLocal(ticket, safety.current, before, buildSnapshotKey(local))) {
+        auth.setServerStatus("불러오는 동안 로컬 데이터가 변경되어 교체하지 않았습니다. 다시 확인 후 불러오세요.");
+        return;
+      }
+      const backupKey = getUserDataKey(localUserId!) + ":recovery:" + Date.now() + ":sync:" + crypto.randomUUID();
+      const backup = buildLivingCostBackup(local);
+      window.localStorage.setItem(backupKey, backup);
+      if (window.localStorage.getItem(backupKey) !== backup) throw new Error("Recovery backup failed");
+      const hydrated = hydrateWorkspaceSnapshot(nextSnapshot);
+      latestBudget.current.applyBudgetSnapshot(hydrated);
+      establishSyncBaseline(ticket, buildSnapshotKey(hydrated), nextSnapshot.syncVersion);
+      checkedScope.current = ticket;
+      setIsServerSnapshotChecked(true);
       setServerSnapshot(nextSnapshot);
       setLastServerSyncedAt(new Date());
-      setLastSyncedSnapshotKey(buildSnapshotKey(hydrateWorkspaceSnapshot(nextSnapshot)));
       auth.setServerErrorKind(null);
-      auth.setServerStatus("서버 데이터를 이 브라우저에 불러왔습니다.");
+      auth.setServerStatus("서버 데이터를 불러왔습니다. 이전 데이터 복구 백업: " + backupKey);
+      track({ type: "sync.pull", timestamp: Date.now(), data: { workspaceId: serverSession.workspace.id } });
       // 복원 직후에도 히스토리 기반 추세를 채워 코치 입력에 반영한다.
       void coach.refreshMonthlyReport(serverSession);
     } catch (error) {
+      if (!isActive(ticket)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error) + " 로컬 데이터는 변경하지 않았습니다.");
     } finally {
-      auth.setIsServerBusy(false);
+      ticket.busy = false;
+      if (isActive(ticket)) { auth.setIsServerBusy(false); notifySafety(); }
     }
   }
 
   function handleStayLocalOnly() {
+    setAutoSyncEnabled(false);
     auth.setServerStatus("로컬 전용으로 계속합니다. 서버 연결은 유지되지만 데이터를 덮어쓰지 않습니다.");
   }
 
   // ── server-logout / auth-failure teardown (called from useServerAuth) ──
   function resetOnServerLogout() {
+    safety.current = createSyncSafety("");
+    decisionRequest.current += 1;
     // 진행 중인 히스토리 응답을 무효화하고 이전 사용자 추세를 즉시 비운다.
     setServerSnapshot(null);
     coach.invalidateMonthlyReport();
@@ -286,13 +384,14 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
     setInvitations([]);
     setSentInvitations([]);
     setLastServerSyncedAt(null);
-    setLastSyncedSnapshotKey("");
     clearWorkspaceScopedSharingDrafts();
   }
 
   // Session invalidated while restoring (refresh token dead too): clears less
   // than a full logout — exactly the original page-level sequence.
   function dropSessionOnAuthFailure() {
+    safety.current = createSyncSafety("");
+    decisionRequest.current += 1;
     setServerWorkspaces([]);
     coach.invalidateMonthlyReport();
     setIsServerSnapshotChecked(false);
@@ -306,6 +405,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
 
     // Only workspace owners may list the invitations they've sent (server
     // returns 403 otherwise), so guard the call by role.
+    const ticket = safety.current;
     const isOwner = session.workspace?.role === "owner";
 
     try {
@@ -316,11 +416,14 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
           ? serverApi.listWorkspaceInvitations(session.workspace.id, session.token)
           : Promise.resolve([])
       ]);
+      if (!isActive(ticket) || !isCurrentSession(session)) return;
+      sharingScope.current = ticket;
       setMembers(nextMembers);
       setInvitations(nextInvitations);
       setSentInvitations(nextSentInvitations);
       auth.setServerErrorKind(null);
     } catch (error) {
+      if (!isActive(ticket) || !isCurrentSession(session)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error));
     }
@@ -331,19 +434,22 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return;
     }
 
+    const ticket = safety.current;
     auth.setIsServerBusy(true);
     try {
       const invitation = await serverApi.createInvitation(serverSession.workspace.id, { email: inviteEmail, role: inviteRole }, serverSession.token);
+      if (!isActive(ticket) || !isCurrentSession(serverSession)) return;
       setCreatedInvitation(invitation);
       setInviteEmail("");
       auth.setServerStatus("초대를 만들었습니다. 아래 토큰을 초대받은 사용자에게 전달하세요.");
       auth.setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
+      if (!isActive(ticket) || !isCurrentSession(serverSession)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error));
     } finally {
-      auth.setIsServerBusy(false);
+      if (isActive(ticket)) auth.setIsServerBusy(false);
     }
   }
 
@@ -358,20 +464,23 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return;
     }
 
+    const ticket = safety.current;
     auth.setIsServerBusy(true);
     try {
       const accepted = await serverApi.acceptInvitation(invitationId, tokenValue, serverSession.token);
+      if (!isActive(ticket) || !isCurrentSession(serverSession)) return;
       const nextSession = await auth.resolveAndStoreServerSession({ ...serverSession, workspace: accepted.workspace });
+      if (latestLocal.current.localUserId !== localUserId || latestLocal.current.isLocalDataReady !== isLocalDataReady) return;
       clearWorkspaceScopedSharingDrafts();
       auth.setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
       auth.setServerErrorKind(null);
-      await prepareServerSyncDecision(nextSession);
-      await refreshSharing(nextSession);
+      if (await prepareServerSyncDecision(nextSession)) await refreshSharing(nextSession);
     } catch (error) {
+      if (!isActive(ticket)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error));
     } finally {
-      auth.setIsServerBusy(false);
+      if (isActive(ticket)) auth.setIsServerBusy(false);
     }
   }
 
@@ -380,17 +489,20 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return;
     }
 
+    const ticket = safety.current;
     auth.setIsServerBusy(true);
     try {
       await serverApi.updateMemberRole(serverSession.workspace.id, memberId, role, serverSession.token);
+      if (!isActive(ticket) || !isCurrentSession(serverSession)) return;
       auth.setServerStatus("멤버 권한을 변경했습니다.");
       auth.setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
+      if (!isActive(ticket)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error));
     } finally {
-      auth.setIsServerBusy(false);
+      if (isActive(ticket)) auth.setIsServerBusy(false);
     }
   }
 
@@ -403,17 +515,20 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return;
     }
 
+    const ticket = safety.current;
     auth.setIsServerBusy(true);
     try {
       await serverApi.deleteMember(serverSession.workspace.id, memberId, serverSession.token);
+      if (!isActive(ticket) || !isCurrentSession(serverSession)) return;
       auth.setServerStatus("멤버를 제거했습니다.");
       auth.setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
+      if (!isActive(ticket)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error));
     } finally {
-      auth.setIsServerBusy(false);
+      if (isActive(ticket)) auth.setIsServerBusy(false);
     }
   }
 
@@ -426,17 +541,20 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
       return;
     }
 
+    const ticket = safety.current;
     auth.setIsServerBusy(true);
     try {
       await serverApi.revokeInvitation(serverSession.workspace.id, invitationId, serverSession.token);
+      if (!isActive(ticket) || !isCurrentSession(serverSession)) return;
       auth.setServerStatus("초대를 취소했습니다.");
       auth.setServerErrorKind(null);
       await refreshSharing(serverSession);
     } catch (error) {
+      if (!isActive(ticket)) return;
       auth.setServerErrorKind(isServerAuthFailure(error) ? "auth" : "request");
       auth.setServerStatus(getServerSyncErrorMessage(error));
     } finally {
-      auth.setIsServerBusy(false);
+      if (isActive(ticket)) auth.setIsServerBusy(false);
     }
   }
 
@@ -448,10 +566,14 @@ export function useWorkspaceSync({ ui, auth, budget, coach }: UseWorkspaceSyncOp
   }
 
   return {
-    serverSnapshot,
+    autoSyncEnabled: safety.current.enabled,
+    canEnableAutoSync: isChecked && safety.current.baseline !== null && !safety.current.blocked && canSyncWorkspace(currentWorkspaceRole),
+    isSyncBlocked: safety.current.blocked,
+    setAutoSyncEnabled,
+    serverSnapshot: isChecked ? serverSnapshot : null,
     setIsServerSnapshotChecked,
-    isServerSnapshotChecked,
-    lastServerSyncedAt,
+    isServerSnapshotChecked: isChecked,
+    lastServerSyncedAt: safety.current.baseline !== null ? lastServerSyncedAt : null,
     serverWorkspaces,
     members,
     invitations,

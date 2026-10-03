@@ -27,7 +27,7 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
     writeRow(["id", "label", "billingDay", "isEndOfMonth"]),
     ...cards.map((card) => writeRow([card.id, card.label, String(card.billingDay), String(card.isEndOfMonth)])),
     "[fixedCosts]",
-    writeRow(["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay", "periodMonths", "isEndOfMonth"]),
+    writeRow(["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay", "periodMonths", "isEndOfMonth", "billingAnchorDate", "renewalStatus", "potentialMonthlySavings", "confirmedMonthlySavings"]),
     ...fixedCosts.map((item) =>
       writeRow([
         item.id,
@@ -38,7 +38,8 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
         String(item.amount),
         String(item.billingDay),
         String(item.periodMonths),
-        String(item.isEndOfMonth)
+        String(item.isEndOfMonth), item.billingAnchorDate ?? "", item.renewalStatus ?? "unreviewed",
+        String(item.potentialMonthlySavings ?? 0), String(item.confirmedMonthlySavings ?? 0)
       ])
     )
   ].join("\n");
@@ -51,6 +52,23 @@ export function parseLivingCostBackup(content: string): LivingCostBackup {
   }
 
   const sections = readSections(lines.slice(1));
+  const requiredHeaders: Record<string, string[]> = {
+    income: ["monthlyIncome"], categories: ["id", "label"], cards: ["id", "label", "billingDay"],
+    fixedCosts: ["id", "name", "categoryId", "paymentMethodId", "paymentOptionId", "amount", "billingDay"]
+  };
+  for (const [section, header] of Object.entries(requiredHeaders)) {
+    const rows = sections.get(section);
+    if (!rows || header.some((cell, index) => rows[0]?.[index] !== cell)) throw new Error("Incomplete backup: " + section);
+    if (section !== "income") {
+      const ids = new Set<string>();
+      for (const row of rows.slice(1)) {
+        if (row.length !== rows[0].length || !row[0] || !row[1] || ids.has(row[0])) throw new Error("Invalid backup row: " + section);
+        ids.add(row[0]);
+      }
+    }
+  }
+  const income = sections.get("income")!;
+  if (income.length !== 1 || income[0][1]?.trim() === "" || !Number.isFinite(Number(income[0][1]))) throw new Error("Invalid income");
   const monthlyIncome = parseIncome(sections.get("income") ?? []);
   const categories = parseCategories(sections.get("categories") ?? []);
   const cards = parseCards(sections.get("cards") ?? []);
@@ -76,6 +94,7 @@ function readSections(lines: string[]): Map<string, string[][]> {
     const sectionMatch = line.match(/^\[([a-zA-Z0-9-]+)\]$/);
     if (sectionMatch) {
       currentSection = sectionMatch[1];
+      if (sections.has(currentSection)) throw new Error("Duplicate backup section");
       sections.set(currentSection, []);
       continue;
     }
@@ -130,7 +149,11 @@ function parseFixedCosts(rows: string[][]): FixedCost[] {
         amount: sanitizeNumber(Number(row[5]), 0),
         billingDay: sanitizeNumber(Number(row[6]), 1),
         periodMonths: sanitizePeriodMonths(Number(row[7])),
-        isEndOfMonth: row[8] === "true"
+        isEndOfMonth: row[8] === "true",
+        billingAnchorDate: row[9] || null,
+        renewalStatus: (row[10] || "unreviewed") as FixedCost["renewalStatus"],
+        potentialMonthlySavings: Number(row[11] || 0),
+        confirmedMonthlySavings: Number(row[12] || 0)
       })
     );
 }
@@ -220,5 +243,5 @@ function sanitizePeriodMonths(value: number): number {
     return 1;
   }
 
-  return Math.max(1, Math.round(value * 10) / 10);
+  return Math.max(0, Math.round(value * 10) / 10);
 }

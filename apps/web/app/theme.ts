@@ -1,8 +1,6 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
-// Teal palette — hero/primary accent. Deeper, more saturated mid-band than the
-// legacy ramp; the #0f766e era is replaced by a brighter #0f9e86 hero (index 6)
-// with a luminous #2ecba6 used as the dark-mode primary (index 4).
+// Restrained teal for actions and meaningful data cues.
 const teal: MantineColorsTuple = [
   "#edfaf7", // 0
   "#d1f4ec", // 1
@@ -47,8 +45,9 @@ const amber: MantineColorsTuple = [
 
 export const theme = createTheme({
   primaryColor: "teal",
+  autoContrast: true,
   // Dark mode uses the brighter teal (index 4) for contrast on the dark canvas.
-  primaryShade: { light: 6, dark: 4 },
+  primaryShade: { light: 8, dark: 4 },
   colors: { teal, rose, amber },
   fontFamily:
     "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif",
@@ -57,15 +56,12 @@ export const theme = createTheme({
     fontWeight: "700"
   },
   fontSizes: { xs: "12px", sm: "13px", md: "14px", lg: "16px", xl: "20px" },
-  radius: { xs: "8px", sm: "10px", md: "14px", lg: "20px", xl: "28px" },
-  defaultRadius: "md",
-  // Light-mode shadow scale with a subtle teal tint. Dark-mode shadows are
-  // overridden in globals.css via scheme-scoped CSS vars (Mantine custom
-  // `shadows` cannot vary per color scheme).
+  radius: { xs: "4px", sm: "6px", md: "8px", lg: "10px", xl: "12px" },
+  defaultRadius: "sm",
   shadows: {
-    xs: "0 1px 3px rgba(0,0,0,0.07)",
-    sm: "0 1px 4px rgba(15,158,134,0.06), 0 4px 16px rgba(0,0,0,0.06)",
-    md: "0 2px 8px rgba(15,158,134,0.08), 0 8px 24px rgba(0,0,0,0.08)",
-    lg: "0 4px 20px rgba(15,158,134,0.14), 0 12px 40px rgba(0,0,0,0.12)"
+    xs: "none",
+    sm: "none",
+    md: "0 4px 16px rgba(0,0,0,0.12)",
+    lg: "0 8px 24px rgba(0,0,0,0.16)"
   }
 });

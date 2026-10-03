@@ -19,18 +19,13 @@ export function expenseRatioPercent(
 }
 
 /**
- * 공유용 한국어 요약 텍스트. 절대 수입액은 노출하지 않고 비율로만 보여
- * 과도한 정보 공유를 피한다(고정비 절대액 + 비율 + Top 카테고리).
+ * 공유용 한국어 요약. 지출과 수입 대비 비율을 함께 제공하면 수입을
+ * 역산할 수 있으므로 수입과 수입 대비 비율은 모두 제외한다.
  */
 export function buildShareSummary(input: ShareSummaryInput): string {
   const lines: string[] = [];
-  lines.push("📊 내 고정비 요약");
+  lines.push("내 고정비 요약");
   lines.push(`월 고정비 ${Math.max(0, Math.round(input.monthlyExpense)).toLocaleString("ko-KR")}원`);
-
-  const ratio = expenseRatioPercent(input);
-  if (ratio !== null) {
-    lines.push(`수입 대비 ${ratio}%`);
-  }
 
   if (
     input.topCategoryLabel &&

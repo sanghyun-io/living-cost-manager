@@ -1,9 +1,11 @@
+import { billingFieldsSchema, type BillingFields } from "@living-cost-manager/shared";
+
 export type Category = {
   id: string;
   label: string;
 };
 
-export type FixedCost = {
+export type FixedCost = BillingFields & {
   id: string;
   name: string;
   categoryId: string;
@@ -49,7 +51,7 @@ export type BudgetSummary = {
   highestCost: FixedCost | null;
 };
 
-type FixedCostInput = {
+type FixedCostInput = BillingFields & {
   id: string;
   name: string;
   categoryId?: string;
@@ -108,6 +110,7 @@ export function createCategory(label: string): Category {
 }
 
 export function createFixedCost(input: FixedCostInput): FixedCost {
+  billingFieldsSchema.parse(input);
   return updateFixedCost(
     {
       id: input.id,
@@ -128,17 +131,25 @@ export function createFixedCost(input: FixedCostInput): FixedCost {
       amount: input.amount,
       periodMonths: input.periodMonths ?? 1,
       billingDay: input.billingDay,
-      isEndOfMonth: input.isEndOfMonth ?? false
+      isEndOfMonth: input.isEndOfMonth ?? false,
+      billingAnchorDate: input.billingAnchorDate ?? null,
+      renewalStatus: input.renewalStatus ?? "unreviewed",
+      potentialMonthlySavings: input.potentialMonthlySavings ?? 0,
+      confirmedMonthlySavings: input.confirmedMonthlySavings ?? 0
     }
   );
 }
 
 export function updateFixedCost(item: FixedCost, patch: Partial<Omit<FixedCost, "id">>): FixedCost {
   const paymentMethodId = sanitizePaymentMethodId(patch.paymentMethodId ?? item.paymentMethodId);
+  const merged = { ...item, ...patch };
+  if (patch.renewalStatus && patch.renewalStatus !== "completed") merged.confirmedMonthlySavings = 0;
+  const billing = billingFieldsSchema.parse(merged);
 
   return {
     ...item,
     ...patch,
+    ...billing,
     name: sanitizeText(patch.name ?? item.name, "새 항목"),
     categoryId: sanitizeCategoryId(patch.categoryId ?? item.categoryId),
     paymentMethodId,

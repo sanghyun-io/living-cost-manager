@@ -19,6 +19,7 @@ function cost(partial: Partial<PredictableFixedCost> & { id: string }): Predicta
     periodMonths: partial.periodMonths ?? 1,
     billingDay: partial.billingDay ?? 1,
     isEndOfMonth: partial.isEndOfMonth ?? false,
+    billingAnchorDate: `2026-01-${String(partial.billingDay ?? 1).padStart(2, "0")}`,
     ...partial
   };
 }
@@ -28,39 +29,39 @@ const FROM = new Date(2026, 4, 15); // month index 4 = May
 
 describe("computeNextDueDate", () => {
   test("이번 달 billingDay 가 아직 안 지났으면 이번 달", () => {
-    const due = computeNextDueDate({ billingDay: 25, isEndOfMonth: false }, FROM);
+    const due = computeNextDueDate(cost({ id: "a", billingDay: 25 }), FROM)!;
     expect([due.getFullYear(), due.getMonth(), due.getDate()]).toEqual([2026, 4, 25]);
   });
 
   test("이번 달 billingDay 가 지났으면 다음 달", () => {
-    const due = computeNextDueDate({ billingDay: 10, isEndOfMonth: false }, FROM);
+    const due = computeNextDueDate(cost({ id: "a", billingDay: 10 }), FROM)!;
     expect([due.getFullYear(), due.getMonth(), due.getDate()]).toEqual([2026, 5, 10]);
   });
 
   test("오늘이 billingDay 면 오늘", () => {
-    const due = computeNextDueDate({ billingDay: 15, isEndOfMonth: false }, FROM);
+    const due = computeNextDueDate(cost({ id: "a", billingDay: 15 }), FROM)!;
     expect(due.getDate()).toBe(15);
     expect(due.getMonth()).toBe(4);
   });
 
   test("isEndOfMonth 는 그 달 마지막 날", () => {
-    const due = computeNextDueDate({ billingDay: 1, isEndOfMonth: true }, FROM);
+    const due = computeNextDueDate(cost({ id: "a", isEndOfMonth: true }), FROM)!;
     expect([due.getMonth(), due.getDate()]).toEqual([4, 31]); // 5월 31일
   });
 
   test("billingDay 가 그 달 일수를 넘으면 마지막 날로 클램프 (2월 31→28)", () => {
     const feb = new Date(2026, 1, 10); // 2026-02-10
-    const due = computeNextDueDate({ billingDay: 31, isEndOfMonth: false }, feb);
+    const due = computeNextDueDate(cost({ id: "a", billingDay: 31 }), feb)!;
     expect([due.getMonth(), due.getDate()]).toEqual([1, 28]); // 2월 28일
   });
 });
 
 describe("getDaysUntilDue", () => {
   test("10일 후", () => {
-    expect(getDaysUntilDue({ billingDay: 25, isEndOfMonth: false }, FROM)).toBe(10);
+    expect(getDaysUntilDue(cost({ id: "a", billingDay: 25 }), FROM)).toBe(10);
   });
   test("오늘이면 0", () => {
-    expect(getDaysUntilDue({ billingDay: 15, isEndOfMonth: false }, FROM)).toBe(0);
+    expect(getDaysUntilDue(cost({ id: "a", billingDay: 15 }), FROM)).toBe(0);
   });
 });
 

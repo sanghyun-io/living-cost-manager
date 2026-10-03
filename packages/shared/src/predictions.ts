@@ -4,6 +4,8 @@
 // 모든 날짜 함수는 기준 시각 `from: Date` 을 인자로 받는다(내부에서 Date.now()
 // 를 부르지 않음) — 테스트 가능성과 결정성을 위해서다.
 
+import { billingDateSchema } from "./billing.js";
+
 /** 예측에 필요한 고정비 최소 필드. */
 export type PredictableFixedCost = {
   id: string;
@@ -13,6 +15,7 @@ export type PredictableFixedCost = {
   periodMonths: number;
   billingDay: number;
   isEndOfMonth: boolean;
+  billingAnchorDate?: string | null;
 };
 
 function lastDayOfMonth(year: number, monthIndex: number): number {
@@ -24,46 +27,40 @@ function dateOnly(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-/**
- * 다음 납부 예정일을 계산한다.
- * - isEndOfMonth 면 그 달의 마지막 날.
- * - 아니면 billingDay(그 달 일수를 넘으면 마지막 날로 클램프).
- * - 이번 달 예정일이 from 이전이면 다음 달로 넘어간다.
- *
- * 주기(periodMonths)는 "며칠에 빠지는가"(billingDay)를 바꾸지 않으므로, 표시용
- * 다음 납부일은 billingDay 기준의 다음 도래일로 본다(월 1회 도래 가정). 분기/
- * 연 단위 항목도 어느 달인지 정보가 없으므로 이 근사가 가장 정직하다.
- */
+type Schedule = Pick<PredictableFixedCost, "billingDay" | "isEndOfMonth"> & Partial<Pick<PredictableFixedCost, "periodMonths" | "billingAnchorDate">>;
+
+/** Anchor determines the recurrence month and day; end-of-month overrides day.
+ * Missing anchors and non-integral month periods cannot produce a known date. */
 export function computeNextDueDate(
-  item: Pick<PredictableFixedCost, "billingDay" | "isEndOfMonth">,
+  item: Schedule,
   from: Date
-): Date {
+): Date | null {
+  if (!billingDateSchema.safeParse(item.billingAnchorDate).success ||
+      !Number.isInteger(item.periodMonths) || !item.periodMonths || item.periodMonths < 1 || item.periodMonths > 120 ||
+      !Number.isFinite(from.getTime())) return null;
+  const [year, month, day] = item.billingAnchorDate!.split("-").map(Number);
+  const period = item.periodMonths;
   const base = dateOnly(from);
-  const y = base.getFullYear();
-  const m = base.getMonth();
-  const fromDay = base.getDate();
-
-  const dayInMonth = (year: number, monthIndex: number) =>
-    item.isEndOfMonth
-      ? lastDayOfMonth(year, monthIndex)
-      : Math.min(item.billingDay, lastDayOfMonth(year, monthIndex));
-
-  const thisMonthDay = dayInMonth(y, m);
-  if (thisMonthDay >= fromDay) {
-    return new Date(y, m, thisMonthDay);
-  }
-  // 다음 달
-  const ny = m === 11 ? y + 1 : y;
-  const nm = m === 11 ? 0 : m + 1;
-  return new Date(ny, nm, dayInMonth(ny, nm));
+  const elapsed = (base.getFullYear() - year) * 12 + base.getMonth() - (month - 1);
+  let step = Math.max(0, Math.floor(elapsed / period));
+  const occurrence = (n: number) => {
+    const start = new Date(year, month - 1 + n * period, 1);
+    const last = lastDayOfMonth(start.getFullYear(), start.getMonth());
+    start.setDate(item.isEndOfMonth ? last : Math.min(day, last));
+    return start;
+  };
+  let due = occurrence(step);
+  if (due < base) due = occurrence(++step);
+  return due;
 }
 
 /** from 부터 다음 납부일까지 남은 일수(0 = 오늘). */
 export function getDaysUntilDue(
-  item: Pick<PredictableFixedCost, "billingDay" | "isEndOfMonth">,
+  item: Schedule,
   from: Date
-): number {
+): number | null {
   const due = computeNextDueDate(item, from);
+  if (!due) return null;
   const base = dateOnly(from);
   const ms = due.getTime() - base.getTime();
   return Math.round(ms / 86_400_000);
@@ -84,15 +81,39 @@ export function getUpcomingDues<T extends PredictableFixedCost>(
   from: Date,
   withinDays?: number
 ): UpcomingDue<T>[] {
-  const result = items.map((item) => {
+  const result: UpcomingDue<T>[] = items.flatMap((item) => {
+    if (item.amount <= 0) return [];
     const dueDate = computeNextDueDate(item, from);
-    return { item, dueDate, daysUntil: getDaysUntilDue(item, from) };
+    if (!dueDate) return [];
+    return [{ item, dueDate, daysUntil: getDaysUntilDue(item, from)! }];
   });
   const filtered =
     typeof withinDays === "number"
       ? result.filter((r) => r.daysUntil <= withinDays)
       : result;
   return filtered.sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+/** Actual full charges in [today, today + 30 days), including repeated occurrences. */
+export function buildThirtyDayDueSummary<T extends PredictableFixedCost>(items: T[], from: Date) {
+  const end = dateOnly(from);
+  end.setDate(end.getDate() + 30);
+  const dues: UpcomingDue<T>[] = [];
+  let unknownCount = 0;
+  for (const item of items) {
+    if (item.amount <= 0) continue;
+    let due = computeNextDueDate(item, from);
+    if (!due) { unknownCount++; continue; }
+    while (due < end) {
+      dues.push({ item, dueDate: due, daysUntil: Math.round((due.getTime() - dateOnly(from).getTime()) / 86400000) });
+      const next: Date = new Date(due);
+      next.setDate(next.getDate() + 1);
+      due = computeNextDueDate(item, next)!;
+    }
+  }
+  dues.sort((a, b) => a.daysUntil - b.daysUntil);
+  return { dues, total: dues.reduce((sum, due) => sum + due.item.amount, 0), unknownCount,
+    monthlyNormalized: items.reduce((sum, item) => sum + monthlyEquivalent(item), 0) };
 }
 
 /** 월 환산 금액(주기로 나눈 값). periodMonths<=0 이면 0. */

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Checkbox, Group, NumberInput, Stack, TextInput } from "@mantine/core";
+import { Button, Checkbox, Group, NumberInput, Stack, Text, TextInput } from "@mantine/core";
 import { isDefaultCard, type PaymentCard } from "../../lib/cards";
 import { ModalShell } from "./ModalShell";
 
@@ -49,6 +49,7 @@ export function CardModal({
 
   return (
     <ModalShell opened={opened} sectionLabel="관리" title="카드 관리" onClose={onClose}>
+      <Text size="sm">카드 대금 결제일은 참고 정보입니다. 구독의 실제 청구일·갱신 알림은 각 항목의 기준 납부일로 계산하며, 카드 변경으로 바뀌지 않습니다.</Text>
       <Group align="flex-end" gap="xs">
         <TextInput
           label="카드 이름"

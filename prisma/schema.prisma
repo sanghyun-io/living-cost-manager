@@ -168,6 +168,10 @@ model FixedCost {
   paymentOptionKey String?
   amount          Int
   periodMonths    Float     @default(1)
+  billingAnchorDate String?
+  renewalStatus String @default("unreviewed")
+  potentialMonthlySavings Int @default(0)
+  confirmedMonthlySavings Int @default(0)
   billingDay      Int
   isEndOfMonth    Boolean   @default(false)
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

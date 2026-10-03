@@ -7,7 +7,10 @@ function isTestIsolatedDatabaseUrl(databaseUrl: string): boolean {
   const databaseName = parsedUrl.pathname.replace(/^\//, "").toLowerCase();
   const schemaName = parsedUrl.searchParams.get("schema")?.toLowerCase() ?? "";
 
-  return hasTestMarker(databaseName) || hasTestMarker(schemaName);
+  return ["postgres:", "postgresql:"].includes(parsedUrl.protocol)
+    && ["localhost", "127.0.0.1", "[::1]"].includes(parsedUrl.hostname)
+    && hasTestMarker(databaseName)
+    && hasTestMarker(schemaName);
 }
 
 function hasTestMarker(value: string): boolean {
@@ -16,7 +19,7 @@ function hasTestMarker(value: string): boolean {
 
 export function resolveApiTestDatabaseUrl(): string {
   const databaseUrl =
-    process.env.API_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+    process.env.API_TEST_DATABASE_URL;
 
   if (!databaseUrl) {
     throw new Error(

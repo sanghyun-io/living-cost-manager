@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Collapse,
+  Divider,
   Group,
   PasswordInput,
   Select,
@@ -59,7 +60,8 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
     onLoadSnapshot,
     onStayLocal,
     onOpenAuth,
-    onExportBackup
+    onExportBackup,
+    onOpenDeleteAccount
   } = sync;
 
   const [pwOpen, setPwOpen] = useState(false);
@@ -187,6 +189,32 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
               </Button>
             </form>
           </Collapse>
+
+          <Divider mt="sm" mb="xs" />
+          <label>
+            <input type="checkbox" checked={sync.autoSyncEnabled}
+              disabled={!sync.canEnableAutoSync && !sync.autoSyncEnabled}
+              onChange={(event) => sync.onAutoSyncChange(event.currentTarget.checked)} />
+            변경사항 자동 업로드 (이 화면을 열어 둔 동안)
+          </label>
+          <Text size="xs" c="dimmed">먼저 직접 동기화한 뒤 켤 수 있습니다. 충돌 시 중단하며 서버 변경을 자동으로 덮어쓰지 않습니다.</Text>
+          <Group justify="space-between">
+            <div>
+              <Text size="xs" fw={700} c="rose">계정 삭제</Text>
+              <Text size="xs" c="dimmed">
+                계정과 서버 데이터가 영구 삭제되며 되돌릴 수 없습니다.
+              </Text>
+            </div>
+            <Button
+              variant="light"
+              color="rose"
+              size="xs"
+              onClick={onOpenDeleteAccount}
+              disabled={isServerBusy}
+            >
+              계정 삭제…
+            </Button>
+          </Group>
         </>
       ) : null}
 

@@ -46,6 +46,9 @@ export interface SharingProps {
 
 // Grouped props for the server-sync section of DataModal.
 export interface SyncProps {
+  autoSyncEnabled: boolean;
+  canEnableAutoSync: boolean;
+  onAutoSyncChange: (enabled: boolean) => void;
   serverSession: ServerSession | null;
   syncStateView: SyncStateView;
   displayedSyncState: AccountSyncState;
@@ -76,6 +79,8 @@ export interface SyncProps {
   onStayLocal: () => void;
   onOpenAuth: () => void;
   onExportBackup: () => void;
+  // Opens the two-step account-deletion confirmation modal (Settings > Account).
+  onOpenDeleteAccount: () => void;
 }
 
 // Props for the DataModal container (import/export + server sync + sharing).
