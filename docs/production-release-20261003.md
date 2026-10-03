@@ -83,9 +83,9 @@ gamja-ops `verify-assets.rb` 통과. `check-local-drift.rb`는 기존 다른 서
 - 검색 노출/순위/실제 유입 성과는 배포만으로 입증되지 않는다. 현재 중앙 analytics 수집이나 새 유료 리소스는 도입하지 않았다.
 - 미래 자동 배포를 재개하려면 릴리스 source branch와 원격 main의 기존 배포 소유권 변경을 검토하여 통합해야 한다. 현재 production identity는 위 고정 SHA이며 GitHub Actions 완료를 주장하지 않는다.
 - 이전 FE rollback deployment는 위 baseline 항목에 있다. DB 필드 보존을 위해 FE rollback 중에도 호환 API를 유지한다. 정상 고객 쓰기가 있는 상태에서 이전 DB dump를 복원하지 않는다.
-# Durability follow-up (2026-10-04 KST)
+## Durability follow-up (2026-10-04 KST)
 
-This section supersedes the initial release's unresolved registry/main notes below.
+This section supersedes the initial release's unresolved registry/main notes above.
 At recheck the SHA85 API returned `{"ok":true}`; its release SHA was in the
 `X-Release-Sha` header, not its JSON body. FE metadata matched that header.
 
@@ -107,3 +107,38 @@ At recheck the SHA85 API returned `{"ok":true}`; its release SHA was in the
   to avoid stale offline release metadata and HTML fallback for missing assets.
 - Follow-up validation: shared 92, web 113, health 6 and service-worker 3 tests
   passed; API and frontend production builds passed. No new migration is needed.
+
+### Completed paired promotion
+
+- Merge commit `b9aee691b09662849f5cca3a3690d0e3c32d3130` has parents
+  `f884150` and `1232c2c`; Git SSH advanced remote main normally, without force.
+  Existing dirty checkout was preserved. Independent final review found no paired
+  deployment blocker; its Compose build-argument omission was also corrected.
+- OCI image built from that exact Git archive, pushed, and remote manifest/pull
+  verified. Runtime Compose pins
+  `yny.ocir.io/axuouply2298/livingcost/backend@sha256:713d1e83d71a173f02072cf2619cf1b85ff8101c6176623e2438d8b44d0a0bdc`.
+  Only backend was recreated; no migration ran. Restart policy remains
+  `unless-stopped`; fresh container identity and DB `SELECT 1` passed.
+- Pages production deployment `526b4024-b7c2-4e24-b094-3f28b4f6f4a0` succeeded
+  at `2026-10-03T15:14:42.210768Z`, trigger `ad_hoc`, clean commit SHA above.
+- Direct curl verification at `2026-10-03T15:15:39Z`: API HTTP200,
+  `X-Release-Sha` and JSON `commitSha` match the full merge SHA;
+  `releaseId` is `lcm-<SHA>`. Both canonical FE and pages.dev `/release-meta.json`
+  match all identity values. This supersedes SHA85's header-only API response.
+- Five guides HTTP200/indexable/canonical/single H1; dashboard noindex; sitemap
+  contains five URLs; nonexistent guide404. Chromium 390px/1440px verified local
+  add/reload persistence, no horizontal overflow or runtime errors, current release
+  identity and failed offline metadata request. JS-disabled Korean guide passed.
+  Screenshots: `lcm-ui-preview/durable-dashboard-{390,1440}.png` in approved temp root.
+- `/opt/livingcost/releases/20261004-durability/` contains protected Compose backup,
+  DB dump (37,095 bytes), checked SHA256/TOC, exact source and static FE archive.
+  Existing FixedCost count/full-row digest matched before and after deployment.
+  Reminder timer remained active. Temporary registry credentials were logged out.
+- Safe paired rollback for THIS follow-up is SHA85: its registry digest is recorded
+  above and its matching Pages deployment is `6bf89f34-d2e9-48fd-a036-8f8a29c270e4`.
+  SHA85 already preserves billing fields. Pin that verified digest, recreate only
+  backend, roll Pages back to that deployment, then verify API header and FE commit
+  equal SHA85 plus DB readiness. SHA85 body is only `{"ok":true}`. No DB restore
+  or migration is part of this rollback. The older `bef2f76` API remains unsafe.
+- Ops registry validation passes; pre-existing historical local-drift errors remain.
+  Search Console requires authenticated property access; indexing is not claimed.
