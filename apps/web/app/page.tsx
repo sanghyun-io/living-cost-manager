@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Button, Text } from "@mantine/core";
 import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
+import { renewalQueue } from "./lib/costViews";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
@@ -161,9 +162,18 @@ export default function Home() {
       <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
 
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
+        <section aria-label="갱신 검토 작업목록">
+          <Text fw={700}>갱신 검토 작업목록</Text>
+          <Text size="sm" c="dimmed">30일 이내 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
+          {renewalQueue(budget.fixedCosts).length === 0 ? <Text size="sm">현재 검토할 작업이 없습니다.</Text> : null}
+          {renewalQueue(budget.fixedCosts).map((item) => <Button key={item.id} variant="light" m={4} onClick={() => budget.revealItem(item.id)}>
+            {item.name} · {item.renewalStatus === "cancel-planned" ? "해지 예정" : item.renewalStatus === "change-review" ? "변경 검토" : "임박 미검토"} 편집
+          </Button>)}
+        </section>
         {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
         <FixedCostTable
           focusItemId={budget.focusItemId}
+          focusRequest={budget.focusRequest}
           costFilters={budget.costFilters}
           onCostFilters={budget.setCostFilters}
           onResetFilters={budget.resetCostFilters}

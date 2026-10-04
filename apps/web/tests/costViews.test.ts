@@ -1,7 +1,18 @@
 import { expect, test } from "vitest";
 import { createFixedCost } from "../app/lib/budget";
-import { duplicateCost, emptyCostFilters, filterCosts } from "../app/lib/costViews";
+import { duplicateCost, emptyCostFilters, filterCosts, renewalQueue } from "../app/lib/costViews";
 const make = (id: string, patch = {}) => createFixedCost({ id, name: id, amount: 100, periodMonths: 1, billingDay: 1, ...patch });
+test("renewal queue follows review transitions without changing billed amounts or savings", () => {
+  const item = make("due", { billingAnchorDate: "2026-10-06" });
+  const now = new Date(2026, 9, 5);
+  expect(renewalQueue([item, make("unknown")], now)).toEqual([item]);
+  for (const renewalStatus of ["keep", "completed"] as const) expect(renewalQueue([{ ...item, renewalStatus }], now)).toEqual([]);
+  for (const renewalStatus of ["cancel-planned", "change-review"] as const) {
+    const planned = { ...item, renewalStatus, billingAnchorDate: null, potentialMonthlySavings: 50 };
+    expect(renewalQueue([planned], now)).toEqual([planned]);
+    expect(planned.amount).toBe(100); expect(planned.confirmedMonthlySavings).toBe(0);
+  }
+});
 test("duplicate preserves billing but resets all review savings without mutating original", () => {
   const original = make("original", { renewalStatus: "completed", confirmedMonthlySavings: 900, potentialMonthlySavings: 300, billingAnchorDate: "2024-02-29", isEndOfMonth: true });
   const before = structuredClone(original);

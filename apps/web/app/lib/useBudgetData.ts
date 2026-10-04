@@ -58,6 +58,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [costFilters, setCostFilters] = useState(emptyCostFilters);
   const [focusItemId, setFocusItemId] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
   const [deletedBatch, setDeletedBatch] = useState<{ userId: string; items: FixedCost[] } | null>(null);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
@@ -257,6 +258,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     setCategoryFilterId("all");
     setCostFilters(emptyCostFilters);
     setFocusItemId(id);
+    setFocusRequest((request) => request + 1);
   }
   function handleEnterDeleteMode() {
     setIsDeleteMode(true);
@@ -481,6 +483,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     monthlyIncome,
     fixedCosts,
     focusItemId,
+    focusRequest,
     costFilters,
     setCostFilters,
     resetCostFilters: () => { setCostFilters(emptyCostFilters); setCategoryFilterId("all"); },
@@ -508,6 +511,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     handlePaymentOptionChange,
     handleAddItem,
     handleDuplicateItem,
+    revealItem,
     handleQuickAdd,
     handleEnterDeleteMode,
     handleCancelDeleteMode,

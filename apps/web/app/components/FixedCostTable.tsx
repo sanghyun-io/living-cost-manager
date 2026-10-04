@@ -10,6 +10,7 @@ import { formatWon, getPaymentOptions } from "../lib/formatting";
 
 interface FixedCostTableProps {
   focusItemId: string | null;
+  focusRequest: number;
   costFilters: CostFilters;
   onCostFilters: (filters: CostFilters) => void;
   onResetFilters: () => void;
@@ -62,6 +63,7 @@ function categoryColor(id: string): string {
 
 export function FixedCostTable({
   focusItemId,
+  focusRequest,
   costFilters, onCostFilters, onResetFilters,
   categories,
   cards,
@@ -93,7 +95,7 @@ export function FixedCostTable({
   const focusInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusItemId) { focusInput.current?.focus(); focusInput.current?.select(); }
-  }, [focusItemId]);
+  }, [focusItemId, focusRequest]);
   const quickPreview = previewQuickAdd(quickAddText);
 
   function submitQuickAdd() {
