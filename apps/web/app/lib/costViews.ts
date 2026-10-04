@@ -3,6 +3,9 @@ import { type FixedCost } from "./budget";
 
 export type CostFilters = { query: string; method: string; review: string; sort: string };
 export const emptyCostFilters: CostFilters = { query: "", method: "all", review: "all", sort: "original" };
+export function duplicateCost(item: FixedCost, id: string): FixedCost {
+  return { ...item, id, name: item.name + " (복사)", renewalStatus: "unreviewed", potentialMonthlySavings: 0, confirmedMonthlySavings: 0 };
+}
 export function filterCosts(items: FixedCost[], filters: CostFilters, now = new Date()) {
   const query = filters.query.trim().toLocaleLowerCase();
   const result = items.filter((item) => item.name.toLocaleLowerCase().includes(query)

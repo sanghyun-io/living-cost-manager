@@ -36,7 +36,7 @@ import type { LocalBudgetSnapshot } from "./snapshot";
 import type { CardDraft } from "../components/modals/CardModal";
 import type { UIStateApi } from "./useUIState";
 import type { LocalUsersApi } from "./useLocalUsers";
-import { emptyCostFilters, filterCosts } from "./costViews";
+import { duplicateCost, emptyCostFilters, filterCosts } from "./costViews";
 
 interface UseBudgetDataOptions {
   users: LocalUsersApi;
@@ -214,6 +214,16 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     });
     setFixedCosts((items) => [...items, nextItem]);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
+  }
+
+  function handleDuplicateItem(id: string) {
+    const original = fixedCosts.find((item) => item.id === id);
+    if (!original) return;
+    const copy = duplicateCost(original, "cost-" + crypto.randomUUID());
+    setFixedCosts((items) => [...items, copy]);
+    setCategoryFilterId("all");
+    setCostFilters(emptyCostFilters);
+    setImportMessage(copy.name + " 항목을 복제했습니다.");
   }
 
   // 자연어 한 줄("넷플릭스 17000원 매달")을 파싱해 고정비를 추가한다.
@@ -470,6 +480,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     handlePaymentMethodChange,
     handlePaymentOptionChange,
     handleAddItem,
+    handleDuplicateItem,
     handleQuickAdd,
     handleEnterDeleteMode,
     handleCancelDeleteMode,

@@ -176,6 +176,7 @@ export default function Home() {
           onPaymentMethodChange={budget.handlePaymentMethodChange}
           onPaymentOptionChange={budget.handlePaymentOptionChange}
           onAddItem={budget.handleAddItem}
+          onDuplicateItem={budget.handleDuplicateItem}
           onQuickAdd={budget.handleQuickAdd}
           onEnterDeleteMode={budget.handleEnterDeleteMode}
           onCancelDeleteMode={budget.handleCancelDeleteMode}

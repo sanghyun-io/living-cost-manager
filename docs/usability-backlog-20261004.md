@@ -22,6 +22,7 @@
 ## 완료 게이트
 
 ### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+- 3 완료 — UUID 복제, 청구 필드 보존/검토·절감 초기화, 필터 해제로 복제본 노출. costViews 3/3 통과, 원본 불변 검증. commit: `feat(usability): duplicate costs with fresh review state`.
 - 2 완료 — 이름/결제수단/검토 조합, 실제 청구금액/납부일 정렬, 초기화/빈 결과. costViews + budgetUsability 3/3 통과. commit: `feat(usability): combined cost search filters and sorting`.
 - 1 완료 — 브라우저 저장 표시, quota 재시도, 현재 메모리 백업. `budgetUsability` 1/1 통과 (quota 실패→최신 수입 복구, 프로필 쓰기 차단). commit: `feat(usability): retry browser storage and export unsaved data`. shared 선행 build 필요 확인.
 

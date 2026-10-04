@@ -1,7 +1,14 @@
 import { expect, test } from "vitest";
 import { createFixedCost } from "../app/lib/budget";
-import { emptyCostFilters, filterCosts } from "../app/lib/costViews";
+import { duplicateCost, emptyCostFilters, filterCosts } from "../app/lib/costViews";
 const make = (id: string, patch = {}) => createFixedCost({ id, name: id, amount: 100, periodMonths: 1, billingDay: 1, ...patch });
+test("duplicate preserves billing but resets all review savings without mutating original", () => {
+  const original = make("original", { renewalStatus: "completed", confirmedMonthlySavings: 900, potentialMonthlySavings: 300, billingAnchorDate: "2024-02-29", isEndOfMonth: true });
+  const before = structuredClone(original);
+  const copy = duplicateCost(original, "new-id");
+  expect(copy).toEqual({ ...original, id: "new-id", name: "original (복사)", renewalStatus: "unreviewed", confirmedMonthlySavings: 0, potentialMonthlySavings: 0 });
+  expect(original).toEqual(before);
+});
 test("combined name, method, review filtering and reset preserve source", () => {
   const items = [make("Alpha", { renewalStatus: "keep" }), make("Beta"), make("ALPHA 2", { paymentMethodId: "credit-card" })];
   expect(filterCosts(items, { ...emptyCostFilters, query: " alpha ", method: "bank-transfer", review: "keep" }).map(x => x.id)).toEqual(["Alpha"]);

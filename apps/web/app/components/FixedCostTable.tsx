@@ -22,6 +22,7 @@ interface FixedCostTableProps {
   onPaymentMethodChange: (item: FixedCost, methodId: FixedCost["paymentMethodId"]) => void;
   onPaymentOptionChange: (item: FixedCost, optionId: string) => void;
   onAddItem: () => void;
+  onDuplicateItem: (id: string) => void;
   onQuickAdd?: (text: string) => void;
   onEnterDeleteMode: () => void;
   onCancelDeleteMode: () => void;
@@ -70,6 +71,7 @@ export function FixedCostTable({
   onPaymentMethodChange,
   onPaymentOptionChange,
   onAddItem,
+  onDuplicateItem,
   onQuickAdd,
   onEnterDeleteMode,
   onCancelDeleteMode,
@@ -218,6 +220,7 @@ export function FixedCostTable({
                   value={item.name}
                   onChange={(event) => onItemChange(item.id, { name: event.currentTarget.value })}
                 />
+                {!isDeleteMode ? <Button variant="subtle" size="compact-xs" aria-label={`${item.name} 복제`} onClick={() => onDuplicateItem(item.id)}>복제</Button> : null}
               </span>
               <span>
                 <Group gap={6} wrap="nowrap" align="center">
