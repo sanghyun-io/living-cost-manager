@@ -31,6 +31,12 @@ export function setupBudget() {
   return { render, users, ui, storage, values, save: () => hooks.effects[2]() };
 }
 beforeEach(() => { hooks.slots = []; vi.unstubAllGlobals(); });
+test("invalid quick input never creates a placeholder row", () => {
+  const h = setupBudget();
+  const before = h.render().fixedCosts;
+  expect(h.render().handleQuickAdd("금액 없음")).toBe(false);
+  expect(h.render().fixedCosts).toEqual(before);
+});
 
 test("undo merges deleted rows without reverting later edits; replacement and profiles invalidate it", () => {
   const h = setupBudget();

@@ -22,6 +22,7 @@
 ## 완료 게이트
 
 ### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+- 5 완료 — 파싱 미리보기/기본 매월 명시, 누락·범위 오류 입력 보존, IME Enter 차단. quickAdd + budgetUsability 4/4 통과. 브라우저 IME 검증은 10번 통합 명령에 포함. commit: `feat(usability): preview and validate quick entry`.
 - 4 완료 — 최근 삭제 병합 복원, 후속 편집 보존, 프로필 로드/스냅샷 교체/가져오기 무효화, 삭제된 참조 보정. budgetUsability 2/2 통과. 연속 추가 ID 충돌도 UUID로 해결. commit: `feat(usability): undo deletion without reverting subsequent edits`.
 - 3 완료 — UUID 복제, 청구 필드 보존/검토·절감 초기화, 필터 해제로 복제본 노출. costViews 3/3 통과, 원본 불변 검증. commit: `feat(usability): duplicate costs with fresh review state`.
 - 2 완료 — 이름/결제수단/검토 조합, 실제 청구금액/납부일 정렬, 초기화/빈 결과. costViews + budgetUsability 3/3 통과. commit: `feat(usability): combined cost search filters and sorting`.

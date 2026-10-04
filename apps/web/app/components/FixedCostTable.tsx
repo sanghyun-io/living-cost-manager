@@ -4,6 +4,7 @@ import { suggestCategoryId, computeNextDueDate, billingDateSchema } from "@livin
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
 import type { CostFilters } from "../lib/costViews";
+import { previewQuickAdd } from "../lib/quickAdd";
 import { formatWon, getPaymentOptions } from "../lib/formatting";
 
 interface FixedCostTableProps {
@@ -23,7 +24,7 @@ interface FixedCostTableProps {
   onPaymentOptionChange: (item: FixedCost, optionId: string) => void;
   onAddItem: () => void;
   onDuplicateItem: (id: string) => void;
-  onQuickAdd?: (text: string) => void;
+  onQuickAdd?: (text: string) => boolean | void;
   onEnterDeleteMode: () => void;
   onCancelDeleteMode: () => void;
   onConfirmDeleteItems: () => void;
@@ -86,13 +87,14 @@ export function FixedCostTable({
   const filterData = [{ value: "all", label: "전체" }, ...categoryData];
   const methodData = PAYMENT_METHODS.map((m) => ({ value: m.id, label: m.label }));
   const [quickAddText, setQuickAddText] = useState("");
+  const quickPreview = previewQuickAdd(quickAddText);
 
   function submitQuickAdd() {
     const text = quickAddText.trim();
-    if (text.length === 0 || !onQuickAdd) {
+    if (!quickPreview.valid || !onQuickAdd) {
       return;
     }
-    onQuickAdd(text);
+    if (onQuickAdd(text) === false) return;
     setQuickAddText("");
   }
 
@@ -146,18 +148,21 @@ export function FixedCostTable({
             value={quickAddText}
             onChange={(event) => setQuickAddText(event.currentTarget.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                 event.preventDefault();
                 submitQuickAdd();
               }
             }}
           />
-          <Button onClick={submitQuickAdd} disabled={quickAddText.trim().length === 0}>
+          <Button onClick={submitQuickAdd} disabled={!quickPreview.valid}>
             추가
           </Button>
         </Group>
       ) : null}
       <div className="filter-bar" aria-label="카테고리 필터">
+        {quickAddText && !isDeleteMode ? <Text role="status" size="sm">{quickPreview.valid
+          ? `미리보기: ${quickPreview.name} · ${formatWon(quickPreview.amount!)} · ${quickPreview.periodMonths}개월${quickPreview.defaultPeriod ? " (주기 생략: 매월)" : ""}`
+          : "이름과 유효한 금액을 입력하세요. 입력 내용은 유지됩니다."}</Text> : null}
         <TextInput label="이름 검색" value={costFilters.query} onChange={(e) => onCostFilters({ ...costFilters, query: e.currentTarget.value })} />
         <Select label="결제수단 필터" value={costFilters.method} data={[{ value: "all", label: "모든 결제수단" }, ...methodData]} onChange={(value) => onCostFilters({ ...costFilters, method: value ?? "all" })} />
         <Select label="검토 상태 필터" value={costFilters.review} data={[{ value: "all", label: "모든 검토 상태" }, { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" }, { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" }, { value: "completed", label: "검토 완료" }]} onChange={(value) => onCostFilters({ ...costFilters, review: value ?? "all" })} />

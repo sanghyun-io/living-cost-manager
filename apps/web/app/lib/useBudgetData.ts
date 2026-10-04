@@ -29,7 +29,7 @@ import { buildPieBackground, clampBillingDay, mergeCards, mergeCategories } from
 import { getUserDataKey, getUserErasureKey } from "./users";
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, parseBudgetSnapshot } from "./storage";
 import { seedFixedCosts, emptyBudgetSnapshot } from "./seedData";
-import { parseFixedCostInput } from "@living-cost-manager/shared";
+import { previewQuickAdd } from "./quickAdd";
 import { getCurrentBudgetSnapshotFromState } from "./snapshot";
 import { track } from "./analytics";
 import type { LocalBudgetSnapshot } from "./snapshot";
@@ -232,7 +232,8 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   // 자연어 한 줄("넷플릭스 17000원 매달")을 파싱해 고정비를 추가한다.
   // 추출 실패한 필드는 handleAddItem 과 동일한 기본값으로 폴백한다.
   function handleQuickAdd(text: string) {
-    const parsed = parseFixedCostInput(text);
+    const parsed = previewQuickAdd(text);
+    if (!parsed.valid) return false;
     const nextItem = createFixedCost({
       id: "cost-" + crypto.randomUUID(),
       name: parsed.name ?? "새 고정비",
