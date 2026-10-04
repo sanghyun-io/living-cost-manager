@@ -14,6 +14,9 @@ try {
     const errors = [];
     await context.route("**/*", route => {
       if (!["GET", "HEAD"].includes(route.request().method())) { errors.push("Write request blocked"); return route.abort(); }
+      // Cloudflare injects this analytics script on the public origin. Keep it
+      // blocked so production verification remains local-data-only.
+      if (process.env.LCM_E2E_PUBLIC === "1" && new URL(route.request().url()).origin === "https://static.cloudflareinsights.com") return route.abort();
       if (new URL(route.request().url()).origin !== origin) { errors.push("External request blocked"); return route.abort(); }
       return route.continue();
     });

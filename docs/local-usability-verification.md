@@ -47,6 +47,16 @@ LCM_VERIFY_INJECT_FAILURE=after-db pnpm verify:usability
 
 이 명령은 의도적으로 실패하고 임시 PostgreSQL 종료/삭제 메시지를 출력해야 한다. 운영 배포/공개 서비스 접근은 포함하지 않는다. 산출물 `apps/web/out`, 패키지 `dist`는 일반 로컬 build 결과이다.
 
+## 공개 FE 검증
+
+운영 FE의 로컬 데이터 전용 smoke는 별도 명령으로 실행한다:
+
+```sh
+LCM_E2E_PUBLIC=1 LCM_E2E_ORIGIN=https://living-cost-manager.gamja.top node scripts/usability-browser.mjs
+```
+
+새 브라우저 context만 사용하며 GET/HEAD 외 요청과 외부 요청을 차단하고 실패 처리한다. 운영 Cloudflare analytics script는 전송하지 않고 조용히 차단한다. API 동기화 스크립트는 운영에서 실행하지 않는다.
+
 ## 복구 사본 보존
 
 새 `:recovery:v1:import:`와 `:recovery:v1:corrupt:` 네임스페이스에서만 종류별 최근 3개를 보존한다. 손상 원본은 가공 없이 저장하고 동일 원본의 반복 사본은 만들지 않는다. quota 실패 시 가장 최근 기존 사본을 남기고 더 오래된 관리 대상 사본만 정리하여 재시도한다. 그래도 실패하면 가져오기를 중단한다. 기존/알 수 없는 키와 과거 백업은 자동 삭제하지 않는다. 저장소의 동기 확인·쓰기에는 탭 간 원자적 CAS 보장이 없으며, 가져오기 효과에서의 지연 재저장은 하지 않는다.

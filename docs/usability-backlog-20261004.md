@@ -21,6 +21,8 @@
 
 ## 완료 게이트
 
+**운영 배포 완료:** source `e44808e28da2f9d91b1b50bd41ed6cb0f079f786`, 352 tests 및 독립 리뷰 통과, OCI digest/Pages paired promotion과 공개 desktop/mobile 검증 완료. [실제 배포 증거](./usability-release-20261005.md)를 따른다.
+
 후속 Owner 지시로 열 가지 기능의 main 통합·OCI/Pages 배포·공개 검증까지 승인되었다. 검증 명령/격리 및 정리 절차는 [로컬 검증 안내](./local-usability-verification.md)를 따른다. 아래 로컬 전용 체크포인트는 당시 실행 범위의 기록이며 현재 배포 범위를 제한하지 않는다.
 
 ### 구현 체크포인트 (이전 로컬 구현 단계)
