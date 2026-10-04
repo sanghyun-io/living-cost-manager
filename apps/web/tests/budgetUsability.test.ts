@@ -32,6 +32,29 @@ export function setupBudget() {
 }
 beforeEach(() => { hooks.slots = []; vi.unstubAllGlobals(); });
 
+test("undo merges deleted rows without reverting later edits; replacement and profiles invalidate it", () => {
+  const h = setupBudget();
+  let b = h.render();
+  b.handleAddItem(); b.handleQuickAdd("보험 12000원 매달");
+  b = h.render();
+  const [first, second] = b.fixedCosts;
+  h.ui.selectedDeleteIds = [first.id];
+  h.render().handleConfirmDeleteItems();
+  b = h.render(); b.handleItemChange(second.id, { amount: 777 });
+  h.render().handleUndoDelete();
+  b = h.render();
+  expect(b.fixedCosts.find(x => x.id === second.id)?.amount).toBe(777);
+  expect(b.fixedCosts.filter(x => x.id === first.id)).toHaveLength(1);
+  b.handleConfirmDeleteItems(); b = h.render();
+  h.users.currentUser = { id: "other" };
+  h.render().handleUndoDelete();
+  expect(h.render().fixedCosts.some(x => x.id === first.id)).toBe(false);
+  h.users.currentUser = { id: "test-local" };
+  b = h.render(); b.applyBudgetSnapshot({ ...b.currentBudgetSnapshot, fixedCosts: [] });
+  h.render().handleUndoDelete();
+  expect(h.render().fixedCosts).toEqual([]);
+});
+
 test("quota failure retains edits and retry persists latest state; recovery remains blocked", () => {
   const h = setupBudget();
   let budget = h.render();

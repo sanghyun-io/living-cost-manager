@@ -57,6 +57,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [saveError, setSaveError] = useState("");
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [costFilters, setCostFilters] = useState(emptyCostFilters);
+  const [deletedBatch, setDeletedBatch] = useState<{ userId: string; items: FixedCost[] } | null>(null);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
   const activeUserRef = useRef<string | null>(null);
@@ -92,6 +93,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     }
 
     setIsLoaded(false);
+    setDeletedBatch(null);
     const stored = window.localStorage.getItem(getUserDataKey(currentUser.id));
     const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = parseBudgetSnapshot(stored ?? legacyStored);
@@ -165,6 +167,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     }
     window.localStorage.setItem(getUserDataKey(userId) + ":recovery:" + Date.now() + ":import", buildLivingCostBackup(JSON.parse(snapshot)));
     setBlockedSaveUserId(null);
+    setDeletedBatch(null);
   }
 
   function handleExportRecovery() {
@@ -203,7 +206,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
   function handleAddItem() {
     const nextItem = createFixedCost({
-      id: "cost-" + Date.now().toString(36),
+      id: "cost-" + crypto.randomUUID(),
       name: "새 고정비",
       categoryId: categories[0]?.id ?? "other",
       paymentMethodId: "bank-transfer",
@@ -231,7 +234,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   function handleQuickAdd(text: string) {
     const parsed = parseFixedCostInput(text);
     const nextItem = createFixedCost({
-      id: "cost-" + Date.now().toString(36),
+      id: "cost-" + crypto.randomUUID(),
       name: parsed.name ?? "새 고정비",
       categoryId: categories[0]?.id ?? "other",
       paymentMethodId: "bank-transfer",
@@ -275,6 +278,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     // 삭제 대상의 카테고리 정보를 state 필터로 미리 뽑아 두었다가 이벤트로 남긴다
     // (업데이터 안에서 side-effect 를 내면 StrictMode 이중 실행 시 중복 추적됨).
     const removedItems = fixedCosts.filter((item) => selectedDeleteIds.includes(item.id));
+    setDeletedBatch(currentUser ? { userId: currentUser.id, items: removedItems } : null);
     setFixedCosts((items) => items.filter((item) => !selectedDeleteIds.includes(item.id)));
     setSelectedDeleteIds([]);
     setIsDeleteMode(false);
@@ -285,6 +289,17 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   // ── categories ───────────────────────────────────────────────────────
+  function handleUndoDelete() {
+    if (!deletedBatch || deletedBatch.userId !== activeUserRef.current || loadedUserId !== activeUserRef.current) return;
+    if (window.localStorage.getItem(getUserErasureKey(deletedBatch.userId))) return;
+    const restored = deletedBatch.items.map((item) => ({ ...item,
+      categoryId: categories.some((category) => category.id === item.categoryId) ? item.categoryId : categories[0]?.id ?? "other",
+      paymentOptionId: item.paymentMethodId === "credit-card" && !cards.some((card) => card.id === item.paymentOptionId) ? "" : item.paymentOptionId
+    }));
+    setFixedCosts((items) => [...items, ...restored.filter((item) => !items.some((existing) => existing.id === item.id))]);
+    setDeletedBatch(null);
+    setImportMessage("최근 삭제를 취소했습니다.");
+  }
   // The draft label is owned by CategoryModal and handed up on submit.
   function handleAddCategory(label: string) {
     const nextCategory = createCategory(label);
@@ -442,6 +457,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
+    setDeletedBatch(null);
     setMonthlyIncome(snapshot.monthlyIncome);
     setCategories(snapshot.categories);
     setCards(snapshot.cards);
@@ -486,6 +502,8 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     handleCancelDeleteMode,
     handleToggleDeleteSelection,
     handleConfirmDeleteItems,
+    handleUndoDelete,
+    canUndoDelete: !!deletedBatch && deletedBatch.userId === currentUser?.id,
     handleAddCategory,
     handleRenameCategory,
     handleDeleteCategory,

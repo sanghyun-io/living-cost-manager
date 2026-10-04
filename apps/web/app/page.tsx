@@ -160,6 +160,7 @@ export default function Home() {
       <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
 
       <section className="workspace" id="fixed-costs" aria-label="고정비 편집">
+        {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
         <FixedCostTable
           costFilters={budget.costFilters}
           onCostFilters={budget.setCostFilters}
