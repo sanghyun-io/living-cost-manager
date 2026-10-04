@@ -54,6 +54,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [cards, setCards] = useState<PaymentCard[]>(DEFAULT_CARDS);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState("");
+  const [saveAttempt, setSaveAttempt] = useState(0);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
   const activeUserRef = useRef<string | null>(null);
@@ -127,7 +128,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     } catch {
       setSaveError("브라우저 저장 공간에 저장하지 못했습니다. 전체 백업을 먼저 내보내세요.");
     }
-  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, loadedUserId, blockedSaveUserId, monthlyIncome]);
+  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, loadedUserId, blockedSaveUserId, monthlyIncome, saveAttempt]);
 
   // ── derived views ────────────────────────────────────────────────────
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
@@ -445,6 +446,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     cards,
     lastSavedAt,
     saveError,
+    retrySave: () => setSaveAttempt((attempt) => attempt + 1),
     localScopeKey: loadedUserId === currentUser?.id && isLoaded ? loadedUserId : null,
     localRecoveryRequired: blockedSaveUserId === currentUser?.id,
     importFileRef,

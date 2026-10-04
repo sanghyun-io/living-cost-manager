@@ -127,6 +127,9 @@ export default function Home() {
     <main className="page-shell">
       <AppHeader
         saveError={budget.saveError}
+        onRetrySave={budget.retrySave}
+        onExportUnsaved={budget.handleExportBackup}
+        recoveryRequired={budget.localRecoveryRequired}
         lastSavedAt={budget.lastSavedAt}
         serverSession={auth.serverSession}
         currentUserName={users.currentUser?.name}

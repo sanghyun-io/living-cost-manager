@@ -5,6 +5,9 @@ import type { ServerSession } from "../lib/serverApi";
 
 interface AppHeaderProps {
   saveError: string;
+  onRetrySave: () => void;
+  onExportUnsaved: () => void;
+  recoveryRequired: boolean;
   lastSavedAt: Date | null;
   serverSession: ServerSession | null;
   currentUserName: string | undefined;
@@ -17,6 +20,9 @@ interface AppHeaderProps {
 
 export function AppHeader({
   saveError,
+  onRetrySave,
+  onExportUnsaved,
+  recoveryRequired,
   lastSavedAt,
   serverSession,
   currentUserName,
@@ -25,7 +31,7 @@ export function AppHeader({
   onOpenCoach,
   onServerLogout
 }: AppHeaderProps) {
-  const saveLabel = saveError || (lastSavedAt ? "저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
+  const saveLabel = saveError || (lastSavedAt ? "이 브라우저에 저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
   const { setColorScheme } = useMantineColorScheme();
   const computed = useComputedColorScheme("light", { getInitialValueInEffect: true });
 
@@ -46,6 +52,10 @@ export function AppHeader({
         <Text size="xs" c={saveError ? "rose" : "dimmed"} role={saveError ? "alert" : undefined}>
           {saveLabel}
         </Text>
+        {saveError ? <Group gap="xs">
+          <Button onClick={onRetrySave} disabled={recoveryRequired}>브라우저 저장 재시도</Button>
+          <Button variant="default" onClick={onExportUnsaved}>미저장 데이터 내보내기</Button>
+        </Group> : null}
         {serverSession ? (
           <Button variant="default" onClick={onOpenData}>
             서버 연결됨 · 동기화 관리
