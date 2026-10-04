@@ -168,7 +168,7 @@ export function FixedCostTable({
           </Button>
         </Group>
       ) : null}
-      <div className="filter-bar" aria-label="카테고리 필터">
+      <div className="filter-bar" aria-label="고정비 필터">
         {quickAddText && !isDeleteMode ? <Text role="status" size="sm">{quickPreview.valid
           ? `미리보기: ${quickPreview.name} · ${formatWon(quickPreview.amount!)} · ${quickPreview.periodMonths}개월${quickPreview.defaultPeriod ? " (주기 생략: 매월)" : ""}`
           : "이름과 유효한 금액을 입력하세요. 입력 내용은 유지됩니다."}</Text> : null}

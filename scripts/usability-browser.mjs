@@ -31,6 +31,7 @@ try {
     try {
       await page.goto(origin);
       await quick.waitFor();
+      await waitFor(async () => (await local()) !== null, "initial budget persisted");
       await page.keyboard.press("Tab");
       assert.equal(await page.getByRole("link", { name: "고정비 편집으로 건너뛰기" }).evaluate(el => el === document.activeElement), true);
       await page.keyboard.press("Enter");
@@ -55,7 +56,8 @@ try {
       assert.notEqual(duplicated[0].id, duplicated[1].id); assert.equal(duplicated[1].renewalStatus, "unreviewed");
       await page.getByLabel("이름 검색", { exact: true }).fill("없는 항목");
       await page.getByText("조건에 맞는 항목이 없어요. 필터를 초기화해 보세요.").waitFor();
-      await page.getByRole("button", { name: "필터 초기화", exact: true }).click(); assert.equal(await rows().count(), 2);
+      await page.getByRole("button", { name: "필터 초기화", exact: true }).click();
+      await waitFor(async () => (await rows().count()) === 2, "filters reset");
       await page.getByRole("button", { name: "삭제 모드", exact: true }).click();
       await rows().nth(1).getByLabel("삭제 선택", { exact: true }).check();
       await page.getByRole("button", { name: "선택 삭제", exact: true }).click();

@@ -713,6 +713,8 @@ body {
 .skip-link:focus { top: 12px; }
 .filter-bar { flex-wrap: wrap; }
 .filter-bar > * { min-width: 0; max-width: 100%; }
+.renewal-queue .mantine-Button-root { max-width: calc(100% - 8px); height: auto; min-height: 44px; }
+.renewal-queue .mantine-Button-label { white-space: normal; overflow-wrap: anywhere; padding-block: 8px; }
 @media (max-width: 48em) {
   .cost-list .mantine-Input-input, .cost-list .mantine-Button-root,
   .mantine-Modal-content .mantine-Button-root, .mantine-Modal-close { min-height: 44px; }

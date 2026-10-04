@@ -1,12 +1,13 @@
 // Local isolated API/DB only. API fixture verification never targets production.
 import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
+import { assertVerificationTarget } from "./verification-target.mjs";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const origin = process.env.LCM_E2E_ORIGIN || "http://127.0.0.1:3318";
 const api = process.env.LCM_E2E_API || "http://127.0.0.1:4318";
 assert.equal(new URL(origin).hostname, "127.0.0.1");
 assert.equal(new URL(api).hostname, "127.0.0.1");
-const databaseUrl = process.env.API_TEST_DATABASE_URL;
+const databaseUrl = await assertVerificationTarget(process.env);
 const target = new URL(databaseUrl);
 assert.equal(target.hostname, "127.0.0.1");
 assert.ok(Number(target.port) > 0);

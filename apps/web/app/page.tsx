@@ -54,6 +54,7 @@ export default function Home() {
   const coach = useCoach({ budget, serverApi: auth.serverApi });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: users.currentUser?.id ?? null,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
+  const reviewItems = renewalQueue(budget.fixedCosts);
 
   usersRef.current = users;
   budgetRef.current = budget;
@@ -163,11 +164,11 @@ export default function Home() {
       <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
 
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
-        <section aria-label="갱신 검토 작업목록">
+        <section className="renewal-queue" aria-label="갱신 검토 작업목록">
           <Text fw={700}>갱신 검토 작업목록</Text>
-          <Text size="sm" c="dimmed">30일 이내 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
-          {renewalQueue(budget.fixedCosts).length === 0 ? <Text size="sm">현재 검토할 작업이 없습니다.</Text> : null}
-          {renewalQueue(budget.fixedCosts).map((item) => <Button key={item.id} variant="light" m={4} onClick={() => budget.revealItem(item.id)}>
+          <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
+          {reviewItems.length === 0 ? <Text size="sm">현재 검토할 작업이 없습니다.</Text> : null}
+          {reviewItems.map((item) => <Button key={item.id} variant="light" m={4} onClick={() => budget.revealItem(item.id)}>
             {item.name} · {item.renewalStatus === "cancel-planned" ? "해지 예정" : item.renewalStatus === "change-review" ? "변경 검토" : "임박 미검토"} 편집
           </Button>)}
         </section>

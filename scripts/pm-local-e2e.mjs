@@ -1,4 +1,4 @@
-// Run against a local server with NEXT_PUBLIC_API_BASE_URL=''. No production requests.
+// Local browser-only journey; no API session is created. External requests are blocked.
 // PLAYWRIGHT_MODULE may point to an existing local Playwright installation.
 import assert from "node:assert/strict";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");

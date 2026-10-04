@@ -14,13 +14,15 @@ pnpm verify:usability
 
 ## 수행 내용
 
-1. 임의의 사용 가능한 loopback 포트에 목적 전용 PostgreSQL cluster를 시작한다. DB/user/schema는 `lcm_test`이다. 호출자의 `DATABASE_URL`과 운영 provider 환경변수를 상속하지 않는다.
-2. shared/web/API 전체 테스트를 수행한다. 기존 API reset은 이 명령이 만든 임시 DB에만 실행된다. API 테스트 자체도 loopback 및 database/schema의 test 이름을 검사한다.
+1. 임의의 사용 가능한 loopback 포트에 목적 전용 PostgreSQL cluster를 시작한다. DB/user/schema는 `lcm_test`이다. 5432/5433은 제외한다. 호출자의 `DATABASE_URL`과 운영 provider 환경변수를 상속하지 않는다. `LCM_VERIFY_CLUSTER_MARKER`는 새 임시 디렉터리의 `ownership.json`이며 DB/API/web URL과 초기화된 PG_VERSION을 대조한다. API 브라우저 픽스처는 이 표식 없이는 실행되지 않는다.
+2. 소유권 guard 2개와 shared/web/API 전체 테스트를 수행한다. 기존 API reset은 이 명령이 만든 임시 DB에만 실행된다. API 테스트 자체도 loopback 및 database/schema의 test 이름을 검사한다.
+
+   `scripts/verification-target.test.mjs`는 러너가 만든 cluster 환경을 필요로 하므로 위 단일 명령 안에서 실행한다.
 3. 전체 production build와 service worker 회귀를 실행한다.
 4. 빌드된 정적 웹과 API를 loopback에 띄운다. Chromium 1440/390에서 열 가지 사용성 기능, 기존 로컬 데이터 보존 및 실제 로컬 API 동기화/충돌/계정 삭제를 회귀 검증한다. 브라우저의 외부 요청은 차단된다.
-5. 성공/실패 모두 `finally`에서 자식 프로세스와 웹 서버를 종료하고 PostgreSQL을 중지한 뒤 목적 전용 임시 디렉터리를 제거한다. DB 중지 실패 시 증거 디렉터리를 보존하고 실패한다.
+5. 성공/실패 모두 `finally`에서 자식 프로세스와 웹 서버를 종료하고 PostgreSQL을 중지한 뒤 목적 전용 임시 디렉터리를 제거한다. SIGINT/SIGTERM은 작업을 실패 처리하고 POSIX 자식 프로세스 그룹에 종료를 전달한다. 실행 파일 누락도 대기 없이 실패한다. DB 중지 실패 시 증거 디렉터리를 보존하고 실패한다.
 
-테스트나 build/browser 단계 실패는 0이 아닌 종료 코드로 전파된다. 정리 경로 확인용:
+테스트나 build/browser 단계 실패는 0이 아닌 종료 코드로 전파된다.
 
 ### 수락 조건과 테스트 연결
 
@@ -36,6 +38,8 @@ pnpm verify:usability
 | 갱신 검토 | `costViews.test.ts` 상태 전이·청구/절감 불변 + 브라우저 임박 작업에서 직접 편집 |
 | 가져오기 | `budgetUsability.test.ts` 손상/취소/편집/느린 파일/프로필 왕복/선택 경쟁 + 브라우저 미리보기·적용 |
 | 검증 DX | 단일 명령 전체 실행 + DB 이후 의도적 실패의 exit/정리 확인 |
+
+정리 경로 확인용:
 
 ```sh
 LCM_VERIFY_INJECT_FAILURE=after-db pnpm verify:usability

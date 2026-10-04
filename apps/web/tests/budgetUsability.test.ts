@@ -69,6 +69,48 @@ test("slow files, cancellation, profile round trips and newer file selection can
   resolve(text); await request;
   expect(h.render().pendingImport).toBeNull();
 });
+test("same-tick edits invalidate import before React renders, even if reverted", async () => {
+  const h = setupBudget();
+  const before = h.render().currentBudgetSnapshot;
+  await h.render().handleImportBackup({ text: async () => buildLivingCostBackup({ ...before, monthlyIncome: 999 }) } as File);
+  const b = h.render();
+  b.handleIncomeChange(321);
+  b.handleIncomeChange(before.monthlyIncome);
+  b.applyImport();
+  expect(h.render().monthlyIncome).toBe(before.monthlyIncome);
+  expect(h.render().pendingImport).toBeNull();
+});
+test("file reads use the latest loaded scope and explain discarded edits without stale messages", async () => {
+  const h = setupBudget();
+  const text = buildLivingCostBackup(h.render().currentBudgetSnapshot);
+  let resolve!: (text: string) => void;
+  const slow = () => ({ text: () => new Promise<string>(yes => { resolve = yes; }) } as File);
+  h.users.isLoaded = false;
+  let request = h.render().handleImportBackup(slow());
+  h.users.isLoaded = true; h.render();
+  resolve(text); await request;
+  expect(h.render().pendingImport).not.toBeNull();
+  h.render().cancelImport();
+  request = h.render().handleImportBackup(slow());
+  h.render().handleIncomeChange(600);
+  resolve(text); await request;
+  expect(h.ui.setImportMessage).toHaveBeenLastCalledWith(expect.stringContaining("다시 선택"));
+  expect(h.render().pendingImport).toBeNull();
+});
+test("another tab's persisted edit blocks replacement and repeated apply does not report false failure", async () => {
+  const h = setupBudget();
+  const text = buildLivingCostBackup({ ...h.render().currentBudgetSnapshot, monthlyIncome: 500 });
+  const file = { text: async () => text } as File;
+  await h.render().handleImportBackup(file);
+  h.values.set(getUserDataKey("test-local"), "another-tab-change");
+  h.render().applyImport();
+  expect(h.render().monthlyIncome).not.toBe(500);
+  expect(h.ui.setImportMessage).toHaveBeenLastCalledWith(expect.stringContaining("다른 탭"));
+  await h.render().handleImportBackup(file);
+  const b = h.render(); b.applyImport(); b.applyImport();
+  expect(h.render().monthlyIncome).toBe(500);
+  expect(h.ui.setImportMessage).toHaveBeenLastCalledWith(expect.stringContaining("적용했습니다"));
+});
 test("new and duplicated items reveal a focus target even with filters active", () => {
   const h = setupBudget();
   h.render().setCostFilters({ query: "hidden", method: "all", review: "completed", sort: "amount" });

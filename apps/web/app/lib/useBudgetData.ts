@@ -64,9 +64,13 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
   const activeUserRef = useRef<string | null>(null);
   const importEpoch = useRef(0);
+  const importReadId = useRef(0);
+  const appliedImportEpoch = useRef<number | null>(null);
+  const loadedScopeRef = useRef<string | null>(null);
+  loadedScopeRef.current = users.isLoaded ? loadedUserId : null;
   if (activeUserRef.current !== (users.currentUser?.id ?? null)) importEpoch.current += 1;
   activeUserRef.current = users.currentUser?.id ?? null;
-  const [pendingImport, setPendingImport] = useState<{ userId: string; before: string; epoch: number; snapshot: LocalBudgetSnapshot } | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ userId: string; before: string; storedBefore: string | null; epoch: number; snapshot: LocalBudgetSnapshot } | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
 
@@ -161,18 +165,28 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   snapshotRef.current = currentBudgetSnapshot;
 
   function importStillCurrent(userId: string | null, before: string, epoch: number): boolean {
-    return userId !== null && activeUserRef.current === userId && loadedUserId === userId && importEpoch.current === epoch && JSON.stringify(snapshotRef.current) === before;
+    return userId !== null && activeUserRef.current === userId && loadedScopeRef.current === userId && importEpoch.current === epoch && JSON.stringify(snapshotRef.current) === before;
   }
 
-  function cancelImport() { importEpoch.current += 1; setPendingImport(null); }
+  function cancelImport() { importEpoch.current += 1; importReadId.current += 1; setPendingImport(null); }
+  function reportDiscardedImport(userId: string | null, readId: number) {
+    if (activeUserRef.current === userId && importReadId.current === readId) {
+      setImportMessage("데이터가 변경되어 가져오기를 취소했습니다. 파일을 다시 선택하세요.");
+    }
+  }
   function applyImport() {
     if (!pendingImport) return;
     const { userId, before, epoch, snapshot } = pendingImport;
+    if (appliedImportEpoch.current === epoch) return;
     if (!importStillCurrent(userId, before, epoch)) {
       cancelImport(); setImportMessage("공간 또는 데이터가 변경되어 미리보기를 취소했습니다. 파일을 다시 선택하세요."); return;
     }
     try {
+      if (window.localStorage.getItem(getUserDataKey(userId)) !== pendingImport.storedBefore) {
+        cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
+      }
       preserveBeforeImport(userId, before);
+      appliedImportEpoch.current = epoch;
       applyBudgetSnapshot(snapshot);
       setImportMessage("검증한 " + snapshot.fixedCosts.length + "개 항목을 적용했습니다.");
     } catch { setImportMessage("복구 사본을 저장하지 못해 교체하지 않았습니다."); }
@@ -209,10 +223,12 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
   // ── income & fixed-cost handlers ─────────────────────────────────────
   function handleIncomeChange(value: number) {
+    importEpoch.current += 1;
     setMonthlyIncome(Math.max(0, Math.round(value)));
   }
 
   function handleItemChange(id: string, patch: Partial<Omit<FixedCost, "id">>) {
+    importEpoch.current += 1;
     setFixedCosts((items) => items.map((item) => (item.id === id ? updateFixedCost(item, patch) : item)));
   }
 
@@ -225,6 +241,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function handleAddItem() {
+    importEpoch.current += 1;
     const nextItem = createFixedCost({
       id: "cost-" + crypto.randomUUID(),
       name: "새 고정비",
@@ -243,6 +260,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   function handleDuplicateItem(id: string) {
     const original = fixedCosts.find((item) => item.id === id);
     if (!original) return;
+    importEpoch.current += 1;
     const copy = duplicateCost(original, "cost-" + crypto.randomUUID());
     setFixedCosts((items) => [...items, copy]);
     revealItem(copy.id);
@@ -256,6 +274,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   function handleQuickAdd(text: string) {
     const parsed = previewQuickAdd(text);
     if (!parsed.valid) return false;
+    importEpoch.current += 1;
     const nextItem = createFixedCost({
       id: "cost-" + crypto.randomUUID(),
       name: parsed.name ?? "새 고정비",
@@ -269,6 +288,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     setFixedCosts((items) => [...items, nextItem]);
     revealItem(nextItem.id);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
+    return true;
   }
 
   // ── delete mode ──────────────────────────────────────────────────────
@@ -308,6 +328,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     // 삭제 대상의 카테고리 정보를 state 필터로 미리 뽑아 두었다가 이벤트로 남긴다
     // (업데이터 안에서 side-effect 를 내면 StrictMode 이중 실행 시 중복 추적됨).
     const removedItems = fixedCosts.filter((item) => selectedDeleteIds.includes(item.id));
+    importEpoch.current += 1;
     setDeletedBatch(currentUser ? { userId: currentUser.id, items: removedItems } : null);
     setFixedCosts((items) => items.filter((item) => !selectedDeleteIds.includes(item.id)));
     setSelectedDeleteIds([]);
@@ -322,6 +343,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   function handleUndoDelete() {
     if (!deletedBatch || deletedBatch.userId !== activeUserRef.current || loadedUserId !== activeUserRef.current) return;
     if (window.localStorage.getItem(getUserErasureKey(deletedBatch.userId))) return;
+    importEpoch.current += 1;
     const restored = deletedBatch.items.map((item) => ({ ...item,
       categoryId: categories.some((category) => category.id === item.categoryId) ? item.categoryId : categories[0]?.id ?? "other",
       paymentOptionId: item.paymentMethodId === "credit-card" && !cards.some((card) => card.id === item.paymentOptionId) ? "" : item.paymentOptionId
@@ -332,16 +354,19 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
   // The draft label is owned by CategoryModal and handed up on submit.
   function handleAddCategory(label: string) {
+    importEpoch.current += 1;
     const nextCategory = createCategory(label);
     setCategories((currentCategories) => mergeCategories(currentCategories, [nextCategory]));
     track({ type: "budget.category_create", timestamp: Date.now(), data: {} });
   }
 
   function handleRenameCategory(categoryId: string, label: string) {
+    importEpoch.current += 1;
     setCategories((currentCategories) => renameCategory(currentCategories, categoryId, label));
   }
 
   function handleDeleteCategory(categoryId: string) {
+    importEpoch.current += 1;
     setCategories((currentCategories) => {
       const result = deleteCategory(currentCategories, fixedCosts, categoryId);
       setFixedCosts(result.items);
@@ -355,26 +380,31 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   // ── cards ────────────────────────────────────────────────────────────
   // CardModal owns the new-card draft fields and hands them up on submit.
   function handleAddCard(draft: CardDraft) {
+    importEpoch.current += 1;
     const nextCard = createPaymentCard(draft.label, draft.billingDay, draft.isEndOfMonth);
     setCards((currentCards) => mergeCards(currentCards, [nextCard]));
     track({ type: "budget.card_create", timestamp: Date.now(), data: {} });
   }
 
   function handleRenameCard(cardId: string, label: string) {
+    importEpoch.current += 1;
     setCards((currentCards) => renamePaymentCard(currentCards, cardId, label));
   }
 
   function handleUpdateCardEndOfMonth(cardId: string, isEndOfMonth: boolean) {
+    importEpoch.current += 1;
     setCards((currentCards) => updatePaymentCard(currentCards, cardId, { isEndOfMonth }));
     // Card settlement date is separate from a subscription merchant charge date.
   }
 
   function handleUpdateCardBillingDay(cardId: string, billingDay: number) {
+    importEpoch.current += 1;
     const nextBillingDay = clampBillingDay(billingDay);
     setCards((currentCards) => updatePaymentCard(currentCards, cardId, { billingDay: nextBillingDay }));
   }
 
   function handleDeleteCard(cardId: string) {
+    importEpoch.current += 1;
     setCards((currentCards) => {
       const result = deletePaymentCard(currentCards, fixedCosts, cardId);
       setFixedCosts(result.items);
@@ -421,17 +451,19 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     const importingUserId = activeUserRef.current;
     const before = JSON.stringify(snapshotRef.current);
     const epoch = ++importEpoch.current;
+    const readId = ++importReadId.current;
     setPendingImport(null);
     try {
+      const storedBefore = importingUserId ? window.localStorage.getItem(getUserDataKey(importingUserId)) : null;
       const csv = await file.text();
-      if (!importStillCurrent(importingUserId, before, epoch)) return;
+      if (!importStillCurrent(importingUserId, before, epoch)) { reportDiscardedImport(importingUserId, readId); return; }
       const result = parseFixedCostCsvTemplate({
         csv,
         categories,
         cards
       });
 
-      setPendingImport({ userId: importingUserId!, before, epoch, snapshot: { ...snapshotRef.current, categories: result.categories, cards: result.cards, fixedCosts: result.fixedCosts } });
+      setPendingImport({ userId: importingUserId!, before, storedBefore, epoch, snapshot: { ...snapshotRef.current, categories: result.categories, cards: result.cards, fixedCosts: result.fixedCosts } });
     } catch {
       if (importStillCurrent(importingUserId, before, epoch)) setImportMessage("가져오기에 실패했습니다. CSV 형식과 필수 값을 확인하세요.");
     } finally {
@@ -449,12 +481,14 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     const importingUserId = activeUserRef.current;
     const before = JSON.stringify(snapshotRef.current);
     const epoch = ++importEpoch.current;
+    const readId = ++importReadId.current;
     setPendingImport(null);
     try {
+      const storedBefore = importingUserId ? window.localStorage.getItem(getUserDataKey(importingUserId)) : null;
       const text = await file.text();
-      if (!importStillCurrent(importingUserId, before, epoch)) return;
+      if (!importStillCurrent(importingUserId, before, epoch)) { reportDiscardedImport(importingUserId, readId); return; }
       const result = parseLivingCostBackup(text);
-      setPendingImport({ userId: importingUserId!, before, epoch, snapshot: result });
+      setPendingImport({ userId: importingUserId!, before, storedBefore, epoch, snapshot: result });
     } catch {
       if (importStillCurrent(importingUserId, before, epoch)) setImportMessage("전체 백업 가져오기에 실패했습니다. 파일 형식과 내용을 확인하세요.");
     } finally {

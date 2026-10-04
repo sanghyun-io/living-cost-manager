@@ -54,7 +54,8 @@ export function AppHeader({
         </Text>
         {saveError ? <Group gap="xs">
           <Button onClick={onRetrySave} disabled={recoveryRequired}>브라우저 저장 재시도</Button>
-          <Button variant="default" onClick={onExportUnsaved}>미저장 데이터 내보내기</Button>
+          <Button variant="default" onClick={onExportUnsaved}>{recoveryRequired ? "현재 편집 내용 내보내기" : "미저장 데이터 내보내기"}</Button>
+          {recoveryRequired ? <Text size="xs">손상 원본은 아래 ‘저장 원본 내보내기’로 별도 보관하세요.</Text> : null}
         </Group> : null}
         {serverSession ? (
           <Button variant="default" onClick={onOpenData}>

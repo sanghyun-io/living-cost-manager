@@ -17,13 +17,15 @@
 | 7 | P1 일정 설정 안내 | 기준일·소수 주기 미확인 원인 모름 | 6 | 미확인 이유와 수정 방법, 실제 청구액/월환산 구분, 월말 안내; 윤년·소수 주기 회귀 | 완료 `414d60d` |
 | 8 | P1 갱신 검토 작업 흐름 | 목록 전체에서 임박·미결정 항목 찾기 어려움 | 7 | 임박 미검토/해지예정/변경검토 중심 작업목록과 직접 편집 이동, 실제 절감 과장 없음; 상태 전이 검증 | 완료 `260c5e7` |
 | 9 | P0 가져오기 검증·미리보기 | 교체 전 내용과 영향 파악 불가 | 8 | 파일 검증 후 현재/대상 개수·금액 확인과 명시 적용/취소, 파일 읽기/프로필/편집 경쟁 방지; 손상/취소/경쟁 테스트 | 완료 `6dbb50f` |
-| 10 | P1 one-command 검증 DX | 격리 테스트와 브라우저 회귀 실행 경로 분산 | 9 | 문서화된 단일 명령, DB loopback/test guard, finally 서버/DB 종료, 실패 exit 전파; 실제 실행 확인 | 완료 (아래 checkpoint) |
+| 10 | P1 one-command 검증 DX | 격리 테스트와 브라우저 회귀 실행 경로 분산 | 9 | 문서화된 단일 명령, DB loopback/test guard, finally 서버/DB 종료, 실패 exit 전파; 실제 실행 확인 | 완료 `066cf9d` |
 
 ## 완료 게이트
 
 현재 Owner 지시가 우선한다: 지정 worktree/브랜치에서 구현·로컬 검증·커밋까지 수행한다. 아래 원래 release gate의 main 통합/배포/공개 검증은 이번 실행 범위에서 제외한다. 검증 명령/격리 및 정리 절차는 [로컬 검증 안내](./local-usability-verification.md)를 따른다.
 
 ### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+- 최종 결과 — 리뷰 수정 후 `pnpm verify:usability` 재실행: shared 92 / web 128 / API 129 = 349 tests, 임시 DB 소유권 guard 2 / service-worker 3, 전체 build, Chromium 1440/390 및 기존 로컬·실제 격리 API 회귀 통과. finally 종료·임시 cluster 삭제 완료. 별도 reviewer 후속 확인: H1/H2/H3 해결, 남은 blocker 없음. follow-up commit: `fix(usability): close import races and harden verification lifecycle`.
+- 최종 리뷰 보강 — 읽기 전용 reviewer H1/H2/H3 대응: 임시 cluster 소유권 표식/기본 DB 포트 거부, 최신 로드 ref와 폐기 안내, 브라우저 저장·필터 렌더 대기. 추가로 동일 이벤트 편집/원복·다른 탭 저장·이중 적용 회귀, 복구 전 현재 편집/원본 내보내기 구분, 프로세스 그룹 종료·실행 파일 누락 정리·SIGTERM exit 1 검증. 복구 사본은 데이터 보존을 위해 자동 삭제하지 않으며 Playwright 기본 경로는 Owner가 지정한 설치를 사용한다.
 - 10 완료 — `pnpm verify:usability`: 새 임시 loopback PostgreSQL/test DB, shared 92 + web 125 + API 129 = 346 tests, 전체 build, service-worker 3 tests, Chromium 1440/390 사용성, 기존 로컬/실제 API 동기화 회귀 모두 통과. 성공 finally 정리 완료. `LCM_VERIFY_INJECT_FAILURE=after-db`는 의도한 exit 1 및 DB 종료/삭제 확인. 브라우저 통화·현지 날짜·모달 전환 대기를 실제 UI에 맞춰 수정. commit: `test(usability): one-command isolated full-stack regression`.
 - 9 완료 — 검증 후 개수/월환산 미리보기, 명시 적용/취소, 복구 사본 선행. 파일 선택 세대·프로필 왕복·편집·모달 닫기 경쟁 차단. budgetUsability + dataSafety 10/10 통과. commit: `feat(usability): validated import preview with race-safe apply`.
 - 8 완료 — 임박 미검토/해지예정/변경검토 작업목록과 필터 해제·직접 편집 포커스. 예정/실제 절감 구분 유지. costViews 4/4 통과 (상태 전이·금액 불변). commit: `feat(usability): actionable renewal review queue`.
