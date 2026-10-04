@@ -9,8 +9,7 @@ test("bounded owned recovery retention preserves unknown backups and newest copy
   }) as Storage;
   storage.setItem("user:recovery:unknown", "untouched");
   storage.setItem("user:corrupt:legacy", "provenance");
-  let time = 100;
-  const clock = vi.spyOn(Date, "now").mockImplementation(() => time++);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(100);
   try {
     for (let i = 0; i < 6; i++) saveRecovery(storage, "user", "import", String(i));
     expect(Object.keys(storage).filter(key => key.includes(":v1:import:"))).toHaveLength(3);
