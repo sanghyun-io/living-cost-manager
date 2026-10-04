@@ -3,9 +3,13 @@ import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, T
 import { suggestCategoryId, computeNextDueDate, billingDateSchema } from "@living-cost-manager/shared";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
+import type { CostFilters } from "../lib/costViews";
 import { formatWon, getPaymentOptions } from "../lib/formatting";
 
 interface FixedCostTableProps {
+  costFilters: CostFilters;
+  onCostFilters: (filters: CostFilters) => void;
+  onResetFilters: () => void;
   categories: Category[];
   cards: PaymentCard[];
   visibleFixedCosts: FixedCost[];
@@ -53,6 +57,7 @@ function categoryColor(id: string): string {
 }
 
 export function FixedCostTable({
+  costFilters, onCostFilters, onResetFilters,
   categories,
   cards,
   visibleFixedCosts,
@@ -151,6 +156,11 @@ export function FixedCostTable({
         </Group>
       ) : null}
       <div className="filter-bar" aria-label="카테고리 필터">
+        <TextInput label="이름 검색" value={costFilters.query} onChange={(e) => onCostFilters({ ...costFilters, query: e.currentTarget.value })} />
+        <Select label="결제수단 필터" value={costFilters.method} data={[{ value: "all", label: "모든 결제수단" }, ...methodData]} onChange={(value) => onCostFilters({ ...costFilters, method: value ?? "all" })} />
+        <Select label="검토 상태 필터" value={costFilters.review} data={[{ value: "all", label: "모든 검토 상태" }, { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" }, { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" }, { value: "completed", label: "검토 완료" }]} onChange={(value) => onCostFilters({ ...costFilters, review: value ?? "all" })} />
+        <Select label="정렬" value={costFilters.sort} data={[{ value: "original", label: "등록 순서" }, { value: "amount", label: "청구 금액 큰 순" }, { value: "due", label: "다음 납부일 순 (미확인 마지막)" }]} onChange={(value) => onCostFilters({ ...costFilters, sort: value ?? "original" })} />
+        <Button variant="default" onClick={onResetFilters}>필터 초기화</Button>
         <Select
           label="카테고리 보기"
           data={filterData}
@@ -176,7 +186,7 @@ export function FixedCostTable({
         </div>
         {visibleFixedCosts.length === 0 ? (
           <div className="table-empty" role="note">
-            {categoryFilterId === "all" ? (
+            {categoryFilterId === "all" && !costFilters.query && costFilters.method === "all" && costFilters.review === "all" ? (
               <>
                 <Text fw={700} mb={4}>아직 등록된 고정비가 없어요</Text>
                 <Text size="sm" c="dimmed">
@@ -185,7 +195,7 @@ export function FixedCostTable({
                 </Text>
               </>
             ) : (
-              <Text size="sm" c="dimmed">이 카테고리에 해당하는 고정비가 없어요. 다른 카테고리를 보거나 새 항목을 추가해 보세요.</Text>
+              <Text size="sm" c="dimmed">조건에 맞는 항목이 없어요. 필터를 초기화해 보세요.</Text>
             )}
           </div>
         ) : null}

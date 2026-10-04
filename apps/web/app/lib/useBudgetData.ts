@@ -36,6 +36,7 @@ import type { LocalBudgetSnapshot } from "./snapshot";
 import type { CardDraft } from "../components/modals/CardModal";
 import type { UIStateApi } from "./useUIState";
 import type { LocalUsersApi } from "./useLocalUsers";
+import { emptyCostFilters, filterCosts } from "./costViews";
 
 interface UseBudgetDataOptions {
   users: LocalUsersApi;
@@ -55,6 +56,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState("");
   const [saveAttempt, setSaveAttempt] = useState(0);
+  const [costFilters, setCostFilters] = useState(emptyCostFilters);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
   const activeUserRef = useRef<string | null>(null);
@@ -135,8 +137,8 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
   const pieSegments = useMemo(() => getCategoryPieSegments(buckets), [buckets]);
   const visibleFixedCosts = useMemo(
-    () => (categoryFilterId === "all" ? fixedCosts : fixedCosts.filter((item) => item.categoryId === categoryFilterId)),
-    [categoryFilterId, fixedCosts]
+    () => filterCosts(categoryFilterId === "all" ? fixedCosts : fixedCosts.filter((item) => item.categoryId === categoryFilterId), costFilters),
+    [categoryFilterId, fixedCosts, costFilters]
   );
   const visibleFixedCostTotal = useMemo(
     () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
@@ -442,6 +444,9 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   return {
     monthlyIncome,
     fixedCosts,
+    costFilters,
+    setCostFilters,
+    resetCostFilters: () => { setCostFilters(emptyCostFilters); setCategoryFilterId("all"); },
     categories,
     cards,
     lastSavedAt,

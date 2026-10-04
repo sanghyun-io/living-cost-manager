@@ -22,6 +22,7 @@
 ## 완료 게이트
 
 ### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+- 2 완료 — 이름/결제수단/검토 조합, 실제 청구금액/납부일 정렬, 초기화/빈 결과. costViews + budgetUsability 3/3 통과. commit: `feat(usability): combined cost search filters and sorting`.
 - 1 완료 — 브라우저 저장 표시, quota 재시도, 현재 메모리 백업. `budgetUsability` 1/1 통과 (quota 실패→최신 수입 복구, 프로필 쓰기 차단). commit: `feat(usability): retry browser storage and export unsaved data`. shared 선행 build 필요 확인.
 
 각 기능 테스트와 checkpoint commit → 전체 shared/web/API 테스트 및 build → Chromium desktop/mobile → 별도 reviewer 및 모든 blocker 수정 → latest main 안전 통합 → 기존 OCI digest-pinned/Pages direct-upload runbook으로 배포 → 공개 SHA/브라우저 검증 → 임시 자원 종료. 운영 DB reset/drop 금지. 고객 알림 금지. 기존 dirty 원본 worktree 보존.

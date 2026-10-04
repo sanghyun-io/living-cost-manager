@@ -161,6 +161,9 @@ export default function Home() {
 
       <section className="workspace" id="fixed-costs" aria-label="고정비 편집">
         <FixedCostTable
+          costFilters={budget.costFilters}
+          onCostFilters={budget.setCostFilters}
+          onResetFilters={budget.resetCostFilters}
           categories={budget.categories}
           cards={budget.cards}
           visibleFixedCosts={budget.visibleFixedCosts}
