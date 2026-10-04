@@ -7,7 +7,10 @@ export function saveRecovery(storage: Storage, userKey: string, kind: "import" |
     .sort((a, b) => Number(b.slice(prefix.length).split("-")[0]) - Number(a.slice(prefix.length).split("-")[0]));
   // Identical corrupt sources do not need another copy on every reload.
   if (kind === "corrupt" && keys.some(key => storage.getItem(key) === value)) return;
-  const key = `${prefix}${Date.now()}-${crypto.randomUUID()}`;
+  // Monotonic per-kind timestamp also orders back-to-back writes in the same
+  // millisecond (and writes after a backwards wall-clock adjustment).
+  const timestamp = Math.max(Date.now(), keys[0] ? Number(keys[0].slice(prefix.length).split("-")[0]) + 1 : 0);
+  const key = `${prefix}${timestamp}-${crypto.randomUUID()}`;
   try { storage.setItem(key, value); }
   catch (error) {
     for (const old of keys.slice(1)) storage.removeItem(old);
