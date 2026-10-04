@@ -21,9 +21,9 @@
 
 ## 완료 게이트
 
-현재 Owner 지시가 우선한다: 지정 worktree/브랜치에서 구현·로컬 검증·커밋까지 수행한다. 아래 원래 release gate의 main 통합/배포/공개 검증은 이번 실행 범위에서 제외한다. 검증 명령/격리 및 정리 절차는 [로컬 검증 안내](./local-usability-verification.md)를 따른다.
+후속 Owner 지시로 열 가지 기능의 main 통합·OCI/Pages 배포·공개 검증까지 승인되었다. 검증 명령/격리 및 정리 절차는 [로컬 검증 안내](./local-usability-verification.md)를 따른다. 아래 로컬 전용 체크포인트는 당시 실행 범위의 기록이며 현재 배포 범위를 제한하지 않는다.
 
-### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+### 구현 체크포인트 (이전 로컬 구현 단계)
 - 최종 검증(구현 담당 독립 재확인) — 병렬 구현 에이전트 종료 후 `504a6d7` 단독 작성자 상태에서 `pnpm verify:usability` 재실행: EXIT 0, shared 92 / web 128 / API 129 = 349 tests, 소유권 guard 2 + service-worker 3, 전체 production build, Chromium 1440/390 사용성 회귀, 기존 로컬 여정과 실제 격리 API 동기화 회귀까지 전부 통과. `LCM_VERIFY_INJECT_FAILURE=after-db`는 EXIT 1 전파 및 임시 PostgreSQL 종료·삭제(`CLEANUP` 로그)로 확인했고 임시 클러스터 잔여물 0개. 원본 dirty worktree(`f884150`)·main 브랜치·오리진 미변경, push/deploy 없음.
 - 최종 결과 — 리뷰 수정 후 `pnpm verify:usability` 재실행: shared 92 / web 128 / API 129 = 349 tests, 임시 DB 소유권 guard 2 / service-worker 3, 전체 build, Chromium 1440/390 및 기존 로컬·실제 격리 API 회귀 통과. finally 종료·임시 cluster 삭제 완료. 별도 reviewer 후속 확인: H1/H2/H3 해결, 남은 blocker 없음. follow-up commit: `fix(usability): close import races and harden verification lifecycle`.
 - 최종 리뷰 보강 — 읽기 전용 reviewer H1/H2/H3 대응: 임시 cluster 소유권 표식/기본 DB 포트 거부, 최신 로드 ref와 폐기 안내, 브라우저 저장·필터 렌더 대기. 추가로 동일 이벤트 편집/원복·다른 탭 저장·이중 적용 회귀, 복구 전 현재 편집/원본 내보내기 구분, 프로세스 그룹 종료·실행 파일 누락 정리·SIGTERM exit 1 검증. 복구 사본은 데이터 보존을 위해 자동 삭제하지 않으며 Playwright 기본 경로는 Owner가 지정한 설치를 사용한다.

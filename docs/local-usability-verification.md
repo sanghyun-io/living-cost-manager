@@ -8,9 +8,9 @@ pnpm verify:usability
 
 설치된 pnpm 의존성, PostgreSQL 도구(`initdb`, `pg_ctl`, `createdb`), Chromium을 포함한 Playwright가 필요하다. shared 선행 build와 Prisma client 생성은 명령이 수행한다.
 
-기본 Playwright는 `/Users/sanghyun/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs`를 사용한다. 다른 환경에서는 `PLAYWRIGHT_MODULE`을 설치된 모듈의 절대 경로로 지정한다. PostgreSQL 도구 경로는 `PG_BIN`, 브라우저 실행 파일은 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`로 지정할 수 있다.
+Playwright는 루트의 버전 고정 devDependency를 사용한다. `pnpm install --frozen-lockfile` 후 `pnpm exec playwright install chromium`으로 브라우저를 준비한다. `PLAYWRIGHT_MODULE`로 설치된 모듈을 재정의할 수 있다. PostgreSQL 도구 경로는 `PG_BIN`, 브라우저 실행 파일은 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`로 지정할 수 있다.
 
-임시 루트는 OpenCode 승인 경로 `/private/var/folders/f_/kdvkncsn11l2nssxg_75xglc0000gp/T/opencode`이며, 다른 환경에서는 `LCM_TEST_TEMP_ROOT`로 지정한다. 매 실행마다 새 `lcm-usability-test-*` 디렉터리를 만든다.
+임시 루트는 OS `tmpdir()` 기본값이며 `LCM_TEST_TEMP_ROOT`로 지정할 수 있다. OpenCode에서는 해당 세션이 안내한 승인 임시 루트를 지정한다. 매 실행마다 새 `lcm-usability-test-*` 디렉터리를 만든다.
 
 ## 수행 내용
 
@@ -46,3 +46,7 @@ LCM_VERIFY_INJECT_FAILURE=after-db pnpm verify:usability
 ```
 
 이 명령은 의도적으로 실패하고 임시 PostgreSQL 종료/삭제 메시지를 출력해야 한다. 운영 배포/공개 서비스 접근은 포함하지 않는다. 산출물 `apps/web/out`, 패키지 `dist`는 일반 로컬 build 결과이다.
+
+## 복구 사본 보존
+
+새 `:recovery:v1:import:`와 `:recovery:v1:corrupt:` 네임스페이스에서만 종류별 최근 3개를 보존한다. 손상 원본은 가공 없이 저장하고 동일 원본의 반복 사본은 만들지 않는다. quota 실패 시 가장 최근 기존 사본을 남기고 더 오래된 관리 대상 사본만 정리하여 재시도한다. 그래도 실패하면 가져오기를 중단한다. 기존/알 수 없는 키와 과거 백업은 자동 삭제하지 않는다. 저장소의 동기 확인·쓰기에는 탭 간 원자적 CAS 보장이 없으며, 가져오기 효과에서의 지연 재저장은 하지 않는다.

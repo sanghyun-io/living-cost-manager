@@ -8,9 +8,10 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
+import { tmpdir } from "node:os";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const tempRoot = process.env.LCM_TEST_TEMP_ROOT || "/private/var/folders/f_/kdvkncsn11l2nssxg_75xglc0000gp/T/opencode";
+const tempRoot = process.env.LCM_TEST_TEMP_ROOT || tmpdir();
 const pg = (name) => process.env.PG_BIN ? path.join(process.env.PG_BIN, name) : name;
 const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "USER", "LANG", "SHELL"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
 Object.assign(env, { CI: "1", NEXT_TELEMETRY_DISABLED: "1", EMAIL_PROVIDER: "console" });
@@ -75,7 +76,7 @@ try {
     NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${apiPort}`, LCM_E2E_ORIGIN: `http://127.0.0.1:${webPort}`,
     LCM_E2E_API: `http://127.0.0.1:${apiPort}`,
     LCM_VERIFY_CLUSTER_MARKER: path.join(cluster, "ownership.json"),
-    PLAYWRIGHT_MODULE: process.env.PLAYWRIGHT_MODULE || "/Users/sanghyun/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs",
+    PLAYWRIGHT_MODULE: process.env.PLAYWRIGHT_MODULE || "playwright",
     ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { PLAYWRIGHT_CHROMIUM_EXECUTABLE: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
   await run(pg("initdb"), ["-D", path.join(cluster, "data"), "-U", "lcm_test", "-A", "trust", "--no-locale", "-E", "UTF8"]);
   await writeFile(env.LCM_VERIFY_CLUSTER_MARKER, JSON.stringify({ databaseUrl, apiOrigin: env.LCM_E2E_API, webOrigin: env.LCM_E2E_ORIGIN }), { mode: 0o600 });

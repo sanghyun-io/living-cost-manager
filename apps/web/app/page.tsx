@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Text } from "@mantine/core";
 import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
@@ -54,7 +54,14 @@ export default function Home() {
   const coach = useCoach({ budget, serverApi: auth.serverApi });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: users.currentUser?.id ?? null,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
-  const reviewItems = renewalQueue(budget.fixedCosts);
+  const [reviewDate, setReviewDate] = useState(() => new Date().toDateString());
+  useEffect(() => {
+    const refresh = () => setReviewDate(new Date().toDateString());
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, []);
+  const reviewItems = useMemo(() => renewalQueue(budget.fixedCosts, new Date(reviewDate)), [budget.fixedCosts, reviewDate]);
 
   usersRef.current = users;
   budgetRef.current = budget;

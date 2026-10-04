@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const origin = process.env.LCM_E2E_ORIGIN;
-assert.equal(new URL(origin).hostname, "127.0.0.1");
+if (process.env.LCM_E2E_PUBLIC === "1") assert.equal(origin, "https://living-cost-manager.gamja.top");
+else assert.equal(new URL(origin).hostname, "127.0.0.1");
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE });
 async function waitFor(check, label) {
   for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 50)); }
@@ -12,6 +13,7 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 900 }, acceptDownloads: true });
     const errors = [];
     await context.route("**/*", route => {
+      if (!["GET", "HEAD"].includes(route.request().method())) { errors.push("Write request blocked"); return route.abort(); }
       if (new URL(route.request().url()).origin !== origin) { errors.push("External request blocked"); return route.abort(); }
       return route.continue();
     });

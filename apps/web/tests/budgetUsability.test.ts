@@ -122,6 +122,16 @@ test("new and duplicated items reveal a focus target even with filters active", 
   expect(b.focusItemId).not.toBe(first);
   expect(b.visibleFixedCosts.some(x => x.id === b.focusItemId)).toBe(true);
 });
+test("import persists immediately and its deferred effect never overwrites a later tab write", async () => {
+  const h = setupBudget();
+  const key = getUserDataKey("test-local");
+  await h.render().handleImportBackup({ text: async () => buildLivingCostBackup({ ...h.render().currentBudgetSnapshot, monthlyIncome: 500 }) } as File);
+  h.render().applyImport();
+  expect(JSON.parse(h.values.get(key)!).monthlyIncome).toBe(500);
+  h.values.set(key, "later-tab-write");
+  h.render(); h.save();
+  expect(h.values.get(key)).toBe("later-tab-write");
+});
 test("invalid quick input never creates a placeholder row", () => {
   const h = setupBudget();
   const before = h.render().fixedCosts;

@@ -37,6 +37,7 @@ import type { CardDraft } from "../components/modals/CardModal";
 import type { UIStateApi } from "./useUIState";
 import type { LocalUsersApi } from "./useLocalUsers";
 import { duplicateCost, emptyCostFilters, filterCosts } from "./costViews";
+import { newestImportRecovery, saveRecovery } from "./recoveryStorage";
 
 interface UseBudgetDataOptions {
   users: LocalUsersApi;
@@ -67,6 +68,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const importReadId = useRef(0);
   const appliedImportEpoch = useRef<number | null>(null);
   const loadedScopeRef = useRef<string | null>(null);
+  const importedWrite = useRef<{ userId: string; value: string } | null>(null);
   loadedScopeRef.current = users.isLoaded ? loadedUserId : null;
   if (activeUserRef.current !== (users.currentUser?.id ?? null)) importEpoch.current += 1;
   activeUserRef.current = users.currentUser?.id ?? null;
@@ -110,7 +112,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     let recoveryFailed = false;
     if (parsed.recovered && stored) {
       try {
-        window.localStorage.setItem(getUserDataKey(currentUser.id) + ":corrupt:" + Date.now().toString(36), stored);
+        saveRecovery(window.localStorage, getUserDataKey(currentUser.id), "corrupt", stored);
       } catch {
         recoveryFailed = true;
       }
@@ -135,6 +137,13 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
     try {
       if (window.localStorage.getItem(getUserErasureKey(currentUser.id))) return;
+      // Import was persisted in its event handler. Never replay that write from
+      // an effect: another tab may have saved in the meantime.
+      if (importedWrite.current?.userId === currentUser.id) {
+        const imported = importedWrite.current;
+        importedWrite.current = null;
+        if (imported.value === JSON.stringify({ monthlyIncome, fixedCosts, categories, cards })) return;
+      }
       window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
       setLastSavedAt(new Date());
       setSaveError("");
@@ -161,7 +170,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     [cards, categories, fixedCosts, monthlyIncome]
   );
   const snapshotRef = useRef(currentBudgetSnapshot);
-  if (JSON.stringify(snapshotRef.current) !== JSON.stringify(currentBudgetSnapshot)) importEpoch.current += 1;
+  if (snapshotRef.current !== currentBudgetSnapshot && JSON.stringify(snapshotRef.current) !== JSON.stringify(currentBudgetSnapshot)) importEpoch.current += 1;
   snapshotRef.current = currentBudgetSnapshot;
 
   function importStillCurrent(userId: string | null, before: string, epoch: number): boolean {
@@ -186,8 +195,21 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
         cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
       }
       preserveBeforeImport(userId, before);
+      // localStorage has no cross-tab compare-and-swap. Recheck after recovery
+      // and write synchronously to eliminate the deferred-effect race, without
+      // claiming atomic exclusion of simultaneous writes in other processes.
+      if (window.localStorage.getItem(getUserDataKey(userId)) !== pendingImport.storedBefore) {
+        cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
+      }
+      const value = JSON.stringify({ monthlyIncome: snapshot.monthlyIncome, fixedCosts: snapshot.fixedCosts, categories: snapshot.categories, cards: snapshot.cards });
+      window.localStorage.setItem(getUserDataKey(userId), value);
+      importedWrite.current = { userId, value };
+      setBlockedSaveUserId(null);
+      setDeletedBatch(null);
       appliedImportEpoch.current = epoch;
       applyBudgetSnapshot(snapshot);
+      setLastSavedAt(new Date());
+      setSaveError("");
       setImportMessage("검증한 " + snapshot.fixedCosts.length + "개 항목을 적용했습니다.");
     } catch { setImportMessage("복구 사본을 저장하지 못해 교체하지 않았습니다."); }
   }
@@ -197,20 +219,15 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     // Abort replacement if storage is full: recovery is a precondition, not best effort.
     if (blockedSaveUserId === userId) {
       const original = window.localStorage.getItem(getUserDataKey(userId));
-      if (original) window.localStorage.setItem(getUserDataKey(userId) + ":corrupt:" + Date.now().toString(36), original);
+      if (original) saveRecovery(window.localStorage, getUserDataKey(userId), "corrupt", original);
     }
-    window.localStorage.setItem(getUserDataKey(userId) + ":recovery:" + Date.now() + ":import", buildLivingCostBackup(JSON.parse(snapshot)));
-    setBlockedSaveUserId(null);
-    setDeletedBatch(null);
+    saveRecovery(window.localStorage, getUserDataKey(userId), "import", buildLivingCostBackup(JSON.parse(snapshot)));
   }
 
   function handleExportRecovery() {
     if (!currentUser) return;
     const rawOriginal = blockedSaveUserId === currentUser.id ? window.localStorage.getItem(getUserDataKey(currentUser.id)) : null;
-    const prefix = getUserDataKey(currentUser.id) + ":recovery:";
-    const keys = Object.keys(window.localStorage).filter((key) => key.startsWith(prefix))
-      .sort((a, b) => Number(b.slice(prefix.length).split(":")[0]) - Number(a.slice(prefix.length).split(":")[0]));
-    const backup = rawOriginal ?? (keys[0] ? window.localStorage.getItem(keys[0]) : null);
+    const backup = rawOriginal ?? newestImportRecovery(window.localStorage, getUserDataKey(currentUser.id));
     if (!backup) { setImportMessage("이 공간에는 교체 전 복구본이 없습니다."); return; }
     const url = URL.createObjectURL(new Blob([backup], { type: "text/plain;charset=utf-8" }));
     const link = document.createElement("a");
