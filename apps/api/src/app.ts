@@ -3,7 +3,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import type { PrismaClient } from "@prisma/client";
-import type { FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import Fastify from "fastify";
 
 import { type Env, loadEnv } from "./env.js";
@@ -12,11 +12,13 @@ import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
 import { accountRoutes } from "./routes/account.js";
 import { authRoutes } from "./routes/auth.js";
 import { invitationRoutes } from "./routes/invitations.js";
+import { marketingRoutes } from "./routes/marketing.js";
 import { memberRoutes } from "./routes/members.js";
 import { pushRoutes } from "./routes/push.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { createEmailProvider, type EmailProvider } from "./services/email.js";
+import { shouldDisableRequestLogging } from "./services/marketing-metrics.js";
 import { configureWebPush } from "./services/push.js";
 
 declare module "fastify" {
@@ -30,13 +32,22 @@ declare module "fastify" {
 type BuildAppOptions = {
   env?: Env;
   prisma?: PrismaClient;
+  /**
+   * 테스트/운영에서 커스텀 logger 를 주입할 때 쓴다(Fastify 는 인스턴스를
+   * `loggerInstance` 로 받는다). 미주입 시 기존 동작 유지.
+   */
+  logger?: FastifyBaseLogger;
 };
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const env = options.env ?? loadEnv();
   const prisma = options.prisma ?? getPrismaClient();
   const app = Fastify({
-    logger: env.NODE_ENV !== "test"
+    ...(options.logger ? { loggerInstance: options.logger } : { logger: env.NODE_ENV !== "test" }),
+    // 마케팅 이벤트 수집 경로는 성공/거절/오류 어느 경우에도 요청·본문·쿼리를
+    // 기록하지 않는다(IP/UA 가 로그에 남지 않도록). 다른 라우트의 보안 로그는
+    // 그대로 유지된다 — predicate 가 해당 경로만 선별한다.
+    disableRequestLogging: shouldDisableRequestLogging
   });
 
   app.decorate("prisma", prisma);
@@ -98,6 +109,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(memberRoutes);
     await api.register(snapshotRoutes);
     await api.register(pushRoutes);
+    // 익명 마케팅 이벤트 수집(default off — env 게이트 안에서만 등록된다).
+    await api.register(marketingRoutes);
     api.get("/health", async (_request, reply) => {
       const commitSha = env.RELEASE_SHA ?? env.LCM_COMMIT_SHA ?? "development";
       if (commitSha !== "development") reply.header("X-Release-Sha", commitSha);

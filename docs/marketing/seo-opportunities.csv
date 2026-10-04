@@ -1,0 +1,11 @@
+id,status,path,keyword_or_fact,basis,proposed_action,metric,baseline,gate
+S1-E,evidence,/guide/,구독·고정비 갱신 안내와 대시보드 CTA 존재,apps/web/app/guide/page.tsx:6-39; docs/usability-release-20261005.md:35,기존 페이지 유지,검색 성과를 뜻하지 않는 콘텐츠 존재 확인,unknown,2026-10-05 소스 대조; 현재 검색 순위 미검증
+S1-H,hypothesis,/guide/,연간 구독 관리 방법,검색 수요 미검증,연간 구독 직접 관리 상황을 도입문에서 명료화하는 안 검토,해당 페이지 GSC 클릭·노출·CTR,unknown,페이지별 인증 export와 Owner 변경 승인 후
+S2-E,evidence,/guide/billing-dates/,월환산과 30일 청구액 및 카드 결제일 차이 설명,apps/web/app/guide/content.ts:11-35,설명 정확성 유지,콘텐츠 존재 확인,unknown,릴리스 HTTP200 기록은 검색 노출 증거 아님
+S2-H,hypothesis,/guide/billing-dates/,연간 결제 월환산; 구독 청구일 카드 결제일 차이,검색량·경쟁도 자료 없음,기존 가상 예시와 용어 차이를 우선 노출하는 안 검토,해당 페이지 GSC 클릭·노출·CTR,unknown,Dates.csv만으로 페이지별 판단 금지
+S3-E,evidence,/guide/renewal-checklist/,해지 예정은 자동 해지가 아니며 확인 절감과 예상 분리,apps/web/app/guide/content.ts:40-60,주의 문구 유지,콘텐츠 존재 확인,unknown,절감 실적 증거 아님
+S3-H,hypothesis,/guide/renewal-checklist/,구독 갱신 전 체크리스트,검색 수요 미검증,기존 점검 순서의 이해도를 인터뷰에서 확인,도움 없이 실제 해지와 기록을 구분한 과제 수/유효 시도 수,unknown,면담 동의와 가상 데이터만; SEO 효과와 분리
+S4-E,evidence,/guide/backup-and-sync/,로컬 백업과 선택적 자동 업로드의 제한 설명,apps/web/app/guide/content.ts:65-85,자동 병합 불가 안내 유지,콘텐츠 존재 확인,unknown,현재 동기화 성공률 근거 아님
+S4-H,hypothesis,/guide/backup-and-sync/,로컬 가계부 백업; 브라우저 데이터 백업,검색 수요 미검증,기기 변경 전 백업 순서를 강조하는 안 검토,해당 페이지 GSC 클릭·노출·CTR,unknown,페이지별 자료와 승인 전에는 초안만
+S5-E,evidence,/guide/faq/,로그인·자동 연동·해지·복원 제한 FAQ 존재,apps/web/app/guide/faq/page.tsx:6-17; apps/web/app/guide/content.ts:91-100,기존 FAQ 내부 링크 유지,콘텐츠 존재 확인,unknown,FAQ 구조화 데이터가 검색 리치 결과를 보장하지 않음
+S5-H,hypothesis,/guide/faq/,로그인 없는 구독 관리; 구독 자동 해지 여부,검색 수요 미검증,실제 관찰된 오해가 있을 때만 질문 순서 개선,과제에서 자동 해지로 오해한 수/유효 시도 수,unknown,인터뷰 결과와 검색 성과를 구분

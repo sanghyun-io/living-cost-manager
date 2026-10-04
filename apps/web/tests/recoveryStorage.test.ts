@@ -3,9 +3,9 @@ import { newestImportRecovery, saveRecovery } from "../app/lib/recoveryStorage";
 
 test("bounded owned recovery retention preserves unknown backups and newest copy on quota", () => {
   const storage = Object.create({
-    getItem(key: string) { return this[key] ?? null; },
-    setItem(key: string, value: string) { this[key] = value; },
-    removeItem(key: string) { delete this[key]; }
+    getItem(this: Record<string, string>, key: string) { return this[key] ?? null; },
+    setItem(this: Record<string, string>, key: string, value: string) { this[key] = value; },
+    removeItem(this: Record<string, string>, key: string) { delete this[key]; }
   }) as Storage;
   storage.setItem("user:recovery:unknown", "untouched");
   storage.setItem("user:corrupt:legacy", "provenance");

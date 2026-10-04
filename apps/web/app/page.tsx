@@ -7,6 +7,7 @@ import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
 import { getMonthlyEquivalentAmount } from "./lib/budget";
 import { AppHeader } from "./components/AppHeader";
+import { MarketingConsentControl } from "./components/MarketingConsentControl";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
 import { InsightsPanel } from "./components/InsightsPanel";
@@ -50,7 +51,7 @@ export default function Home() {
     auth,
     getBudget: () => (budgetRef.current as BudgetDataApi).getCurrentBudgetSnapshot()
   });
-  const budget = useBudgetData({ users, ui });
+  const budget = useBudgetData({ users, ui, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId });
   const coach = useCoach({ budget, serverApi: auth.serverApi });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: users.currentUser?.id ?? null,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
@@ -136,6 +137,7 @@ export default function Home() {
   return (
     <main className="page-shell">
       <a className="skip-link" href="#fixed-costs">고정비 편집으로 건너뛰기</a>
+      <MarketingConsentControl />
       <AppHeader
         saveError={budget.saveError}
         onRetrySave={budget.retrySave}

@@ -38,10 +38,12 @@ import type { UIStateApi } from "./useUIState";
 import type { LocalUsersApi } from "./useLocalUsers";
 import { duplicateCost, emptyCostFilters, filterCosts } from "./costViews";
 import { newestImportRecovery, saveRecovery } from "./recoveryStorage";
+import { classifyItemChangeSignals, currentMarketingScope, isPendingSignalSatisfied, sendMarketingEvent, type PendingMarketingSignal, type MarketingEventName } from "./marketing";
 
 interface UseBudgetDataOptions {
   users: LocalUsersApi;
   ui: UIStateApi;
+  marketingPersonal?: boolean;
 }
 
 /**
@@ -49,7 +51,8 @@ interface UseBudgetDataOptions {
  * per-user localStorage load & save, every CRUD handler, and the derived
  * summaries the dashboard renders.
  */
-export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
+export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudgetDataOptions) {
+  const pendingMarketing = useRef<PendingMarketingSignal[]>([]);
   const [monthlyIncome, setMonthlyIncome] = useState(3_000_000);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(seedFixedCosts);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
@@ -79,6 +82,12 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const { currentUser, isBootLoaded, isLoaded, setIsLoaded } = users;
   const { categoryFilterId, setCategoryFilterId, selectedDeleteIds, setIsDeleteMode, setSelectedDeleteIds, setImportMessage } = ui;
 
+  function queueMarketing(event: MarketingEventName, itemId: string, value: string | null = null) {
+    const scope = currentMarketingScope();
+    if (!scope || !marketingPersonal || users.isSampleMode || !currentUser || currentUser.serverUserId || !isLoaded || loadedUserId !== currentUser.id || blockedSaveUserId === currentUser.id) return;
+    if (pendingMarketing.current.length < 24) pendingMarketing.current.push({ event, itemId, value, scope, profileId: currentUser.id });
+  }
+
   useEffect(() => {
     if (!currentUser) return;
     const erase = () => {
@@ -94,6 +103,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
   // ── per-user localStorage load / save ────────────────────────────────
   useEffect(() => {
+    pendingMarketing.current = [];
     if (!isBootLoaded) {
       return;
     }
@@ -131,6 +141,9 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }, [currentUser, isBootLoaded]);
 
   useEffect(() => {
+    // An explicit action is eligible for this persistence attempt only. Failed,
+    // blocked, replaced, or imported writes never become a future retry/backfill.
+    const signals = pendingMarketing.current.splice(0);
     if (!isBootLoaded || !isLoaded || !currentUser || loadedUserId !== currentUser.id || blockedSaveUserId === currentUser.id) {
       return;
     }
@@ -147,6 +160,14 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
       setLastSavedAt(new Date());
       setSaveError("");
+      if (marketingPersonal && !users.isSampleMode && !currentUser.serverUserId) {
+        const scope = currentMarketingScope();
+        for (const signal of signals) {
+          if (signal.profileId === currentUser.id && signal.scope === scope && isPendingSignalSatisfied(signal, fixedCosts)) {
+            sendMarketingEvent(signal.event, { workspace: { sharedWorkspace: false } });
+          }
+        }
+      }
     } catch {
       setSaveError("브라우저 저장 공간에 저장하지 못했습니다. 전체 백업을 먼저 내보내세요.");
     }
@@ -246,6 +267,13 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
   function handleItemChange(id: string, patch: Partial<Omit<FixedCost, "id">>) {
     importEpoch.current += 1;
+    const previous = fixedCosts.find((item) => item.id === id);
+    if (previous) {
+      for (const signal of classifyItemChangeSignals(patch)) {
+        const oldValue = signal.event === "personal_billing_date_saved" ? previous.billingAnchorDate : previous.renewalStatus;
+        if (oldValue !== signal.value) queueMarketing(signal.event, id, signal.value);
+      }
+    }
     setFixedCosts((items) => items.map((item) => (item.id === id ? updateFixedCost(item, patch) : item)));
   }
 
@@ -303,6 +331,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       billingDay: 1
     });
     setFixedCosts((items) => [...items, nextItem]);
+    queueMarketing("personal_cost_saved", nextItem.id);
     revealItem(nextItem.id);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
     return true;
@@ -526,6 +555,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
+    pendingMarketing.current = [];
     cancelImport();
     setDeletedBatch(null);
     setMonthlyIncome(snapshot.monthlyIncome);

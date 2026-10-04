@@ -2,6 +2,10 @@
 
 생활비와 고정비를 관리하는 모노레포 프로젝트입니다. 프론트엔드는 Cloudflare Pages, API와 PostgreSQL은 OCI에서 운영합니다. 현재 배포·복구 절차는 [DEPLOYMENT_MIGRATION.md](DEPLOYMENT_MIGRATION.md)를 기준으로 합니다.
 
+## 마케팅 검증 자료와 운영 보고
+
+[마케팅 준비 키트](docs/marketing/README.md)에서 기능 근거, 인터뷰, SEO 가설, 실험 및 주간 보고 절차를 확인합니다. [고정 캠페인 링크 도구](docs/marketing-campaign-links.md)는 개인정보 없이 승인 전 링크를 준비합니다. 원본 내보내기와 생성 보고서는 gitignored `marketing-private/`에 보관합니다. 이벤트 수는 사용자 수·전환율·재방문율이 아닙니다.
+
 ## 모노레포 구조
 
 ```text

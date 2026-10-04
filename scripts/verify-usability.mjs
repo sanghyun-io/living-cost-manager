@@ -90,6 +90,7 @@ try {
   await run("pnpm", ["prisma", "generate"]);
   await run("pnpm", ["--filter", "@living-cost-manager/shared", "build"]);
   await run("node", ["--test", "scripts/verification-target.test.mjs"]);
+  await run("pnpm", ["test:marketing"]);
   await assertVerificationTarget(env);
   await run("pnpm", ["test"]);
   await run("pnpm", ["build"]);
@@ -112,6 +113,7 @@ try {
   await run("node", ["scripts/usability-browser.mjs"]);
   await run("node", ["scripts/pm-local-e2e.mjs"]);
   await run("node", ["scripts/pm-sync-e2e.mjs"]);
+  await run("node", ["scripts/verify-marketing.mjs"]);
   console.log("PASS: shared/web/API tests, builds, service worker, desktop/mobile and sync browser regressions");
 } catch (error) {
   console.error(error); process.exitCode = 1;

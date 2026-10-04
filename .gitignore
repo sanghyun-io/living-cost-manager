@@ -10,3 +10,5 @@ out/
 tmp-screenshots/
 tmp-debug/
 .playwright-mcp/
+# Operator-only source exports, research notes and generated evidence packs.
+marketing-private/

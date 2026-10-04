@@ -48,7 +48,16 @@ export const envSchema = z.object({
   ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900), // 15m
   REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(60 * 60 * 24 * 7), // 7d
   PASSWORD_RESET_TTL: z.coerce.number().int().positive().default(60 * 60), // 1h
-  EMAIL_VERIFICATION_TTL: z.coerce.number().int().positive().default(60 * 60 * 24) // 24h
+  EMAIL_VERIFICATION_TTL: z.coerce.number().int().positive().default(60 * 60 * 24), // 24h
+
+  // Marketing event collector (익명 일별 집계). default off.
+  // enabled=true 이면서 MARKETING_METRICS_FILE 이 절대경로일 때만 라우트가 등록된다.
+  // 절대경로 검증/사유 판정은 resolveMarketingMetricsConfig 가 런타임에 한다 — 여기서는
+  // 파싱만 하고, 오설정 하나가 재무 API 전체 부팅을 실패시키지 않도록 collector 만 끈다.
+  // 운영자가 명시적으로 true 로 켰는데 파일 경로가 없거나 상대경로면 라우트가 미등록(404)
+  // 되고 warn 로그 한 줄만 남는다(경로 값은 노출하지 않는다).
+  MARKETING_METRICS_ENABLED: z.string().optional().transform((value) => value === "true"),
+  MARKETING_METRICS_FILE: z.string().trim().optional()
 });
 
 export type Env = z.infer<typeof envSchema>;
