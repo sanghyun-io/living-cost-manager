@@ -22,6 +22,7 @@ export function ModalShell({ opened, sectionLabel, title, size = "md", onClose, 
     <Modal
       opened={opened}
       onClose={onClose}
+      closeButtonProps={{ "aria-label": `${title} 닫기` }}
       size={size}
       centered
       radius="md"

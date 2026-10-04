@@ -125,6 +125,7 @@ export default function Home() {
 
   return (
     <main className="page-shell">
+      <a className="skip-link" href="#fixed-costs">고정비 편집으로 건너뛰기</a>
       <AppHeader
         saveError={budget.saveError}
         onRetrySave={budget.retrySave}
@@ -159,9 +160,10 @@ export default function Home() {
 
       <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
 
-      <section className="workspace" id="fixed-costs" aria-label="고정비 편집">
+      <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
         {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
         <FixedCostTable
+          focusItemId={budget.focusItemId}
           costFilters={budget.costFilters}
           onCostFilters={budget.setCostFilters}
           onResetFilters={budget.resetCostFilters}

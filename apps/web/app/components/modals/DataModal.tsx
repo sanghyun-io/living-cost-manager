@@ -66,6 +66,7 @@ export function DataModal({
       </Text>
       <input
         ref={importFileRef}
+        aria-label="CSV 파일 가져오기"
         className="sr-only"
         type="file"
         accept=".csv,text/csv"
@@ -73,6 +74,7 @@ export function DataModal({
       />
       <input
         ref={backupFileRef}
+        aria-label="전체 백업 파일 가져오기"
         className="sr-only"
         type="file"
         accept=".lcm,text/plain"

@@ -57,6 +57,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [saveError, setSaveError] = useState("");
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [costFilters, setCostFilters] = useState(emptyCostFilters);
+  const [focusItemId, setFocusItemId] = useState<string | null>(null);
   const [deletedBatch, setDeletedBatch] = useState<{ userId: string; items: FixedCost[] } | null>(null);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
@@ -216,6 +217,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       billingDay: 1
     });
     setFixedCosts((items) => [...items, nextItem]);
+    revealItem(nextItem.id);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
   }
 
@@ -224,6 +226,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     if (!original) return;
     const copy = duplicateCost(original, "cost-" + crypto.randomUUID());
     setFixedCosts((items) => [...items, copy]);
+    revealItem(copy.id);
     setCategoryFilterId("all");
     setCostFilters(emptyCostFilters);
     setImportMessage(copy.name + " 항목을 복제했습니다.");
@@ -245,10 +248,16 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       billingDay: 1
     });
     setFixedCosts((items) => [...items, nextItem]);
+    revealItem(nextItem.id);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
   }
 
   // ── delete mode ──────────────────────────────────────────────────────
+  function revealItem(id: string) {
+    setCategoryFilterId("all");
+    setCostFilters(emptyCostFilters);
+    setFocusItemId(id);
+  }
   function handleEnterDeleteMode() {
     setIsDeleteMode(true);
     setSelectedDeleteIds([]);
@@ -471,6 +480,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   return {
     monthlyIncome,
     fixedCosts,
+    focusItemId,
     costFilters,
     setCostFilters,
     resetCostFilters: () => { setCostFilters(emptyCostFilters); setCategoryFilterId("all"); },

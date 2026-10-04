@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
 import { suggestCategoryId, computeNextDueDate, billingDateSchema } from "@living-cost-manager/shared";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
@@ -8,6 +8,7 @@ import { previewQuickAdd } from "../lib/quickAdd";
 import { formatWon, getPaymentOptions } from "../lib/formatting";
 
 interface FixedCostTableProps {
+  focusItemId: string | null;
   costFilters: CostFilters;
   onCostFilters: (filters: CostFilters) => void;
   onResetFilters: () => void;
@@ -59,6 +60,7 @@ function categoryColor(id: string): string {
 }
 
 export function FixedCostTable({
+  focusItemId,
   costFilters, onCostFilters, onResetFilters,
   categories,
   cards,
@@ -87,6 +89,10 @@ export function FixedCostTable({
   const filterData = [{ value: "all", label: "전체" }, ...categoryData];
   const methodData = PAYMENT_METHODS.map((m) => ({ value: m.id, label: m.label }));
   const [quickAddText, setQuickAddText] = useState("");
+  const focusInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusItemId) { focusInput.current?.focus(); focusInput.current?.select(); }
+  }, [focusItemId]);
   const quickPreview = previewQuickAdd(quickAddText);
 
   function submitQuickAdd() {
@@ -220,6 +226,7 @@ export function FixedCostTable({
               <span>
                 <TextInput
                   aria-label="항목명"
+                  ref={item.id === focusItemId ? focusInput : undefined}
                   label="항목명" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   value={item.name}

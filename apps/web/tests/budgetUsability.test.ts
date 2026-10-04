@@ -31,6 +31,17 @@ export function setupBudget() {
   return { render, users, ui, storage, values, save: () => hooks.effects[2]() };
 }
 beforeEach(() => { hooks.slots = []; vi.unstubAllGlobals(); });
+test("new and duplicated items reveal a focus target even with filters active", () => {
+  const h = setupBudget();
+  h.render().setCostFilters({ query: "hidden", method: "all", review: "completed", sort: "amount" });
+  h.render().handleAddItem();
+  let b = h.render();
+  expect(b.visibleFixedCosts.some(x => x.id === b.focusItemId)).toBe(true);
+  const first = b.focusItemId!;
+  b.handleDuplicateItem(first); b = h.render();
+  expect(b.focusItemId).not.toBe(first);
+  expect(b.visibleFixedCosts.some(x => x.id === b.focusItemId)).toBe(true);
+});
 test("invalid quick input never creates a placeholder row", () => {
   const h = setupBudget();
   const before = h.render().fixedCosts;
