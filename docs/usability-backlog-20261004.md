@@ -22,6 +22,7 @@
 ## 완료 게이트
 
 ### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+- 7 완료 — 기준일/소수 주기 미확인 원인·수정, 실제 청구액/비교용 월환산 구분, 월말 보정 안내. scheduleHelp + billingPersistence 4/4 통과 (윤년/평년 포함). commit: `feat(usability): explain billing schedule setup and monthly equivalents`.
 - 6 완료 — 새 행/복제/빠른 추가 이름 포커스, 건너뛰기 링크, 모달 닫기·파일 입력 이름, 모바일 44px 편집 영역. budgetUsability 4/4 통과 (필터 후 포커스 대상 노출 포함). 실제 터치/overflow는 10번 브라우저 회귀. commit: `feat(usability): accessible focus and mobile editing targets`.
 - 5 완료 — 파싱 미리보기/기본 매월 명시, 누락·범위 오류 입력 보존, IME Enter 차단. quickAdd + budgetUsability 4/4 통과. 브라우저 IME 검증은 10번 통합 명령에 포함. commit: `feat(usability): preview and validate quick entry`.
 - 4 완료 — 최근 삭제 병합 복원, 후속 편집 보존, 프로필 로드/스냅샷 교체/가져오기 무효화, 삭제된 참조 보정. budgetUsability 2/2 통과. 연속 추가 ID 충돌도 UUID로 해결. commit: `feat(usability): undo deletion without reverting subsequent edits`.

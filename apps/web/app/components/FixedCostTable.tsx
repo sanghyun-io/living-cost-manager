@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
-import { suggestCategoryId, computeNextDueDate, billingDateSchema } from "@living-cost-manager/shared";
+import { suggestCategoryId, billingDateSchema } from "@living-cost-manager/shared";
+import { scheduleHelp } from "../lib/scheduleHelp";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
 import type { CostFilters } from "../lib/costViews";
@@ -299,10 +300,7 @@ export function FixedCostTable({
                     if (!date || billingDateSchema.safeParse(date).success) onItemChange(item.id, { billingAnchorDate: date || null });
                   }}
                 />
-                <Text size="xs" c="dimmed">{(() => {
-                  const due = computeNextDueDate(item, new Date());
-                  return due ? `다음 ${due.getFullYear()}/${due.getMonth() + 1}/${due.getDate()}` : "다음 납부일 미확인";
-                })()}</Text>
+                <Text size="xs" c="dimmed">{scheduleHelp(item)}</Text>
                 <Checkbox
                   aria-label="말일"
                   label="말일"
@@ -316,6 +314,7 @@ export function FixedCostTable({
                 <NumberInput
                   aria-label="금액"
                   label="금액" classNames={{ label: "stacked-field-label" }}
+                  description="매 청구 시 실제 결제 금액"
                   size="xs"
                   min={0}
                   thousandSeparator=","
@@ -345,6 +344,7 @@ export function FixedCostTable({
               <span className="monthly-equivalent-cell">
                 <Text fw={700} size="sm" className="tnum">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
                 <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
+                <Text size="xs" c="dimmed">월 환산은 비교용이며 실제 청구액과 다를 수 있어요.</Text>
                 <Select size="xs" label="갱신 검토" value={item.renewalStatus ?? "unreviewed"}
                   allowDeselect={false}
                   data={[
