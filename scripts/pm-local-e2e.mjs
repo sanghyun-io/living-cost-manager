@@ -40,7 +40,7 @@ try {
   let cost = (await snapshot()).fixedCosts[0];
   assert.equal(cost.periodMonths, 12);
   assert.equal(cost.billingAnchorDate ?? null, null);
-  await page.getByText("다음 납부일 미확인", { exact: true }).waitFor();
+   await page.getByText(/다음 납부일 미확인: 실제 청구/).waitFor();
   await page.getByLabel(/기준 납부일/).fill("2026-10-04");
   await waitFor(async () => (await snapshot()).fixedCosts[0].billingAnchorDate === "2026-10-04", "anchor persisted");
   const insights = page.getByRole("region", { name: "예측 및 절감 인사이트" });

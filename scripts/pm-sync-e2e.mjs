@@ -2,12 +2,14 @@
 import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
-const origin = "http://127.0.0.1:3318";
-const api = "http://127.0.0.1:4318";
+const origin = process.env.LCM_E2E_ORIGIN || "http://127.0.0.1:3318";
+const api = process.env.LCM_E2E_API || "http://127.0.0.1:4318";
+assert.equal(new URL(origin).hostname, "127.0.0.1");
+assert.equal(new URL(api).hostname, "127.0.0.1");
 const databaseUrl = process.env.API_TEST_DATABASE_URL;
 const target = new URL(databaseUrl);
 assert.equal(target.hostname, "127.0.0.1");
-assert.equal(target.port, "55483");
+assert.ok(Number(target.port) > 0);
 assert.equal(target.pathname, "/lcm_test");
 assert.equal(target.searchParams.get("schema"), "lcm_test");
 const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
@@ -39,7 +41,14 @@ async function waitFor(check, label) {
   for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise((r) => setTimeout(r, 100)); }
   throw new Error(label);
 }
-const openData = () => page.locator("header").getByRole("button", { name: /데이터 관리|서버 연결됨/ }).click();
+const openData = async () => {
+  if (await page.getByRole("dialog", { name: /데이터 관리/ }).isVisible()) return;
+  await page.locator("header.app-header").getByRole("button", { name: /^(데이터 관리|서버 연결됨 · 동기화 관리)$/ }).click();
+};
+const closeData = async () => {
+  await page.getByRole("button", { name: "데이터 관리 닫기", exact: true }).click();
+  await page.getByRole("dialog", { name: /데이터 관리/ }).waitFor({ state: "hidden" });
+};
 try {
   await page.goto(origin);
   await page.locator("header").getByRole("button", { name: "로그인", exact: true }).click();
@@ -47,7 +56,8 @@ try {
   await page.getByLabel("비밀번호", { exact: true }).fill(password);
   await page.getByRole("dialog").getByRole("button", { name: "로그인", exact: true }).click();
   await waitFor(async () => await page.evaluate(() => localStorage.getItem("living-cost-manager:active-user:v1")) === "server:" + fixture.user.id, "authenticated profile selected");
-  await page.keyboard.press("Escape");
+  await page.getByRole("dialog", { name: "클라우드 로그인", exact: true }).waitFor({ state: "hidden" });
+  await closeData();
   await page.getByLabel("빠른 추가", { exact: true }).fill("동기화 구독 120000원 매년");
   await page.getByRole("button", { name: "추가", exact: true }).click();
   await page.getByLabel(/기준 납부일/).fill("2026-10-04");
@@ -56,7 +66,7 @@ try {
   await waitFor(async () => (await getRemote()).fixedCosts[0]?.billingAnchorDate === "2026-10-04", "manual baseline saved");
   const automatic = page.getByRole("checkbox", { name: /변경사항 자동 업로드/ });
   await automatic.check();
-  await page.keyboard.press("Escape");
+  await closeData();
   await page.getByLabel("금액", { exact: true }).fill("240000");
   await waitFor(async () => (await getRemote()).fixedCosts[0]?.amount === 240000, "automatic upload saved");
   const remote = await getRemote();
@@ -81,7 +91,7 @@ try {
   }, { times: 1 });
   await page.getByRole("button", { name: "서버 데이터 불러오기", exact: true }).click();
   await waitFor(() => loadWaiting, "delayed snapshot started");
-  await page.keyboard.press("Escape");
+  await closeData();
   await page.getByLabel("금액", { exact: true }).fill("500000");
   releaseLoad();
   await openData();
@@ -89,7 +99,7 @@ try {
   assert.equal((await local()).fixedCosts[0].amount, 500000, "late snapshot cannot overwrite edits");
   await page.getByRole("button", { name: "서버 데이터 불러오기", exact: true }).click();
   await waitFor(async () => (await local()).fixedCosts[0].amount === 360000, "explicit retry restored remote");
-  await page.keyboard.press("Escape");
+  await closeData();
   // Returning from demo must restore this server-linked local profile, without reconnecting it.
   await page.getByRole("button", { name: "분리된 샘플 체험", exact: true }).click();
   await page.getByRole("button", { name: "내 데이터로 시작 / 돌아가기", exact: true }).click();
