@@ -44,7 +44,7 @@ function parseAmount(text: string): AmountMatch | null {
   }
 
   // 2) 순수 숫자(쉼표 허용) + 선택적 "원". 예: "17,000원", "17000".
-  const numeric = text.match(/(\d[\d,]*)\s*원?/);
+  const numeric = text.match(/(\d[\d,]*)\s*원/) ?? text.match(/(?<!\S)(\d[\d,]*)(?![\d-])/);
   if (numeric) {
     const digits = numeric[1].replace(/,/g, "");
     const amount = Number.parseInt(digits, 10);
@@ -69,7 +69,7 @@ const PERIOD_RULES: ReadonlyArray<{ pattern: RegExp; months: number }> = [
 
 function parsePeriod(text: string): PeriodMatch | null {
   // 명시적 "N개월" 표기 우선
-  const explicit = text.match(/(\d+(?:\.\d+)?)\s*개월\s*(?:마다|에\s*한\s*번)?/);
+  const explicit = text.match(/((?:\d+(?:\.\d+)?|\.\d+))\s*개월\s*(?:마다|에\s*한\s*번)?/);
   if (explicit) {
     const months = Math.round(parseFloat(explicit[1]) * 10) / 10;
     if (months > 0) {

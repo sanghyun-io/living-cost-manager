@@ -1,0 +1,41 @@
+# 사용성 개선 실행 백로그
+
+기준 source `550686b`, 운영 FE/API `b9aee691b09662849f5cca3a3690d0e3c32d3130`. 기존 기준일/30일 예정/검토 상태/안전 동기화를 신규 기능으로 집계하지 않는다.
+
+실제 desktop/mobile 감사 스크린샷: OpenCode 임시 루트 `lcm-usability-audit/{desktop-01-initial,mobile-01-initial,wf-07-data-modal,wf-05-delete-mode}.png`. 코드 근거는 `FixedCostTable.tsx`, `useBudgetData.ts`, `AppHeader.tsx`, `DataModal.tsx` 및 루트 package scripts. 감사의 추정사항(알림 없음, FastAPI 등)은 채택하지 않는다.
+
+아래 순서대로 구현하며 각 완료 시 결과/검증/commit을 기록한다. 새 DB schema 없이 기존 값과 사용자 경계를 보존한다.
+
+| 순서 | 우선순위 / 기능 | 사용자 문제와 가치 | 선행 | 수락조건 / 의미있는 검증 | 상태 |
+|---|---|---|---|---|---|
+| 1 | P0 저장 상태 및 실패 재시도 | 로컬 저장과 서버 저장 혼동, quota 실패 후 복구 어려움 | 없음 | 브라우저 저장임을 명시, 실패 재시도와 미저장 데이터 내보내기; 저장 실패 주입 후 복구 확인 | 완료 `746ff9f` |
+| 2 | P1 검색·필터·정렬 | 카테고리만으로 많은 항목 탐색 불가 | 1 | 이름/결제수단/검토 상태 조합, 금액·납부일 정렬, 초기화와 빈 결과; 조합/미확인 날짜 테스트 | 완료 `d80227e` |
+| 3 | P1 항목 복제 | 비슷한 항목 반복 입력 부담 | 2 | 새 ID, 청구 정보 보존, 검토/절감 초기화, 복제본 노출; 원본 불변 테스트 | 완료 `618ee35` |
+| 4 | P0 삭제 취소 | 삭제 실수를 즉시 복구 불가 | 3 | 최근 삭제 복원, 후속 편집 보존, 프로필/가져오기 경계 무효화; 데이터 손실 회귀 | 완료 `9a03346` |
+| 5 | P1 빠른 입력 미리보기 | 해석 결과와 실패를 제출 전 파악 불가 | 4 | 이름/금액/주기 미리보기, 유효하지 않으면 입력 보존, IME Enter 안전; 파싱/실패 브라우저 검증 | 완료 `8a0298d` |
+| 6 | P1 모바일·키보드 편집 | 작은 터치영역, 새 행 포커스와 모달 이름 부족 | 5 | 새 항목 포커스, 건너뛰기, 이름 있는 닫기/파일 입력, 모바일 터치/overflow 검증 | 완료 `5d3dfa7` |
+| 7 | P1 일정 설정 안내 | 기준일·소수 주기 미확인 원인 모름 | 6 | 미확인 이유와 수정 방법, 실제 청구액/월환산 구분, 월말 안내; 윤년·소수 주기 회귀 | 완료 `414d60d` |
+| 8 | P1 갱신 검토 작업 흐름 | 목록 전체에서 임박·미결정 항목 찾기 어려움 | 7 | 임박 미검토/해지예정/변경검토 중심 작업목록과 직접 편집 이동, 실제 절감 과장 없음; 상태 전이 검증 | 완료 `260c5e7` |
+| 9 | P0 가져오기 검증·미리보기 | 교체 전 내용과 영향 파악 불가 | 8 | 파일 검증 후 현재/대상 개수·금액 확인과 명시 적용/취소, 파일 읽기/프로필/편집 경쟁 방지; 손상/취소/경쟁 테스트 | 완료 `6dbb50f` |
+| 10 | P1 one-command 검증 DX | 격리 테스트와 브라우저 회귀 실행 경로 분산 | 9 | 문서화된 단일 명령, DB loopback/test guard, finally 서버/DB 종료, 실패 exit 전파; 실제 실행 확인 | 완료 `066cf9d` |
+
+## 완료 게이트
+
+후속 Owner 지시로 열 가지 기능의 main 통합·OCI/Pages 배포·공개 검증까지 승인되었다. 검증 명령/격리 및 정리 절차는 [로컬 검증 안내](./local-usability-verification.md)를 따른다. 아래 로컬 전용 체크포인트는 당시 실행 범위의 기록이며 현재 배포 범위를 제한하지 않는다.
+
+### 구현 체크포인트 (이전 로컬 구현 단계)
+- 최종 검증(구현 담당 독립 재확인) — 병렬 구현 에이전트 종료 후 `504a6d7` 단독 작성자 상태에서 `pnpm verify:usability` 재실행: EXIT 0, shared 92 / web 128 / API 129 = 349 tests, 소유권 guard 2 + service-worker 3, 전체 production build, Chromium 1440/390 사용성 회귀, 기존 로컬 여정과 실제 격리 API 동기화 회귀까지 전부 통과. `LCM_VERIFY_INJECT_FAILURE=after-db`는 EXIT 1 전파 및 임시 PostgreSQL 종료·삭제(`CLEANUP` 로그)로 확인했고 임시 클러스터 잔여물 0개. 원본 dirty worktree(`f884150`)·main 브랜치·오리진 미변경, push/deploy 없음.
+- 최종 결과 — 리뷰 수정 후 `pnpm verify:usability` 재실행: shared 92 / web 128 / API 129 = 349 tests, 임시 DB 소유권 guard 2 / service-worker 3, 전체 build, Chromium 1440/390 및 기존 로컬·실제 격리 API 회귀 통과. finally 종료·임시 cluster 삭제 완료. 별도 reviewer 후속 확인: H1/H2/H3 해결, 남은 blocker 없음. follow-up commit: `fix(usability): close import races and harden verification lifecycle`.
+- 최종 리뷰 보강 — 읽기 전용 reviewer H1/H2/H3 대응: 임시 cluster 소유권 표식/기본 DB 포트 거부, 최신 로드 ref와 폐기 안내, 브라우저 저장·필터 렌더 대기. 추가로 동일 이벤트 편집/원복·다른 탭 저장·이중 적용 회귀, 복구 전 현재 편집/원본 내보내기 구분, 프로세스 그룹 종료·실행 파일 누락 정리·SIGTERM exit 1 검증. 복구 사본은 데이터 보존을 위해 자동 삭제하지 않으며 Playwright 기본 경로는 Owner가 지정한 설치를 사용한다.
+- 10 완료 — `pnpm verify:usability`: 새 임시 loopback PostgreSQL/test DB, shared 92 + web 125 + API 129 = 346 tests, 전체 build, service-worker 3 tests, Chromium 1440/390 사용성, 기존 로컬/실제 API 동기화 회귀 모두 통과. 성공 finally 정리 완료. `LCM_VERIFY_INJECT_FAILURE=after-db`는 의도한 exit 1 및 DB 종료/삭제 확인. 브라우저 통화·현지 날짜·모달 전환 대기를 실제 UI에 맞춰 수정. commit: `test(usability): one-command isolated full-stack regression`.
+- 9 완료 — 검증 후 개수/월환산 미리보기, 명시 적용/취소, 복구 사본 선행. 파일 선택 세대·프로필 왕복·편집·모달 닫기 경쟁 차단. budgetUsability + dataSafety 10/10 통과. commit: `feat(usability): validated import preview with race-safe apply`.
+- 8 완료 — 임박 미검토/해지예정/변경검토 작업목록과 필터 해제·직접 편집 포커스. 예정/실제 절감 구분 유지. costViews 4/4 통과 (상태 전이·금액 불변). commit: `feat(usability): actionable renewal review queue`.
+- 7 완료 — 기준일/소수 주기 미확인 원인·수정, 실제 청구액/비교용 월환산 구분, 월말 보정 안내. scheduleHelp + billingPersistence 4/4 통과 (윤년/평년 포함). commit: `feat(usability): explain billing schedule setup and monthly equivalents`.
+- 6 완료 — 새 행/복제/빠른 추가 이름 포커스, 건너뛰기 링크, 모달 닫기·파일 입력 이름, 모바일 44px 편집 영역. budgetUsability 4/4 통과 (필터 후 포커스 대상 노출 포함). 실제 터치/overflow는 10번 브라우저 회귀. commit: `feat(usability): accessible focus and mobile editing targets`.
+- 5 완료 — 파싱 미리보기/기본 매월 명시, 누락·범위 오류 입력 보존, IME Enter 차단. quickAdd + budgetUsability 4/4 통과. 브라우저 IME 검증은 10번 통합 명령에 포함. commit: `feat(usability): preview and validate quick entry`.
+- 4 완료 — 최근 삭제 병합 복원, 후속 편집 보존, 프로필 로드/스냅샷 교체/가져오기 무효화, 삭제된 참조 보정. budgetUsability 2/2 통과. 연속 추가 ID 충돌도 UUID로 해결. commit: `feat(usability): undo deletion without reverting subsequent edits`.
+- 3 완료 — UUID 복제, 청구 필드 보존/검토·절감 초기화, 필터 해제로 복제본 노출. costViews 3/3 통과, 원본 불변 검증. commit: `feat(usability): duplicate costs with fresh review state`.
+- 2 완료 — 이름/결제수단/검토 조합, 실제 청구금액/납부일 정렬, 초기화/빈 결과. costViews + budgetUsability 3/3 통과. commit: `feat(usability): combined cost search filters and sorting`.
+- 1 완료 — 브라우저 저장 표시, quota 재시도, 현재 메모리 백업. `budgetUsability` 1/1 통과 (quota 실패→최신 수입 복구, 프로필 쓰기 차단). commit: `feat(usability): retry browser storage and export unsaved data`. shared 선행 build 필요 확인.
+
+각 기능 테스트와 checkpoint commit → 전체 shared/web/API 테스트 및 build → Chromium desktop/mobile → 별도 reviewer 및 모든 blocker 수정 → latest main 안전 통합 → 기존 OCI digest-pinned/Pages direct-upload runbook으로 배포 → 공개 SHA/브라우저 검증 → 임시 자원 종료. 운영 DB reset/drop 금지. 고객 알림 금지. 기존 dirty 원본 worktree 보존.

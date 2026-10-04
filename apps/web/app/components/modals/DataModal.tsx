@@ -3,8 +3,10 @@ import type { DataModalProps } from "../../lib/pageTypes";
 import { ModalShell } from "./ModalShell";
 import { ServerSyncPanel } from "./ServerSyncPanel";
 import { AnalyticsDashboard } from "../AnalyticsDashboard";
+import { formatWon } from "../../lib/formatting";
 
 export function DataModal({
+  importPreview, importMessage, onApplyImport, onCancelImport,
   opened,
   hasServerApi,
   importFileRef,
@@ -47,6 +49,13 @@ export function DataModal({
           </Group>
         </Card>
       </SimpleGrid>
+      {importMessage ? <Text role="status">{importMessage}</Text> : null}
+      {importPreview ? <Alert title="가져오기 미리보기 · 현재 데이터 교체" color="yellow">
+        <Text>현재 {importPreview.currentCount}개 · 월 환산 {formatWon(importPreview.currentAmount)}</Text>
+        <Text>가져올 내용 {importPreview.targetCount}개 · 월 환산 {formatWon(importPreview.targetAmount)}</Text>
+        <Text size="sm">적용하면 현재 데이터를 교체합니다. 교체 전 복구 사본을 이 브라우저에 보관합니다.</Text>
+        <Group mt="sm"><Button onClick={onApplyImport}>검증한 내용으로 교체 적용</Button><Button variant="default" onClick={onCancelImport}>가져오기 취소</Button></Group>
+      </Alert> : null}
       {hasServerApi ? (
         <ServerSyncPanel sync={sync} sharing={sharing} />
       ) : (
@@ -66,6 +75,7 @@ export function DataModal({
       </Text>
       <input
         ref={importFileRef}
+        aria-label="CSV 파일 가져오기"
         className="sr-only"
         type="file"
         accept=".csv,text/csv"
@@ -73,6 +83,7 @@ export function DataModal({
       />
       <input
         ref={backupFileRef}
+        aria-label="전체 백업 파일 가져오기"
         className="sr-only"
         type="file"
         accept=".lcm,text/plain"

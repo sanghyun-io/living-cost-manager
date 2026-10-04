@@ -1,4 +1,4 @@
-// Run against a local server with NEXT_PUBLIC_API_BASE_URL=''. No production requests.
+// Local browser-only journey; no API session is created. External requests are blocked.
 // PLAYWRIGHT_MODULE may point to an existing local Playwright installation.
 import assert from "node:assert/strict";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
@@ -40,7 +40,7 @@ try {
   let cost = (await snapshot()).fixedCosts[0];
   assert.equal(cost.periodMonths, 12);
   assert.equal(cost.billingAnchorDate ?? null, null);
-  await page.getByText("다음 납부일 미확인", { exact: true }).waitFor();
+   await page.getByText(/다음 납부일 미확인: 실제 청구/).waitFor();
   await page.getByLabel(/기준 납부일/).fill("2026-10-04");
   await waitFor(async () => (await snapshot()).fixedCosts[0].billingAnchorDate === "2026-10-04", "anchor persisted");
   const insights = page.getByRole("region", { name: "예측 및 절감 인사이트" });

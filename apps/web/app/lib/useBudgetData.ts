@@ -29,13 +29,15 @@ import { buildPieBackground, clampBillingDay, mergeCards, mergeCategories } from
 import { getUserDataKey, getUserErasureKey } from "./users";
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, parseBudgetSnapshot } from "./storage";
 import { seedFixedCosts, emptyBudgetSnapshot } from "./seedData";
-import { parseFixedCostInput } from "@living-cost-manager/shared";
+import { previewQuickAdd } from "./quickAdd";
 import { getCurrentBudgetSnapshotFromState } from "./snapshot";
 import { track } from "./analytics";
 import type { LocalBudgetSnapshot } from "./snapshot";
 import type { CardDraft } from "../components/modals/CardModal";
 import type { UIStateApi } from "./useUIState";
 import type { LocalUsersApi } from "./useLocalUsers";
+import { duplicateCost, emptyCostFilters, filterCosts } from "./costViews";
+import { newestImportRecovery, saveRecovery } from "./recoveryStorage";
 
 interface UseBudgetDataOptions {
   users: LocalUsersApi;
@@ -54,10 +56,23 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [cards, setCards] = useState<PaymentCard[]>(DEFAULT_CARDS);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState("");
+  const [saveAttempt, setSaveAttempt] = useState(0);
+  const [costFilters, setCostFilters] = useState(emptyCostFilters);
+  const [focusItemId, setFocusItemId] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const [deletedBatch, setDeletedBatch] = useState<{ userId: string; items: FixedCost[] } | null>(null);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
   const activeUserRef = useRef<string | null>(null);
+  const importEpoch = useRef(0);
+  const importReadId = useRef(0);
+  const appliedImportEpoch = useRef<number | null>(null);
+  const loadedScopeRef = useRef<string | null>(null);
+  const importedWrite = useRef<{ userId: string; value: string } | null>(null);
+  loadedScopeRef.current = users.isLoaded ? loadedUserId : null;
+  if (activeUserRef.current !== (users.currentUser?.id ?? null)) importEpoch.current += 1;
   activeUserRef.current = users.currentUser?.id ?? null;
+  const [pendingImport, setPendingImport] = useState<{ userId: string; before: string; storedBefore: string | null; epoch: number; snapshot: LocalBudgetSnapshot } | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
 
@@ -89,6 +104,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     }
 
     setIsLoaded(false);
+    setDeletedBatch(null);
     const stored = window.localStorage.getItem(getUserDataKey(currentUser.id));
     const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = parseBudgetSnapshot(stored ?? legacyStored);
@@ -96,7 +112,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     let recoveryFailed = false;
     if (parsed.recovered && stored) {
       try {
-        window.localStorage.setItem(getUserDataKey(currentUser.id) + ":corrupt:" + Date.now().toString(36), stored);
+        saveRecovery(window.localStorage, getUserDataKey(currentUser.id), "corrupt", stored);
       } catch {
         recoveryFailed = true;
       }
@@ -121,21 +137,28 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
     try {
       if (window.localStorage.getItem(getUserErasureKey(currentUser.id))) return;
+      // Import was persisted in its event handler. Never replay that write from
+      // an effect: another tab may have saved in the meantime.
+      if (importedWrite.current?.userId === currentUser.id) {
+        const imported = importedWrite.current;
+        importedWrite.current = null;
+        if (imported.value === JSON.stringify({ monthlyIncome, fixedCosts, categories, cards })) return;
+      }
       window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
       setLastSavedAt(new Date());
       setSaveError("");
     } catch {
       setSaveError("브라우저 저장 공간에 저장하지 못했습니다. 전체 백업을 먼저 내보내세요.");
     }
-  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, loadedUserId, blockedSaveUserId, monthlyIncome]);
+  }, [cards, categories, currentUser, fixedCosts, isBootLoaded, isLoaded, loadedUserId, blockedSaveUserId, monthlyIncome, saveAttempt]);
 
   // ── derived views ────────────────────────────────────────────────────
   const summary = useMemo(() => buildBudgetSummary(fixedCosts, monthlyIncome), [fixedCosts, monthlyIncome]);
   const buckets = useMemo(() => getCategoryBuckets(fixedCosts, categories), [categories, fixedCosts]);
   const pieSegments = useMemo(() => getCategoryPieSegments(buckets), [buckets]);
   const visibleFixedCosts = useMemo(
-    () => (categoryFilterId === "all" ? fixedCosts : fixedCosts.filter((item) => item.categoryId === categoryFilterId)),
-    [categoryFilterId, fixedCosts]
+    () => filterCosts(categoryFilterId === "all" ? fixedCosts : fixedCosts.filter((item) => item.categoryId === categoryFilterId), costFilters),
+    [categoryFilterId, fixedCosts, costFilters]
   );
   const visibleFixedCostTotal = useMemo(
     () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
@@ -147,10 +170,48 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     [cards, categories, fixedCosts, monthlyIncome]
   );
   const snapshotRef = useRef(currentBudgetSnapshot);
+  if (snapshotRef.current !== currentBudgetSnapshot && JSON.stringify(snapshotRef.current) !== JSON.stringify(currentBudgetSnapshot)) importEpoch.current += 1;
   snapshotRef.current = currentBudgetSnapshot;
 
-  function importStillCurrent(userId: string | null, before: string): boolean {
-    return userId !== null && activeUserRef.current === userId && JSON.stringify(snapshotRef.current) === before;
+  function importStillCurrent(userId: string | null, before: string, epoch: number): boolean {
+    return userId !== null && activeUserRef.current === userId && loadedScopeRef.current === userId && importEpoch.current === epoch && JSON.stringify(snapshotRef.current) === before;
+  }
+
+  function cancelImport() { importEpoch.current += 1; importReadId.current += 1; setPendingImport(null); }
+  function reportDiscardedImport(userId: string | null, readId: number) {
+    if (activeUserRef.current === userId && importReadId.current === readId) {
+      setImportMessage("데이터가 변경되어 가져오기를 취소했습니다. 파일을 다시 선택하세요.");
+    }
+  }
+  function applyImport() {
+    if (!pendingImport) return;
+    const { userId, before, epoch, snapshot } = pendingImport;
+    if (appliedImportEpoch.current === epoch) return;
+    if (!importStillCurrent(userId, before, epoch)) {
+      cancelImport(); setImportMessage("공간 또는 데이터가 변경되어 미리보기를 취소했습니다. 파일을 다시 선택하세요."); return;
+    }
+    try {
+      if (window.localStorage.getItem(getUserDataKey(userId)) !== pendingImport.storedBefore) {
+        cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
+      }
+      preserveBeforeImport(userId, before);
+      // localStorage has no cross-tab compare-and-swap. Recheck after recovery
+      // and write synchronously to eliminate the deferred-effect race, without
+      // claiming atomic exclusion of simultaneous writes in other processes.
+      if (window.localStorage.getItem(getUserDataKey(userId)) !== pendingImport.storedBefore) {
+        cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
+      }
+      const value = JSON.stringify({ monthlyIncome: snapshot.monthlyIncome, fixedCosts: snapshot.fixedCosts, categories: snapshot.categories, cards: snapshot.cards });
+      window.localStorage.setItem(getUserDataKey(userId), value);
+      importedWrite.current = { userId, value };
+      setBlockedSaveUserId(null);
+      setDeletedBatch(null);
+      appliedImportEpoch.current = epoch;
+      applyBudgetSnapshot(snapshot);
+      setLastSavedAt(new Date());
+      setSaveError("");
+      setImportMessage("검증한 " + snapshot.fixedCosts.length + "개 항목을 적용했습니다.");
+    } catch { setImportMessage("복구 사본을 저장하지 못해 교체하지 않았습니다."); }
   }
 
   function preserveBeforeImport(userId: string, snapshot: string) {
@@ -158,19 +219,15 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     // Abort replacement if storage is full: recovery is a precondition, not best effort.
     if (blockedSaveUserId === userId) {
       const original = window.localStorage.getItem(getUserDataKey(userId));
-      if (original) window.localStorage.setItem(getUserDataKey(userId) + ":corrupt:" + Date.now().toString(36), original);
+      if (original) saveRecovery(window.localStorage, getUserDataKey(userId), "corrupt", original);
     }
-    window.localStorage.setItem(getUserDataKey(userId) + ":recovery:" + Date.now() + ":import", buildLivingCostBackup(JSON.parse(snapshot)));
-    setBlockedSaveUserId(null);
+    saveRecovery(window.localStorage, getUserDataKey(userId), "import", buildLivingCostBackup(JSON.parse(snapshot)));
   }
 
   function handleExportRecovery() {
     if (!currentUser) return;
     const rawOriginal = blockedSaveUserId === currentUser.id ? window.localStorage.getItem(getUserDataKey(currentUser.id)) : null;
-    const prefix = getUserDataKey(currentUser.id) + ":recovery:";
-    const keys = Object.keys(window.localStorage).filter((key) => key.startsWith(prefix))
-      .sort((a, b) => Number(b.slice(prefix.length).split(":")[0]) - Number(a.slice(prefix.length).split(":")[0]));
-    const backup = rawOriginal ?? (keys[0] ? window.localStorage.getItem(keys[0]) : null);
+    const backup = rawOriginal ?? newestImportRecovery(window.localStorage, getUserDataKey(currentUser.id));
     if (!backup) { setImportMessage("이 공간에는 교체 전 복구본이 없습니다."); return; }
     const url = URL.createObjectURL(new Blob([backup], { type: "text/plain;charset=utf-8" }));
     const link = document.createElement("a");
@@ -183,10 +240,12 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
   // ── income & fixed-cost handlers ─────────────────────────────────────
   function handleIncomeChange(value: number) {
+    importEpoch.current += 1;
     setMonthlyIncome(Math.max(0, Math.round(value)));
   }
 
   function handleItemChange(id: string, patch: Partial<Omit<FixedCost, "id">>) {
+    importEpoch.current += 1;
     setFixedCosts((items) => items.map((item) => (item.id === id ? updateFixedCost(item, patch) : item)));
   }
 
@@ -199,8 +258,9 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function handleAddItem() {
+    importEpoch.current += 1;
     const nextItem = createFixedCost({
-      id: "cost-" + Date.now().toString(36),
+      id: "cost-" + crypto.randomUUID(),
       name: "새 고정비",
       categoryId: categories[0]?.id ?? "other",
       paymentMethodId: "bank-transfer",
@@ -210,15 +270,30 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       billingDay: 1
     });
     setFixedCosts((items) => [...items, nextItem]);
+    revealItem(nextItem.id);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
+  }
+
+  function handleDuplicateItem(id: string) {
+    const original = fixedCosts.find((item) => item.id === id);
+    if (!original) return;
+    importEpoch.current += 1;
+    const copy = duplicateCost(original, "cost-" + crypto.randomUUID());
+    setFixedCosts((items) => [...items, copy]);
+    revealItem(copy.id);
+    setCategoryFilterId("all");
+    setCostFilters(emptyCostFilters);
+    setImportMessage(copy.name + " 항목을 복제했습니다.");
   }
 
   // 자연어 한 줄("넷플릭스 17000원 매달")을 파싱해 고정비를 추가한다.
   // 추출 실패한 필드는 handleAddItem 과 동일한 기본값으로 폴백한다.
   function handleQuickAdd(text: string) {
-    const parsed = parseFixedCostInput(text);
+    const parsed = previewQuickAdd(text);
+    if (!parsed.valid) return false;
+    importEpoch.current += 1;
     const nextItem = createFixedCost({
-      id: "cost-" + Date.now().toString(36),
+      id: "cost-" + crypto.randomUUID(),
       name: parsed.name ?? "새 고정비",
       categoryId: categories[0]?.id ?? "other",
       paymentMethodId: "bank-transfer",
@@ -228,10 +303,18 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
       billingDay: 1
     });
     setFixedCosts((items) => [...items, nextItem]);
+    revealItem(nextItem.id);
     track({ type: "budget.fixed_cost_add", timestamp: Date.now(), data: { categoryId: nextItem.categoryId, amount: nextItem.amount } });
+    return true;
   }
 
   // ── delete mode ──────────────────────────────────────────────────────
+  function revealItem(id: string) {
+    setCategoryFilterId("all");
+    setCostFilters(emptyCostFilters);
+    setFocusItemId(id);
+    setFocusRequest((request) => request + 1);
+  }
   function handleEnterDeleteMode() {
     setIsDeleteMode(true);
     setSelectedDeleteIds([]);
@@ -262,6 +345,8 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     // 삭제 대상의 카테고리 정보를 state 필터로 미리 뽑아 두었다가 이벤트로 남긴다
     // (업데이터 안에서 side-effect 를 내면 StrictMode 이중 실행 시 중복 추적됨).
     const removedItems = fixedCosts.filter((item) => selectedDeleteIds.includes(item.id));
+    importEpoch.current += 1;
+    setDeletedBatch(currentUser ? { userId: currentUser.id, items: removedItems } : null);
     setFixedCosts((items) => items.filter((item) => !selectedDeleteIds.includes(item.id)));
     setSelectedDeleteIds([]);
     setIsDeleteMode(false);
@@ -272,18 +357,33 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   // ── categories ───────────────────────────────────────────────────────
+  function handleUndoDelete() {
+    if (!deletedBatch || deletedBatch.userId !== activeUserRef.current || loadedUserId !== activeUserRef.current) return;
+    if (window.localStorage.getItem(getUserErasureKey(deletedBatch.userId))) return;
+    importEpoch.current += 1;
+    const restored = deletedBatch.items.map((item) => ({ ...item,
+      categoryId: categories.some((category) => category.id === item.categoryId) ? item.categoryId : categories[0]?.id ?? "other",
+      paymentOptionId: item.paymentMethodId === "credit-card" && !cards.some((card) => card.id === item.paymentOptionId) ? "" : item.paymentOptionId
+    }));
+    setFixedCosts((items) => [...items, ...restored.filter((item) => !items.some((existing) => existing.id === item.id))]);
+    setDeletedBatch(null);
+    setImportMessage("최근 삭제를 취소했습니다.");
+  }
   // The draft label is owned by CategoryModal and handed up on submit.
   function handleAddCategory(label: string) {
+    importEpoch.current += 1;
     const nextCategory = createCategory(label);
     setCategories((currentCategories) => mergeCategories(currentCategories, [nextCategory]));
     track({ type: "budget.category_create", timestamp: Date.now(), data: {} });
   }
 
   function handleRenameCategory(categoryId: string, label: string) {
+    importEpoch.current += 1;
     setCategories((currentCategories) => renameCategory(currentCategories, categoryId, label));
   }
 
   function handleDeleteCategory(categoryId: string) {
+    importEpoch.current += 1;
     setCategories((currentCategories) => {
       const result = deleteCategory(currentCategories, fixedCosts, categoryId);
       setFixedCosts(result.items);
@@ -297,26 +397,31 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   // ── cards ────────────────────────────────────────────────────────────
   // CardModal owns the new-card draft fields and hands them up on submit.
   function handleAddCard(draft: CardDraft) {
+    importEpoch.current += 1;
     const nextCard = createPaymentCard(draft.label, draft.billingDay, draft.isEndOfMonth);
     setCards((currentCards) => mergeCards(currentCards, [nextCard]));
     track({ type: "budget.card_create", timestamp: Date.now(), data: {} });
   }
 
   function handleRenameCard(cardId: string, label: string) {
+    importEpoch.current += 1;
     setCards((currentCards) => renamePaymentCard(currentCards, cardId, label));
   }
 
   function handleUpdateCardEndOfMonth(cardId: string, isEndOfMonth: boolean) {
+    importEpoch.current += 1;
     setCards((currentCards) => updatePaymentCard(currentCards, cardId, { isEndOfMonth }));
     // Card settlement date is separate from a subscription merchant charge date.
   }
 
   function handleUpdateCardBillingDay(cardId: string, billingDay: number) {
+    importEpoch.current += 1;
     const nextBillingDay = clampBillingDay(billingDay);
     setCards((currentCards) => updatePaymentCard(currentCards, cardId, { billingDay: nextBillingDay }));
   }
 
   function handleDeleteCard(cardId: string) {
+    importEpoch.current += 1;
     setCards((currentCards) => {
       const result = deletePaymentCard(currentCards, fixedCosts, cardId);
       setFixedCosts(result.items);
@@ -362,24 +467,22 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
     const importingUserId = activeUserRef.current;
     const before = JSON.stringify(snapshotRef.current);
+    const epoch = ++importEpoch.current;
+    const readId = ++importReadId.current;
+    setPendingImport(null);
     try {
+      const storedBefore = importingUserId ? window.localStorage.getItem(getUserDataKey(importingUserId)) : null;
       const csv = await file.text();
-      if (!importStillCurrent(importingUserId, before)) return;
+      if (!importStillCurrent(importingUserId, before, epoch)) { reportDiscardedImport(importingUserId, readId); return; }
       const result = parseFixedCostCsvTemplate({
         csv,
         categories,
         cards
       });
 
-      if (!window.confirm("현재 항목을 CSV 내용으로 교체할까요? 복구용 사본을 브라우저에 보관합니다.")) return;
-      preserveBeforeImport(importingUserId!, before);
-
-      setCategories(result.categories);
-      setCards(result.cards);
-      setFixedCosts(result.fixedCosts);
-      setImportMessage(result.importedCount + "개 항목을 가져왔습니다.");
+      setPendingImport({ userId: importingUserId!, before, storedBefore, epoch, snapshot: { ...snapshotRef.current, categories: result.categories, cards: result.cards, fixedCosts: result.fixedCosts } });
     } catch {
-      setImportMessage("가져오기에 실패했습니다.");
+      if (importStillCurrent(importingUserId, before, epoch)) setImportMessage("가져오기에 실패했습니다. CSV 형식과 필수 값을 확인하세요.");
     } finally {
       if (importFileRef.current) {
         importFileRef.current.value = "";
@@ -394,23 +497,17 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
     const importingUserId = activeUserRef.current;
     const before = JSON.stringify(snapshotRef.current);
+    const epoch = ++importEpoch.current;
+    const readId = ++importReadId.current;
+    setPendingImport(null);
     try {
+      const storedBefore = importingUserId ? window.localStorage.getItem(getUserDataKey(importingUserId)) : null;
       const text = await file.text();
-      if (!importStillCurrent(importingUserId, before)) return;
+      if (!importStillCurrent(importingUserId, before, epoch)) { reportDiscardedImport(importingUserId, readId); return; }
       const result = parseLivingCostBackup(text);
-      if (!window.confirm("현재 데이터를 백업 파일의 내용으로 교체할까요? 복구용 사본을 브라우저에 보관합니다.")) return;
-      preserveBeforeImport(importingUserId!, before);
-
-      setMonthlyIncome(result.monthlyIncome);
-      setCategories(result.categories);
-      setCards(result.cards);
-      setFixedCosts(result.fixedCosts);
-      setCategoryFilterId("all");
-      setIsDeleteMode(false);
-      setSelectedDeleteIds([]);
-      setImportMessage("전체 백업을 가져왔습니다.");
+      setPendingImport({ userId: importingUserId!, before, storedBefore, epoch, snapshot: result });
     } catch {
-      setImportMessage("전체 백업 가져오기에 실패했습니다.");
+      if (importStillCurrent(importingUserId, before, epoch)) setImportMessage("전체 백업 가져오기에 실패했습니다. 파일 형식과 내용을 확인하세요.");
     } finally {
       if (backupFileRef.current) {
         backupFileRef.current.value = "";
@@ -429,6 +526,8 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
+    cancelImport();
+    setDeletedBatch(null);
     setMonthlyIncome(snapshot.monthlyIncome);
     setCategories(snapshot.categories);
     setCards(snapshot.cards);
@@ -441,10 +540,19 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   return {
     monthlyIncome,
     fixedCosts,
+    focusItemId,
+    focusRequest,
+    costFilters,
+    setCostFilters,
+    resetCostFilters: () => { setCostFilters(emptyCostFilters); setCategoryFilterId("all"); },
     categories,
     cards,
     lastSavedAt,
     saveError,
+    pendingImport: pendingImport?.userId === currentUser?.id ? pendingImport : null,
+    applyImport,
+    cancelImport,
+    retrySave: () => setSaveAttempt((attempt) => attempt + 1),
     localScopeKey: loadedUserId === currentUser?.id && isLoaded ? loadedUserId : null,
     localRecoveryRequired: blockedSaveUserId === currentUser?.id,
     importFileRef,
@@ -463,11 +571,15 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     handlePaymentMethodChange,
     handlePaymentOptionChange,
     handleAddItem,
+    handleDuplicateItem,
+    revealItem,
     handleQuickAdd,
     handleEnterDeleteMode,
     handleCancelDeleteMode,
     handleToggleDeleteSelection,
     handleConfirmDeleteItems,
+    handleUndoDelete,
+    canUndoDelete: !!deletedBatch && deletedBatch.userId === currentUser?.id,
     handleAddCategory,
     handleRenameCategory,
     handleDeleteCategory,

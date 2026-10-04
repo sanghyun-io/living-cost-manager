@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Text } from "@mantine/core";
 import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
+import { renewalQueue } from "./lib/costViews";
+import { getMonthlyEquivalentAmount } from "./lib/budget";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
@@ -52,6 +54,14 @@ export default function Home() {
   const coach = useCoach({ budget, serverApi: auth.serverApi });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: users.currentUser?.id ?? null,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
+  const [reviewDate, setReviewDate] = useState(() => new Date().toDateString());
+  useEffect(() => {
+    const refresh = () => setReviewDate(new Date().toDateString());
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, []);
+  const reviewItems = useMemo(() => renewalQueue(budget.fixedCosts, new Date(reviewDate)), [budget.fixedCosts, reviewDate]);
 
   usersRef.current = users;
   budgetRef.current = budget;
@@ -125,8 +135,12 @@ export default function Home() {
 
   return (
     <main className="page-shell">
+      <a className="skip-link" href="#fixed-costs">고정비 편집으로 건너뛰기</a>
       <AppHeader
         saveError={budget.saveError}
+        onRetrySave={budget.retrySave}
+        onExportUnsaved={budget.handleExportBackup}
+        recoveryRequired={budget.localRecoveryRequired}
         lastSavedAt={budget.lastSavedAt}
         serverSession={auth.serverSession}
         currentUserName={users.currentUser?.name}
@@ -156,8 +170,22 @@ export default function Home() {
 
       <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
 
-      <section className="workspace" id="fixed-costs" aria-label="고정비 편집">
+      <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
+        <section className="renewal-queue" aria-label="갱신 검토 작업목록">
+          <Text fw={700}>갱신 검토 작업목록</Text>
+          <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
+          {reviewItems.length === 0 ? <Text size="sm">현재 검토할 작업이 없습니다.</Text> : null}
+          {reviewItems.map((item) => <Button key={item.id} variant="light" m={4} onClick={() => budget.revealItem(item.id)}>
+            {item.name} · {item.renewalStatus === "cancel-planned" ? "해지 예정" : item.renewalStatus === "change-review" ? "변경 검토" : "임박 미검토"} 편집
+          </Button>)}
+        </section>
+        {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
         <FixedCostTable
+          focusItemId={budget.focusItemId}
+          focusRequest={budget.focusRequest}
+          costFilters={budget.costFilters}
+          onCostFilters={budget.setCostFilters}
+          onResetFilters={budget.resetCostFilters}
           categories={budget.categories}
           cards={budget.cards}
           visibleFixedCosts={budget.visibleFixedCosts}
@@ -170,6 +198,7 @@ export default function Home() {
           onPaymentMethodChange={budget.handlePaymentMethodChange}
           onPaymentOptionChange={budget.handlePaymentOptionChange}
           onAddItem={budget.handleAddItem}
+          onDuplicateItem={budget.handleDuplicateItem}
           onQuickAdd={budget.handleQuickAdd}
           onEnterDeleteMode={budget.handleEnterDeleteMode}
           onCancelDeleteMode={budget.handleCancelDeleteMode}
@@ -197,11 +226,16 @@ export default function Home() {
       </section>
 
       <DataModal
+          importMessage={ui.importMessage}
+          importPreview={budget.pendingImport ? { currentCount: budget.fixedCosts.length, targetCount: budget.pendingImport.snapshot.fixedCosts.length,
+            currentAmount: budget.summary.monthlyExpense, targetAmount: budget.pendingImport.snapshot.fixedCosts.reduce((sum, item) => sum + getMonthlyEquivalentAmount(item), 0) } : null}
+          onApplyImport={budget.applyImport}
+          onCancelImport={budget.cancelImport}
           opened={ui.isDataModalOpen}
           hasServerApi={Boolean(auth.serverApi)}
           importFileRef={budget.importFileRef}
           backupFileRef={budget.backupFileRef}
-          onClose={() => ui.setIsDataModalOpen(false)}
+          onClose={() => { budget.cancelImport(); ui.setIsDataModalOpen(false); }}
           onExportTemplate={handleExportCsv}
           onImportTemplate={(file) => void budget.handleImportTemplate(file)}
           onExportBackup={handleExportBackupWithTracking}
