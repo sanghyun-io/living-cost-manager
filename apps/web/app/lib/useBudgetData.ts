@@ -63,7 +63,10 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
   const activeUserRef = useRef<string | null>(null);
+  const importEpoch = useRef(0);
+  if (activeUserRef.current !== (users.currentUser?.id ?? null)) importEpoch.current += 1;
   activeUserRef.current = users.currentUser?.id ?? null;
+  const [pendingImport, setPendingImport] = useState<{ userId: string; before: string; epoch: number; snapshot: LocalBudgetSnapshot } | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
 
@@ -154,10 +157,25 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     [cards, categories, fixedCosts, monthlyIncome]
   );
   const snapshotRef = useRef(currentBudgetSnapshot);
+  if (JSON.stringify(snapshotRef.current) !== JSON.stringify(currentBudgetSnapshot)) importEpoch.current += 1;
   snapshotRef.current = currentBudgetSnapshot;
 
-  function importStillCurrent(userId: string | null, before: string): boolean {
-    return userId !== null && activeUserRef.current === userId && JSON.stringify(snapshotRef.current) === before;
+  function importStillCurrent(userId: string | null, before: string, epoch: number): boolean {
+    return userId !== null && activeUserRef.current === userId && loadedUserId === userId && importEpoch.current === epoch && JSON.stringify(snapshotRef.current) === before;
+  }
+
+  function cancelImport() { importEpoch.current += 1; setPendingImport(null); }
+  function applyImport() {
+    if (!pendingImport) return;
+    const { userId, before, epoch, snapshot } = pendingImport;
+    if (!importStillCurrent(userId, before, epoch)) {
+      cancelImport(); setImportMessage("공간 또는 데이터가 변경되어 미리보기를 취소했습니다. 파일을 다시 선택하세요."); return;
+    }
+    try {
+      preserveBeforeImport(userId, before);
+      applyBudgetSnapshot(snapshot);
+      setImportMessage("검증한 " + snapshot.fixedCosts.length + "개 항목을 적용했습니다.");
+    } catch { setImportMessage("복구 사본을 저장하지 못해 교체하지 않았습니다."); }
   }
 
   function preserveBeforeImport(userId: string, snapshot: string) {
@@ -402,24 +420,20 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
     const importingUserId = activeUserRef.current;
     const before = JSON.stringify(snapshotRef.current);
+    const epoch = ++importEpoch.current;
+    setPendingImport(null);
     try {
       const csv = await file.text();
-      if (!importStillCurrent(importingUserId, before)) return;
+      if (!importStillCurrent(importingUserId, before, epoch)) return;
       const result = parseFixedCostCsvTemplate({
         csv,
         categories,
         cards
       });
 
-      if (!window.confirm("현재 항목을 CSV 내용으로 교체할까요? 복구용 사본을 브라우저에 보관합니다.")) return;
-      preserveBeforeImport(importingUserId!, before);
-
-      setCategories(result.categories);
-      setCards(result.cards);
-      setFixedCosts(result.fixedCosts);
-      setImportMessage(result.importedCount + "개 항목을 가져왔습니다.");
+      setPendingImport({ userId: importingUserId!, before, epoch, snapshot: { ...snapshotRef.current, categories: result.categories, cards: result.cards, fixedCosts: result.fixedCosts } });
     } catch {
-      setImportMessage("가져오기에 실패했습니다.");
+      if (importStillCurrent(importingUserId, before, epoch)) setImportMessage("가져오기에 실패했습니다. CSV 형식과 필수 값을 확인하세요.");
     } finally {
       if (importFileRef.current) {
         importFileRef.current.value = "";
@@ -434,23 +448,15 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
 
     const importingUserId = activeUserRef.current;
     const before = JSON.stringify(snapshotRef.current);
+    const epoch = ++importEpoch.current;
+    setPendingImport(null);
     try {
       const text = await file.text();
-      if (!importStillCurrent(importingUserId, before)) return;
+      if (!importStillCurrent(importingUserId, before, epoch)) return;
       const result = parseLivingCostBackup(text);
-      if (!window.confirm("현재 데이터를 백업 파일의 내용으로 교체할까요? 복구용 사본을 브라우저에 보관합니다.")) return;
-      preserveBeforeImport(importingUserId!, before);
-
-      setMonthlyIncome(result.monthlyIncome);
-      setCategories(result.categories);
-      setCards(result.cards);
-      setFixedCosts(result.fixedCosts);
-      setCategoryFilterId("all");
-      setIsDeleteMode(false);
-      setSelectedDeleteIds([]);
-      setImportMessage("전체 백업을 가져왔습니다.");
+      setPendingImport({ userId: importingUserId!, before, epoch, snapshot: result });
     } catch {
-      setImportMessage("전체 백업 가져오기에 실패했습니다.");
+      if (importStillCurrent(importingUserId, before, epoch)) setImportMessage("전체 백업 가져오기에 실패했습니다. 파일 형식과 내용을 확인하세요.");
     } finally {
       if (backupFileRef.current) {
         backupFileRef.current.value = "";
@@ -469,6 +475,7 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
   }
 
   function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
+    cancelImport();
     setDeletedBatch(null);
     setMonthlyIncome(snapshot.monthlyIncome);
     setCategories(snapshot.categories);
@@ -491,6 +498,9 @@ export function useBudgetData({ users, ui }: UseBudgetDataOptions) {
     cards,
     lastSavedAt,
     saveError,
+    pendingImport: pendingImport?.userId === currentUser?.id ? pendingImport : null,
+    applyImport,
+    cancelImport,
     retrySave: () => setSaveAttempt((attempt) => attempt + 1),
     localScopeKey: loadedUserId === currentUser?.id && isLoaded ? loadedUserId : null,
     localRecoveryRequired: blockedSaveUserId === currentUser?.id,

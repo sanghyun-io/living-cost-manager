@@ -18,6 +18,7 @@ vi.mock("react", () => ({
 vi.mock("../app/lib/analytics", () => ({ track: vi.fn() }));
 import { useBudgetData } from "../app/lib/useBudgetData";
 import { getUserDataKey } from "../app/lib/users";
+import { buildLivingCostBackup } from "../app/lib/backup";
 
 export function setupBudget() {
   const values = new Map<string, string>();
@@ -31,6 +32,43 @@ export function setupBudget() {
   return { render, users, ui, storage, values, save: () => hooks.effects[2]() };
 }
 beforeEach(() => { hooks.slots = []; vi.unstubAllGlobals(); });
+test("import validates before preview, cancels without mutation and refuses edited previews", async () => {
+  const h = setupBudget();
+  const original = h.render().currentBudgetSnapshot;
+  const target = { ...original, monthlyIncome: 555 };
+  const file = { text: async () => buildLivingCostBackup(target) } as File;
+  await h.render().handleImportBackup({ text: async () => "broken" } as File);
+  expect(h.render().pendingImport).toBeNull();
+  await h.render().handleImportBackup(file);
+  expect(h.render().pendingImport?.snapshot.monthlyIncome).toBe(555);
+  expect(h.render().monthlyIncome).toBe(original.monthlyIncome);
+  h.render().cancelImport(); h.render().applyImport();
+  expect(h.render().monthlyIncome).toBe(original.monthlyIncome);
+  await h.render().handleImportBackup(file);
+  h.render().handleIncomeChange(888); h.render().applyImport();
+  expect(h.render().monthlyIncome).toBe(888);
+  await h.render().handleImportBackup(file); h.render().applyImport();
+  expect(h.render().monthlyIncome).toBe(555);
+  expect([...h.values.keys()].some(key => key.includes(":recovery:"))).toBe(true);
+});
+test("slow files, cancellation, profile round trips and newer file selection cannot race", async () => {
+  const h = setupBudget();
+  const text = buildLivingCostBackup({ ...h.render().currentBudgetSnapshot, monthlyIncome: 123 });
+  let resolve!: (text: string) => void;
+  const slow = () => ({ text: () => new Promise<string>(yes => { resolve = yes; }) } as File);
+  let request = h.render().handleImportBackup(slow());
+  h.render().cancelImport(); resolve(text); await request;
+  expect(h.render().pendingImport).toBeNull();
+  request = h.render().handleImportBackup(slow());
+  h.users.currentUser = { id: "other" }; h.render();
+  h.users.currentUser = { id: "test-local" }; h.render();
+  resolve(text); await request;
+  expect(h.render().pendingImport).toBeNull();
+  request = h.render().handleImportBackup(slow());
+  await h.render().handleImportBackup({ text: async () => "bad" } as File);
+  resolve(text); await request;
+  expect(h.render().pendingImport).toBeNull();
+});
 test("new and duplicated items reveal a focus target even with filters active", () => {
   const h = setupBudget();
   h.render().setCostFilters({ query: "hidden", method: "all", review: "completed", sort: "amount" });

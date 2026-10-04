@@ -5,6 +5,7 @@ import { Button, Text } from "@mantine/core";
 import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
+import { getMonthlyEquivalentAmount } from "./lib/budget";
 import { AppHeader } from "./components/AppHeader";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
@@ -217,11 +218,16 @@ export default function Home() {
       </section>
 
       <DataModal
+          importMessage={ui.importMessage}
+          importPreview={budget.pendingImport ? { currentCount: budget.fixedCosts.length, targetCount: budget.pendingImport.snapshot.fixedCosts.length,
+            currentAmount: budget.summary.monthlyExpense, targetAmount: budget.pendingImport.snapshot.fixedCosts.reduce((sum, item) => sum + getMonthlyEquivalentAmount(item), 0) } : null}
+          onApplyImport={budget.applyImport}
+          onCancelImport={budget.cancelImport}
           opened={ui.isDataModalOpen}
           hasServerApi={Boolean(auth.serverApi)}
           importFileRef={budget.importFileRef}
           backupFileRef={budget.backupFileRef}
-          onClose={() => ui.setIsDataModalOpen(false)}
+          onClose={() => { budget.cancelImport(); ui.setIsDataModalOpen(false); }}
           onExportTemplate={handleExportCsv}
           onImportTemplate={(file) => void budget.handleImportTemplate(file)}
           onExportBackup={handleExportBackupWithTracking}

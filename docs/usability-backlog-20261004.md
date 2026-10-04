@@ -22,6 +22,7 @@
 ## 완료 게이트
 
 ### 구현 체크포인트 (현재 요청 범위: 로컬 구현/검증만)
+- 9 완료 — 검증 후 개수/월환산 미리보기, 명시 적용/취소, 복구 사본 선행. 파일 선택 세대·프로필 왕복·편집·모달 닫기 경쟁 차단. budgetUsability + dataSafety 10/10 통과. commit: `feat(usability): validated import preview with race-safe apply`.
 - 8 완료 — 임박 미검토/해지예정/변경검토 작업목록과 필터 해제·직접 편집 포커스. 예정/실제 절감 구분 유지. costViews 4/4 통과 (상태 전이·금액 불변). commit: `feat(usability): actionable renewal review queue`.
 - 7 완료 — 기준일/소수 주기 미확인 원인·수정, 실제 청구액/비교용 월환산 구분, 월말 보정 안내. scheduleHelp + billingPersistence 4/4 통과 (윤년/평년 포함). commit: `feat(usability): explain billing schedule setup and monthly equivalents`.
 - 6 완료 — 새 행/복제/빠른 추가 이름 포커스, 건너뛰기 링크, 모달 닫기·파일 입력 이름, 모바일 44px 편집 영역. budgetUsability 4/4 통과 (필터 후 포커스 대상 노출 포함). 실제 터치/overflow는 10번 브라우저 회귀. commit: `feat(usability): accessible focus and mobile editing targets`.
