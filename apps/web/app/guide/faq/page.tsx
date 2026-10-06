@@ -14,6 +14,6 @@ export default function FaqPage() {
     <p className={styles.lead}>{description}</p>
     <StructuredData data={{ "@context": "https://schema.org", "@type": "FAQPage", url: absoluteUrl("/guide/faq/"), inLanguage: "ko-KR", mainEntity: faqs.map(({ question, answer }) => ({ "@type": "Question", name: question, acceptedAnswer: { "@type": "Answer", text: answer } })) }} />
     {faqs.map(({ question, answer }, index) => <section key={question} className={styles.section} aria-labelledby={`question-${index + 1}`}><h2 id={`question-${index + 1}`}>{question}</h2><p>{answer}</p></section>)}
-    <section className={styles.section}><h2>실제 정리 순서가 궁금하다면</h2><ul><li><a href="/guide/billing-dates/">결제일과 청구액 계산 안내</a></li><li><a href="/guide/renewal-checklist/">구독 갱신 점검 체크리스트</a></li><li><a href="/guide/backup-and-sync/">백업과 동기화 안내</a></li></ul><a className={styles.cta} href="/">대시보드 열기</a></section>
+    <section className={styles.section}><h2>실제 정리 순서가 궁금하다면</h2><ul><li><a href="/guide/billing-dates/">결제일과 청구액 계산 안내</a></li><li><a href="/guide/renewal-checklist/">구독 갱신 점검 체크리스트</a></li><li><a href="/guide/templates/">템플릿 공유와 만료 정책 안내</a></li><li><a href="/guide/backup-and-sync/">백업과 동기화 안내</a></li></ul><a className={styles.cta} href="/">대시보드 열기</a></section>
   </>;
 }
