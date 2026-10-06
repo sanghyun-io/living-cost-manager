@@ -74,7 +74,7 @@
 
 작업트리: approved temp root `lcm-pricing`, branch `feat/pricing-readiness-20261006`, 기준 source `97520946452e28ba96d2c85ae4c9865cc05e5f65`. 기존 원본 dirty checkout 및 마케팅 작업트리는 변경하지 않는다.
 
-- `pnpm verify:usability`: **463 application tests** (shared 109 / web 209 / API 145), operator 17 / ownership 2 / service worker 3, API/web production build, 1440/390 usability·로컬 실제 API 동기화·계정삭제 및 13 marketing privacy 시나리오 통과. purpose-created local PostgreSQL만 사용했으며 임시 DB/서버 종료·삭제 완료. 로그: approved temp root `lcm-pricing-fullverify.log`.
+- `pnpm verify:usability`: **463 application tests** (shared 109 / web 209 / API 145), operator 17 / ownership 2 / service worker 3, API/web production build, 1440/390 usability·로컬 실제 API 동기화·계정삭제 및 13 marketing privacy 시나리오 통과. 최종 재실행에는 가격 전용 브라우저 검증도 통합되어 모두 통과했다. purpose-created local PostgreSQL만 사용했으며 임시 DB/서버 종료·삭제 완료. 최종 로그: approved temp root `lcm-pricing-fullverify-final.log` (초기 실행 `lcm-pricing-fullverify.log`도 보존).
 - 가격 전용 테스트 17개: 정수 KRW 990/9900, 825원 비교값, 1,980원/정확한 1/6 할인, unknown plan·클라이언트 amount/currency/discount/consent 변조 거절, 불변 planned/OFF preview. 주문·동의·권한을 반환하지 않음. 서버 checkout·webhook이 없으므로 결제 중복 통보/서명/달력 과금 테스트가 완료됐다고 주장하지 않는다.
 - `pnpm verify:pricing`: 390/1440에서 guide/FAQ/FAQ JSON-LD 카피 일치, 정확한 금액과 구매 불가 안내, 카드 입력/가짜 checkout/provider script 없음, mutation·외부 요청 없음, runtime error/overflow 없음. 정적 HTML에서도 JS 없이 가격/준비 상태 표시 확인.
 - 공식 요금 산술은 별도 Node 계산으로 재확인했다. JS 원 미만 부동소수 결과는 문서에서 3자리로 표시했으며 PG 실제 정산 반올림과 다를 수 있다.
