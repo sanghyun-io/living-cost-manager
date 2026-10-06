@@ -10,6 +10,8 @@ import { emptyBudgetSnapshot, sampleBudgetSnapshot } from "./seedData";
 import type { LocalBudgetSnapshot } from "./snapshot";
 import type { UIStateApi } from "./useUIState";
 import type { ServerAuthApi } from "./useServerAuth";
+import { persistTemplateProfile } from "./templates";
+import type { TemplateBlueprint } from "@living-cost-manager/shared";
 
 /** Local (browser-only) user accounts and the active-user pointer. */
 interface UseLocalUsersOptions {
@@ -34,6 +36,7 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
   // True once the active user's budget data has been read from localStorage
   // (the budget hook flips it via setIsLoaded after its load effect runs).
   const [isLoaded, setIsLoaded] = useState(false);
+  const templateReturnId = currentUser?.templateReturnId ?? null;
   const sampleUserId = "demo-sample";
   const sampleReturnKey = "living-cost-manager:sample-return:v1";
 
@@ -153,6 +156,24 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
     track({ type: "auth.logout", timestamp: Date.now(), data: {} });
   }
 
+  function applyTemplate(blueprint: TemplateBlueprint, snapshot: LocalBudgetSnapshot) {
+    if (!isLoaded) throw new Error("현재 공간을 불러온 뒤 다시 시도하세요.");
+    if (window.localStorage.getItem(ACTIVE_USER_KEY) !== currentUser?.id) throw new Error("활성 공간이 바뀌었습니다. 다시 확인하세요.");
+    const result = persistTemplateProfile(window.localStorage, blueprint, snapshot, auth.serverSession ? auth.handleServerLogout : undefined);
+    setKnownUsers(result.users);
+    setIsLoaded(false);
+    setCurrentUser(result.user);
+    ui.setIsDeleteMode(false); ui.setSelectedDeleteIds([]);
+  }
+
+  function returnFromTemplate() {
+    if (!templateReturnId || auth.serverSession) return;
+    const user = knownUsers.find(entry => entry.id === templateReturnId);
+    if (!user || window.localStorage.getItem(getUserErasureKey(user.id))) return;
+    window.localStorage.setItem(ACTIVE_USER_KEY, user.id);
+    setIsLoaded(false); setCurrentUser(user);
+  }
+
   /**
    * Local mirror of a successful server-side account deletion: wipes every
    * trace of the removed account (user entry, per-user budget data, legacy
@@ -201,7 +222,8 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
     handleLogout,
     isSampleMode: currentUser?.id === sampleUserId,
     handleChooseDataMode,
-    handleAccountDeleted
+    handleAccountDeleted,
+    applyTemplate, returnFromTemplate, templateReturnId
   };
 }
 

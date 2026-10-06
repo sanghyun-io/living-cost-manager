@@ -17,8 +17,10 @@ import { memberRoutes } from "./routes/members.js";
 import { pushRoutes } from "./routes/push.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
+import { templateRoutes } from "./routes/templates.js";
 import { createEmailProvider, type EmailProvider } from "./services/email.js";
 import { shouldDisableRequestLogging } from "./services/marketing-metrics.js";
+import { isTemplateRequest } from "./services/template-logging.js";
 import { configureWebPush } from "./services/push.js";
 
 declare module "fastify" {
@@ -47,7 +49,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     // 마케팅 이벤트 수집 경로는 성공/거절/오류 어느 경우에도 요청·본문·쿼리를
     // 기록하지 않는다(IP/UA 가 로그에 남지 않도록). 다른 라우트의 보안 로그는
     // 그대로 유지된다 — predicate 가 해당 경로만 선별한다.
-    disableRequestLogging: shouldDisableRequestLogging
+    disableRequestLogging: candidate => shouldDisableRequestLogging(candidate) || isTemplateRequest(candidate)
   });
 
   app.decorate("prisma", prisma);
@@ -105,6 +107,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(authRoutes);
     await api.register(accountRoutes);
     await api.register(workspaceRoutes);
+    await api.register(templateRoutes);
     await api.register(invitationRoutes);
     await api.register(memberRoutes);
     await api.register(snapshotRoutes);

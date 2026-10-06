@@ -12,3 +12,4 @@ export * from "./shareSummary.js";
 export * from "./servicePricing.js";
 export * from "./snapshot.js";
 export * from "./workspace.js";
+export * from "./templates.js";

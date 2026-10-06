@@ -19,6 +19,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   pushSubscriptions       PushSubscription[]
   pushDeliveries          PushDelivery[]
+  templates               BudgetTemplate[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 }
@@ -193,4 +194,29 @@ model BackupSnapshot {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt])
+}
+
+// Private, account-owned blueprints, never linked to financial workspaces.
+model BudgetTemplate {
+  id        String @id @default(cuid())
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  revision  Int @default(1)
+  blueprint Json
+  share     BudgetTemplateShare?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// One bounded published snapshot per template; new publication invalidates
+// the previous token. Draft edits never change an already published snapshot.
+model BudgetTemplateShare {
+  templateId String @id
+  template   BudgetTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  token      String @unique
+  blueprint  Json
+  expiresAt  DateTime
+  revokedAt  DateTime?
 }

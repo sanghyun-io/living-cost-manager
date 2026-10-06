@@ -21,6 +21,7 @@ import { VerifyEmailNoticeModal } from "./components/modals/VerifyEmailNoticeMod
 import { CoachModal } from "./components/modals/CoachModal";
 import { DataModal } from "./components/modals/DataModal";
 import { DeleteAccountModal } from "./components/modals/DeleteAccountModal";
+import { TemplateModal } from "./components/modals/TemplateModal";
 import { useUIState } from "./lib/useUIState";
 import { useServerAuth } from "./lib/useServerAuth";
 import { useLocalUsers } from "./lib/useLocalUsers";
@@ -37,6 +38,8 @@ export default function Home() {
   // The two async back-edges (auth → users/sync) go through latest-value refs
   // below — their handlers only run from events/post-boot effects.
   const ui = useUIState();
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templateError, setTemplateError] = useState("");
   const marketingConsent = useMarketingConsent();
   const usersRef = useRef<LocalUsersApi | null>(null);
   const budgetRef = useRef<BudgetDataApi | null>(null);
@@ -127,6 +130,7 @@ export default function Home() {
   if (!users.isBootLoaded || !users.isLoaded) {
     return (
       <main className="page-shell">
+      {templateError ? <Text role="alert" c="rose" mt="md">{templateError}</Text> : null}
         <section className="login-card">
           <p className="section-label">생활비 관리자</p>
           <h1>불러오는 중입니다</h1>
@@ -149,12 +153,14 @@ export default function Home() {
         onOpenData={() => ui.setIsDataModalOpen(true)}
         onOpenAuth={() => ui.setIsAuthModalOpen(true)}
         onOpenCoach={coach.openCoachModal}
+        onOpenTemplates={() => setTemplatesOpen(true)}
         onServerLogout={() => {
           auth.handleServerLogout();
           users.handleLogout();
         }}
       />
       <main className="page-shell">
+      {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={users.returnFromTemplate}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
       <HeroPanel
         monthlyIncome={budget.monthlyIncome}
         expenseRate={budget.summary.expenseRate}
@@ -232,6 +238,9 @@ export default function Home() {
         /> : null}
       </section>
 
+      <TemplateModal opened={templatesOpen} onOpen={() => setTemplatesOpen(true)} onClose={() => setTemplatesOpen(false)} session={auth.serverSession}
+        onLogin={() => { setTemplatesOpen(false); ui.setIsAuthModalOpen(true); }} canApply={users.isLoaded && !budget.saveError && !budget.localRecoveryRequired}
+        onApply={(blueprint, snapshot) => { try { users.applyTemplate(blueprint, snapshot); setTemplateError(""); } catch (error) { setTemplateError(error instanceof Error ? error.message : "새 공간을 만들지 못했습니다. 기존 데이터는 교체하지 않았습니다."); throw error; } }} />
       <DataModal
            marketingConsent={marketingConsent}
           importMessage={ui.importMessage}

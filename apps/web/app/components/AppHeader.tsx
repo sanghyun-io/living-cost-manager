@@ -14,6 +14,7 @@ interface AppHeaderProps {
   onOpenData: () => void;
   onOpenAuth: () => void;
   onOpenCoach: () => void;
+  onOpenTemplates: () => void;
   /** Combines server logout + local logout (wrapped in page). */
   onServerLogout: () => void;
 }
@@ -29,6 +30,7 @@ export function AppHeader({
   onOpenData,
   onOpenAuth,
   onOpenCoach,
+  onOpenTemplates,
   onServerLogout
 }: AppHeaderProps) {
   const saveLabel = saveError || (lastSavedAt ? "이 브라우저에 저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
@@ -40,6 +42,7 @@ export function AppHeader({
       <Group className="app-header" justify="flex-end" gap="sm" wrap="wrap">
         <Text fw={700} className="app-brand">생활비 관리자</Text>
         <a className="guide-link" href="/guide/">사용 안내</a>
+        <Button variant="subtle" color="gray" onClick={onOpenTemplates}>템플릿</Button>
         <ActionIcon
           variant="subtle"
           color="gray"

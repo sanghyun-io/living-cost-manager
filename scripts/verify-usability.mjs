@@ -93,6 +93,7 @@ try {
   await run("pnpm", ["test:marketing"]);
   await assertVerificationTarget(env);
   await run("pnpm", ["test"]);
+  await run("node", ["scripts/template-restore-rehearsal.mjs"], { LCM_TEST_TEMP_ROOT: tempRoot, ...(process.env.PG_BIN ? { PG_BIN: process.env.PG_BIN } : {}) });
   await run("pnpm", ["build"]);
   await run("node", ["scripts/test-service-worker.mjs"]);
   api = launch("node", ["apps/api/dist/server.js"], { NODE_ENV: "test" });
@@ -114,6 +115,7 @@ try {
   await run("node", ["scripts/ui-refresh-browser.mjs"], process.env.LCM_UI_EVIDENCE ? { LCM_UI_EVIDENCE: process.env.LCM_UI_EVIDENCE } : {});
   await run("node", ["scripts/pm-local-e2e.mjs"]);
   await run("node", ["scripts/pm-sync-e2e.mjs"]);
+  await run("node", ["scripts/templates-browser.mjs"], process.env.LCM_TEMPLATE_EVIDENCE ? { LCM_TEMPLATE_EVIDENCE: process.env.LCM_TEMPLATE_EVIDENCE } : {});
   await run("node", ["scripts/verify-marketing.mjs"]);
   await run("node", ["scripts/verify-pricing.mjs"]);
   console.log("PASS: shared/web/API tests, builds, service worker, desktop/mobile and sync browser regressions");

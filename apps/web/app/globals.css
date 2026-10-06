@@ -717,6 +717,11 @@ body {
 .table-row .mantine-NumberInput-input { font-variant-numeric: tabular-nums; }
 .app-header .save-status { font-variant-numeric: tabular-nums; }
 .mantine-Modal-title { line-height: 1.5; }
+.template-editor { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+.template-editor legend { font-weight: 600; font-size: 14px; }
+.template-item-editor { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+.template-preview { border-top: 1px solid var(--line); padding-top: 16px; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .template-item-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); } .template-item-editor > :first-child { grid-column: 1 / -1; } .template-preview .mantine-Checkbox-body { min-height: 44px; align-items: center; } }
 :where(a, button, summary, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--accent-strong);
   outline-offset: 3px;

@@ -2,6 +2,7 @@ export type AppUser = {
   id: string;
   name: string;
   serverUserId?: string;
+  templateReturnId?: string;
 };
 
 export type StartupServerUser = {
