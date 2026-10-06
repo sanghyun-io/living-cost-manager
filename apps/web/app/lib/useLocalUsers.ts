@@ -166,12 +166,30 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
     ui.setIsDeleteMode(false); ui.setSelectedDeleteIds([]);
   }
 
-  function returnFromTemplate() {
-    if (!templateReturnId || auth.serverSession) return;
+  /**
+   * Returns to the local profile that existed before a template was applied.
+   * Never silently no-ops: every refusal comes back as a message the page can
+   * show in normal UI. Switching profiles while a server session is connected
+   * requires an explicit, user-confirmed disconnect, and the session secret is
+   * dropped by the logout — nothing is copied into the profile being restored.
+   * Returns null only when the switch actually happened.
+   */
+  function returnFromTemplate(): string | null {
+    if (!templateReturnId) return "이전 공간 정보가 없습니다. 현재 공간을 유지합니다.";
     const user = knownUsers.find(entry => entry.id === templateReturnId);
-    if (!user || window.localStorage.getItem(getUserErasureKey(user.id))) return;
+    // A stale or erased target (e.g. deleted from another tab or a removed
+    // account) must not be restored, and we validate this BEFORE disconnecting
+    // so a refused return never tears down the server session for nothing.
+    if (!user || window.localStorage.getItem(getUserErasureKey(user.id))) return "이전 공간이 삭제되었거나 찾을 수 없습니다. 현재 공간을 유지합니다.";
+    if (window.localStorage.getItem(ACTIVE_USER_KEY) !== currentUser?.id) return "활성 공간이 바뀌었습니다. 다시 확인한 뒤 시도하세요.";
+    if (auth.serverSession) {
+      const approved = window.confirm("이전 공간으로 돌아가려면 서버 연결을 해제해야 합니다. 서버 데이터는 그대로 두고 이 브라우저의 연결만 해제합니다. 계속할까요?");
+      if (!approved) return "서버 연결을 유지하여 이전 공간으로 돌아가지 않았습니다.";
+      auth.handleServerLogout();
+    }
     window.localStorage.setItem(ACTIVE_USER_KEY, user.id);
     setIsLoaded(false); setCurrentUser(user);
+    return null;
   }
 
   /**

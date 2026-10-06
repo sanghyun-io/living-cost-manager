@@ -53,3 +53,38 @@ export function persistTemplateProfile(storage: Storage, blueprint: TemplateBlue
   }
   return { user, users: nextUsers, returnId: previousActive };
 }
+
+/**
+ * Apply-step amounts are indexed by item, so they may only be carried over
+ * while an item keeps the same identity in the same stable position. The
+ * server stores canonical text, so a save response can legitimately differ in
+ * spelling (NFKC/trim normalization) from the local draft while describing the
+ * same item. Comparing canonical identities keeps those drafts, while a
+ * genuinely added/removed/edited item blanks only its own amount instead of
+ * leaking a stale number onto a neighbour. Amounts and income stay
+ * browser-only: they are never POSTed and never part of a shared blueprint.
+ */
+type TemplateItemIdentity = { name: string; category: string; periodMonths: number };
+const canonicalItemKey = (item: TemplateItemIdentity) =>
+  `${item.name.trim().normalize("NFKC")}\u0000${item.category.trim().normalize("NFKC")}\u0000${item.periodMonths}`;
+
+/** Re-index prior draft amounts onto the (possibly canonicalized) next items. */
+export function alignTemplateAmounts(
+  priorItems: readonly TemplateItemIdentity[],
+  priorAmounts: readonly string[],
+  nextItems: readonly TemplateItemIdentity[]
+): string[] {
+  return nextItems.map((item, index) => {
+    const prior = priorItems[index];
+    return prior !== undefined && canonicalItemKey(prior) === canonicalItemKey(item) ? priorAmounts[index] ?? "" : "";
+  });
+}
+
+/** True when both lists describe the same items in the same stable order. */
+export function templateItemsUnchanged(
+  priorItems: readonly TemplateItemIdentity[],
+  nextItems: readonly TemplateItemIdentity[]
+): boolean {
+  return priorItems.length === nextItems.length
+    && priorItems.every((item, index) => canonicalItemKey(item) === canonicalItemKey(nextItems[index]));
+}

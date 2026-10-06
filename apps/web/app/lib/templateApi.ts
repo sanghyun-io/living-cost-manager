@@ -14,6 +14,19 @@ async function request(path: string, token?: string, body?: unknown, method = "G
   const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return JSON.parse(new TextDecoder().decode(bytes));
 }
+
+// A share fragment is a bearer capability, not an identifier to display. The
+// browser checks the shape first so malformed/overlong/whitespace values never
+// reach the network and the raw URL is never echoed back into the UI.
+const shareTokenShape = /^[A-Za-z0-9_-]{43}$/;
+export const isTemplateShareToken = (value: string) => shareTokenShape.test(value);
+export type TemplateShareFragment = { kind: "none" } | { kind: "invalid" } | { kind: "token"; token: string };
+export function parseTemplateShareFragment(hash: string): TemplateShareFragment {
+  if (!hash.startsWith("#template=")) return { kind: "none" };
+  const value = hash.slice("#template=".length);
+  return isTemplateShareToken(value) ? { kind: "token", token: value } : { kind: "invalid" };
+}
+
 export const templateApi = {
   async list(token: string, signal?: AbortSignal): Promise<OwnedTemplate[]> { return ownedTemplatesSchema.parse(await request("/templates", token, undefined, "GET", signal)); },
   async save(blueprint: TemplateBlueprint, token: string, entry?: OwnedTemplate) {
@@ -22,5 +35,5 @@ export const templateApi = {
   async publish(entry: OwnedTemplate, token: string) { return templatePublishedSchema.parse(await request(`/templates/${encodeURIComponent(entry.id)}/publish`, token, { revision: entry.revision, reviewed: true, rightsConfirmed: true }, "POST")); },
   async revoke(entry: OwnedTemplate, token: string) { await request(`/templates/${encodeURIComponent(entry.id)}/share`, token, undefined, "DELETE"); },
   async remove(entry: OwnedTemplate, token: string) { await request(`/templates/${encodeURIComponent(entry.id)}`, token, undefined, "DELETE"); },
-  async shared(token: string, signal?: AbortSignal) { if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error("공유 링크 형식이 올바르지 않습니다."); return sharedTemplateSchema.parse(await request(`/template-shares/${token}`, undefined, undefined, "GET", signal)).blueprint; }
+  async shared(token: string, signal?: AbortSignal) { if (!isTemplateShareToken(token)) throw new Error("공유 링크 형식이 올바르지 않습니다."); return sharedTemplateSchema.parse(await request(`/template-shares/${token}`, undefined, undefined, "GET", signal)).blueprint; }
 };
