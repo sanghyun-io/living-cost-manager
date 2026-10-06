@@ -1,6 +1,6 @@
 <!-- GENERATED FROM sanghyun-io/gamja-ops. DO NOT EDIT MANUALLY. -->
 <!-- Source file: policies/agent-infra-registry-policy.md -->
-<!-- Source commit: 0a6ec99f0b53b3cbe6eb300396aa9f8528b945d8 -->
+<!-- Source commit: eb963842234d5178920d7ced31eae2025d17edb6 -->
 
 # Gamja Ops Infrastructure Registry Policy
 
