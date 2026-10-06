@@ -103,3 +103,48 @@ Remaining: Owner-approved credential revocation/rotation, complete bounded exact
 exposure/history investigation where possible, missing-JS provenance analysis,
 independent helper/registry review, and any approved fresh deployment/public smoke.
 No new billed infrastructure was created; GPT calls are within the approved task.
+
+## Reviewer-requested helper correction (local synthetic verification only)
+
+Following conditional independent review, the reusable restore helper was corrected:
+
+- Replaced asynchronous process-substitution diagnostic writers with synchronous
+  `sudo sh` redirections in the private root-owned0700 receipt directory. Both
+  log files must open before executing restore/migration; noclobber and077 umask
+  apply, and pipeline failures propagate. No diagnostic body is printed publicly.
+- Cleanup is armed before Docker startup, because a failed `docker run` may still
+  create a container. Pre-existing exact names are rejected before arming. Cleanup
+  inspects only the unique name and verifies its exact ownership label before
+  `docker rm -f -v`; it never removes another owner's container or global volumes.
+  Inspect failure requires a successful exact-name absence check rather than
+  guessing absence. Unverified ownership/resources remain intact with failure.
+- EXIT cleanup preserves the original startup/restore/diagnostic failure status;
+  cleanup failure cannot produce a successful completed receipt. The completion
+  timestamp and `proof_complete=true` are written only after synchronous commands,
+  owned-target cleanup and final permission checks succeed. Explicit exits make
+  safety guards fail closed even on local Bash3.2 conditional-errexit behavior.
+- Pinned release directories and backup/migration leaf symlinks are checked;
+  receipt ownership/mode is checked before privileged log writes.
+
+Actual local verification after these edits:
+`bash -n scripts/templates-oci-restore-proof.sh` PASS;
+`python3 scripts/test-templates-oci-restore-proof.py` **10 tests PASS**;
+`python3 scripts/test-templates-clean-build-proof.py` **5 tests PASS**;
+`git diff --check` PASS. Protected combined log (0600):
+`/private/var/folders/f_/kdvkncsn11l2nssxg_75xglc0000gp/T/opencode/lcm-restore-helper-review-fix-20261007.log`.
+
+The executable-level restore tests use fake Docker/sudo commands and test-owned
+temporary synthetic fixtures only. They cover successful awaited private logs,
+startup-fails-after-creation cleanup, wrong-label preservation, pre-existing-name
+preservation, inspect/daemon failures, restore/migration diagnostic writer failures,
+stderr-open failure, restore exit propagation, cleanup failure and preservation of
+the original startup exit when cleanup also fails. Removal assertions permit only
+the owned unique target with `-v`; diagnostics/receipts are absent from completed
+public output on failure. Tests do not prove real daemon or volume behavior.
+
+No OCI restore was repeated for these corrections. The earlier actual restore
+receipt remains historical evidence of that execution, not evidence that these
+new failure cases occurred or passed in production. No registry worktree, app
+API/web/shared source, credential or provider operation was changed. Existing
+untracked `scripts/__pycache__/` is preserved. Main must obtain follow-up independent
+review of this correction; credential incident and JS provenance blockers remain open.
