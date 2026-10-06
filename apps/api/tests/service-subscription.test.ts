@@ -9,6 +9,21 @@ const observation = (overrides: Partial<VerifiedObservation> = {}): VerifiedObse
   status: "paid", fetchedAt: 100, ...overrides });
 
 describe("LCM server billing preparation (never real payment)", () => {
+  describe.each(["accountId", "paymentId", "merchantId"] as const)("runtime reference %s", field => {
+    test.each([12345, { length: 5 }, {}, [], ["id"], true, false, null, undefined, "", " \t\n", "a".repeat(201)])("rejects invalid reference %j", value => {
+      const input = { accountId: "account-a", paymentId: "payment-a", merchantId: "lcm-test-only",
+        plan: { planId: "monthly" }, anchor: "2024-01-31", cycle: 0, [field]: value };
+      expect(() => createSandboxAttempt(input as unknown as Parameters<typeof createSandboxAttempt>[0])).toThrow("Invalid server reference");
+    });
+    test.each(["a", "a".repeat(200)])("accepts valid reference length %s", value => {
+      const input = { accountId: "account-a", paymentId: "payment-a", merchantId: "lcm-test-only",
+        plan: { planId: "monthly" }, anchor: "2024-01-31", cycle: 0, [field]: value };
+      expect(createSandboxAttempt(input)[field]).toBe(value);
+    });
+  });
+  test.each(["false", "true", 0, 1, {}, [], null, undefined])("rejects nonboolean cancellation intent %j", value => {
+    expect(() => describeSandboxLifecycle(attempt(), null, value as unknown as boolean, new Date())).toThrow("Invalid cancellation intent");
+  });
   test.each([
     ["2024-01-31", "monthly", 1, "2024-02-28T15:00:00.000Z"],
     ["2024-01-31", "monthly", 2, "2024-03-30T15:00:00.000Z"],

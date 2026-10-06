@@ -50,7 +50,9 @@ export function createSandboxAttempt(input: {
   accountId: string; paymentId: string; merchantId: string; plan: unknown; anchor: string; cycle: number;
 }): Attempt {
   for (const value of [input.accountId, input.paymentId, input.merchantId]) {
-    if (!value || value.length > 200) throw new TypeError("Invalid server reference");
+    if (typeof value !== "string" || value.trim().length === 0 || value.length > 200) {
+      throw new TypeError("Invalid server reference");
+    }
   }
   const quote = previewServicePrice(input.plan);
   periodBoundary(input.anchor, quote.planId, input.cycle);
@@ -94,6 +96,7 @@ export type PaidPeriod = NonNullable<ReturnType<typeof reconcileAttempt>["period
  */
 export function describeSandboxLifecycle(attempt: Attempt, period: PaidPeriod | null,
   cancelFutureCharges: boolean, now: Date) {
+  if (typeof cancelFutureCharges !== "boolean") throw new TypeError("Invalid cancellation intent");
   if (!Number.isFinite(now.getTime())) throw new TypeError("Invalid lifecycle clock");
   if (period && (period.accountId !== attempt.accountId || period.paymentId !== attempt.paymentId ||
       period.startsAt !== periodBoundary(attempt.anchor, attempt.quote.planId, attempt.cycle).toISOString() ||

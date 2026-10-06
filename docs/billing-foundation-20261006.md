@@ -19,6 +19,7 @@
 5. paid 최초 전이만 기간 후보를 반환한다. 중복 성공은 연장하지 않고, 이전 조회/동일 조회 시각은 무시하며, paid 이후 늦은 failure는 되돌리지 않는다. 조회 실패는 state를 변경하지 않고 같은 payment ID로 다시 **조회**한다. 새 charge를 재시도하는 구현이 아니다.
 6. refunded는 `refund_review`로 분리한다. paid callback이 늦게 와도 자동 기간 발급/환불 되돌림을 하지 않는다. 환불 amount/부분환불/기간 권한 조정은 별도 ledger 및 승인 정책 필요.
 7. 취소 intent는 결제 시도와 별개다. 준비 lifecycle은 pending/scheduled/paid_period/ending/expired/payment_failed/refund_review를 구분하지만 실제 계정의 구독 라벨이 아니다. provider 예약 취소를 실행했다는 반환값도 만들지 않는다. 어떤 상태에도 `nextChargeAllowed=false`다.
+   시작일 전에는 취소 intent가 있어도 state는 `scheduled`이고 별도 `cancelFutureCharges=true`를 보존한다. `ending`은 후보 기간 안에서만의 설명이다. 이는 실제 취소/환불 정책 확정이나 예약 취소 완료가 아니다.
 8. `resolveServiceEntitlement`는 account 소유 기간을 서버에서 확인하되 항상 **free / paidAccess=false**다. sandbox 기간 후보나 로컬 저장 flag로 paid가 되지 않는다. 기능 개통은 catalog flag 한 줄 변경으로 완료되지 않으며 승인된 live period 전용 entitlement 구현/독립 보안 리뷰가 필요하다.
 
 ## 저장 구조 결정 — 필요한 장기 구조, 아직 적용하지 않음
@@ -84,3 +85,11 @@
 - API/web production builds; 1440/390 usability; 실제 로컬 API sync/conflict/relogin/account 삭제; 13 marketing privacy 시나리오; 가격/준비 안내 browser+JS 없는 HTML 검증 통과.
 - 테스트용 PostgreSQL cluster 삭제 및 모든 검증 서버 종료 로그 확인. 운영 DB 미사용. browser는 별도 headless 프로세스로 사용자 탭 미조작.
 - `git diff --check` 통과. **독립 리뷰/배포 미실행**.
+
+### 독립 검토와 추가 hardening
+
+메인 조정자가 reviewer `ses_eefd9dd79ffeLw34Q6M2nEnSUG`, security `ses_eefd9b2dcffeX5WuQ3aY3yyVH3`의 **PASS / blockers 0**를 전달했다. 검토자가 직접 재현한 shared115 / billing37 / consent6 / API TypeScript build는 구현자의 전체 회귀 로그와 별도 근거다.
+
+이후 권고에 따라 account/payment/merchant reference에 runtime `typeof string`, 빈 문자열/공백-only/200자 상한 검사를 추가하고 각 필드의 number/object/array/boolean/null/undefined 및 경계값을 테스트했다. 취소 intent도 runtime boolean만 허용한다. 이 후속 작은 guard 수정의 독립 재리뷰 완료를 주장하지 않으며, 메인 조정자의 해당 수정·회귀검증을 조건으로 한 비과금 배포 승인에 따른다. Durable unique/lock/fence/atomic ledger와 실제 billing routes는 여전히 미구현·비활성이다.
+
+Hardening 후 `verify:usability` 전체 재실행 **557 application tests** 통과(shared115/web210/API232; billing domain87). operator17/ownership2/SW3는 별도다. Production builds, 실제 격리 API sync/삭제, 1440/390 layout/keyboard/focus, 기존13 privacy와 pricing/static HTML 모두 통과. 로그 `<approved temp root>/lcm-billing-hardened-verify.log`; 모든 임시 DB/서버 정리 확인. 실제 과금 OFF.
