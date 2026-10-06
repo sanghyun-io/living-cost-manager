@@ -19,11 +19,11 @@ UI 리뷰 freeze `9eafeee`를 보존하고 별도 branch `feat/templates-2026100
 추가 테이블은 두 개다:
 
 - `BudgetTemplate`: User 소유 private JSON 설계도, 낙관적 revision. Workspace와 연결하지 않아 공동 생활비 편집 권한을 공개 설계도 권한으로 오해하지 않는다.
-- `BudgetTemplateShare`: template당 최대1개의 pinned JSON 게시본, 무작위32byte token,90일 조회 만료, revokedAt. 별도 draft edit는 기존 게시본에 영향을 주지 않는다. 다시 게시하면 token이 바뀌어 이전 링크가 즉시 무효다. 철회/삭제/작성자 계정 삭제는 이후 GET을 거부한다. 이미 복사된 데이터는 원격 삭제하지 않는다.
+- `BudgetTemplateShare`: template당 최대1개의 pinned JSON 게시본, 무작위32byte token,90일 조회 만료, revokedAt(레거시 행용). 별도 draft edit는 기존 게시본에 영향을 주지 않는다. 다시 게시하면 token이 바뀌어 이전 링크가 즉시 무효다. **명시적 철회는 게시본 행(token+text)을 owner transaction 안에서 물리 삭제**하고 이후 GET을 거부한다(재실행 204 idempotent). 초안은 어떤철회·만료정리에도 보존되며 owner 삭제/계정 삭제(cascade)로만 사라진다. 90일 이후 조회 거부는 보장, 물리 소각은 owner 활동·공개 조회 시점의 기회적(정확한 날짜 보장 아님 — 완전삭제 문구 금지). 이미 복사된 데이터는 원격 삭제하지 않는다.
 
 저장/수정/게시에는 인증+확인된 이메일을 요구한다. 목록/삭제/철회는 인증된 소유자만. User 행을 transaction 안에서 잠가20개 quota와 revision/publish/revoke/delete 경쟁을 직렬화한다. private owner ID는 public DTO에 절대 넣지 않는다. 공개 목록·검색·crawler route 없음.
 
-API: `/templates`, `/templates/:id`, `/templates/:id/publish`, `/templates/:id/share`, `/template-shares/:token`. 게시 조회는 `no-store`, 모두 `X-Robots-Tag: noindex,nofollow`; 읽기30회/분, 작성60회/분. 템플릿 경로의 자동 요청 로깅을 억제한다. **CDN/proxy access log 보존·redaction까지 검증했다고 주장하지 않으며 운영 적용 전에 점검한다.**
+API: `/templates`, `/templates/:id`, `/templates/:id/publish`, `/templates/:id/share`, `/template-shares/:token`. 게시 조회는 `no-store`, 모두 `X-Robots-Tag: noindex,nofollow`; 쓰기는 검증된 JWT `sub`당 60회/분(인증 성공 후 preHandler 순서 보장), 공개 조회는 (client, token)당 30회/분 + 스윕 계층 — 프록시 체인 read-only 검증 전에는 `TRUST_PROXY=off` 기본으로 익명 per-client 분리를 주장하지 않는다. 템플릿 경로의 자동 요청 로깅을 억제한다. **CDN/proxy access log 보존·redaction까지 검증했다고 주장하지 않으며 운영 적용 전에 점검한다.** 상세: [보안 리뷰 대응](templates-security-20261006.md).
 
 CF 정적 export는 기존 루트 `/#template=<opaque-token>`로 읽는다. 주소에 금융 JSON을 넣거나 runtime slug 페이지를 생성하지 않는다. public GET만으로 조회하며 API+클라이언트 모두strict schema; public 응답100KiB / private 목록512KiB 스트림 cap. 외부 요청·새 analytics event·새 의존성 없음. API는 기존 도메인·prefix·port를 사용한다.
 
@@ -48,7 +48,7 @@ CF 정적 export는 기존 루트 `/#template=<opaque-token>`로 읽는다. 주�
 
 ## 검증 상태
 
-최종 `pnpm verify:usability` PASS: shared136/web218/API239, 총593개. API 권한·교차 계정·revision 충돌·동시 quota·게시본 고정·재게시·철회·만료·계정 cascade·payload cap·공개 rate limit을 실제 격리 PostgreSQL에서 확인했다.
+최종 `pnpm verify:usability` PASS: shared136/web218/API239, 총593개. API 권한·교차 계정·revision 충돌·동시 quota·게시본 고정·재게시·철회·만료·계정 cascade·payload cap·공개 rate limit을 실제 격리 PostgreSQL에서 확인했다. 이후 보안 리뷰 대응(B1/N1/N2/B4/B5/C10)으로 shared158·API251 재검증 — 근거와 미완료 게이트는 [templates-security-20261006.md](templates-security-20261006.md) 참조.
 
 템플릿 브라우저1440/390/360 PASS: 상황별3개 선택, 확인된 계정의 저장/비공개 사용, 미리보기/명시적 게시, anonymous 조회, 미입력 금액 차단, 새ID/새profile, 기존 snapshot byte 보존, reload 후 원래 공간 복귀, 철회/삭제, 명시적 연결 해제와 기존 workspace 업로드0, 통계 동의ON 상태에도 템플릿 등록 이벤트0. HTML처럼 보이는 작성 문구가 텍스트로만 표시되고 실행되지 않음을 확인했다. 성공 적용 후 capability fragment를 소비해 reload에서 공유창이 다시 열리지 않는다.
 

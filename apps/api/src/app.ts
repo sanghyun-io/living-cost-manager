@@ -36,16 +36,20 @@ type BuildAppOptions = {
   prisma?: PrismaClient;
   /**
    * 테스트/운영에서 커스텀 logger 를 주입할 때 쓴다(Fastify 는 인스턴스를
-   * `loggerInstance` 로 받는다). 미주입 시 기존 동작 유지.
+   * `loggerInstance` 로 받는다). `false` 는 완전 억제(게이트 테스트용). 미주입 시 기존 동작 유지.
    */
-  logger?: FastifyBaseLogger;
+  logger?: FastifyBaseLogger | false;
 };
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const env = options.env ?? loadEnv();
   const prisma = options.prisma ?? getPrismaClient();
   const app = Fastify({
-    ...(options.logger ? { loggerInstance: options.logger } : { logger: env.NODE_ENV !== "test" }),
+    // B1: narrow, env-gated proxy trust. "off" keeps request.ip at the socket
+    // peer (no header spoofing possible); "loopback" is only set after the
+    // deployment's proxy chain is verified — see env.ts and the security doc.
+    ...(env.TRUST_PROXY === "loopback" ? { trustProxy: "loopback" as const } : {}),
+    ...(options.logger === false ? { logger: false } : options.logger ? { loggerInstance: options.logger } : { logger: env.NODE_ENV !== "test" }),
     // 마케팅 이벤트 수집 경로는 성공/거절/오류 어느 경우에도 요청·본문·쿼리를
     // 기록하지 않는다(IP/UA 가 로그에 남지 않도록). 다른 라우트의 보안 로그는
     // 그대로 유지된다 — predicate 가 해당 경로만 선별한다.
@@ -96,6 +100,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     // Disable limiting under test so suites can hammer auth endpoints freely.
     enableDraftSpec: false,
     allowList: env.NODE_ENV === "test" ? () => true : undefined
+    // Storage note (B1 review): the default LocalStore is an LRU capped at
+    // 5000 keys per store (routes with their own config get their own child
+    // store; see the explicit `cache` in routes/templates.ts). Keys for the
+    // template surface are salted hashes or verified user IDs — never raw IPs.
   });
   await app.register(authPlugin, {
     secret: env.JWT_SECRET,

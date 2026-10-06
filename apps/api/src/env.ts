@@ -26,6 +26,21 @@ export const envSchema = z.object({
     .transform((value) => value.replace(/\/+$/, ""))
     .default(""),
 
+  // Reverse-proxy hop trust for client-IP derivation in rate limiting.
+  // Security review B1 (2026-10-06): "true" is forbidden — a blanket trust lets
+  // any client spoof X-Forwarded-For and mint unlimited limit buckets, and also
+  // changes req.ip for every route (auth brute-force caps included).
+  //   off      — default; req.ip is the socket peer. Behind nginx/cloudflared this
+  //              means anonymous share buckets key on the proxy socket, so they
+  //              stay per-token (blast radius of one burst is that one share).
+  //   loopback — trust X-Forwarded-For only when the immediate hop is loopback
+  //              (nginx/cloudflared on the same host). Enable per instance ONLY
+  //              after the read-only checks in docs/templates-security-20261006.md
+  //              prove the proxy overwrites client-supplied XFF and the API port
+  //              is not otherwise reachable. Until then, do not claim per-client
+  //              anonymous separation.
+  TRUST_PROXY: z.enum(["off", "loopback"]).default("off"),
+
   // Frontend base URL used to build password-reset / email-verification links.
   APP_BASE_URL: z.url().default("https://living-cost-manager.gamja.top"),
 
