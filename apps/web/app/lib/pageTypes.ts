@@ -85,6 +85,7 @@ export interface SyncProps {
 
 // Props for the DataModal container (import/export + server sync + sharing).
 export interface DataModalProps {
+  marketingConsent: import("./useMarketingConsent").MarketingConsentState;
   importPreview: { currentCount: number; targetCount: number; currentAmount: number; targetAmount: number } | null;
   importMessage: string;
   onApplyImport: () => void;

@@ -154,14 +154,14 @@ export function AnalyticsDashboard() {
   }
 
   return (
-    <Card withBorder padding="md" radius="sm" component="section" aria-label="온디바이스 사용 통계">
+    <Card withBorder padding="md" radius="sm" component="section" aria-label="개인 기기에서 확인하는 통계">
       <Stack gap="md">
         <Group justify="space-between" align="flex-start" wrap="wrap">
           <div>
             <Text className="section-label" size="xs">
-              애널리틱스
+              내 브라우저 기록
             </Text>
-            <Text fw={700}>온디바이스 사용 통계</Text>
+            <Text fw={700}>개인 기기에서 확인하는 통계</Text>
           </div>
           <Group gap="xs">
             <Button variant="default" size="xs" onClick={() => void reload()}>
@@ -180,6 +180,7 @@ export function AnalyticsDashboard() {
         <Text size="sm">
           이벤트는 이 브라우저의 IndexedDB(lcm-analytics)에만 저장되며 서버로 전송되지 않습니다. 최신 1,000개까지
           보관되고 오래된 이벤트부터 자동으로 삭제됩니다.
+          위의 선택적 사용 통계 제공과 별개이며, 이를 켜도 이 기록을 업로드하지 않습니다.
         </Text>
       </Alert>
 

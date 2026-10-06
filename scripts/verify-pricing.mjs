@@ -46,6 +46,10 @@ try {
         assert.ok((await pricing.innerText()).includes(text), text);
       }
       assert.equal(await pricing.locator("button,input,form").count(), 0, "no fake checkout/card collection");
+      for (const text of ["계약 조건이 아닙니다", "시작일이 없어 갱신일도 미정", "마케팅 수신 동의와 별도로",
+        "미리 동의된 상태로 두지 않습니다", "청약철회·환불 문의를 구분", "현재 무료 기능을 제한하지 않습니다"]) {
+        assert.ok((await pricing.innerText()).includes(text), `truthful billing preparation: ${text}`);
+      }
       assert.equal(await pricing.getByRole("link", { name: "기존 문의 페이지", exact: true }).getAttribute("href"), "https://gamja.top/#contact");
       assert.equal(await page.locator('script[src*="portone"],script[src*="tosspayments"]').count(), 0);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);

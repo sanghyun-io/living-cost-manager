@@ -44,7 +44,7 @@ async function waitFor(check, label) {
 }
 const openData = async () => {
   if (await page.getByRole("dialog", { name: /데이터 관리/ }).isVisible()) return;
-  await page.locator("header.app-header").getByRole("button", { name: /^(데이터 관리|서버 연결됨 · 동기화 관리)$/ }).click();
+  await page.getByRole("banner").getByRole("button", { name: /^(데이터 관리|서버 연결됨 · 동기화 관리)$/ }).click();
 };
 const closeData = async () => {
   await page.getByRole("button", { name: "데이터 관리 닫기", exact: true }).click();

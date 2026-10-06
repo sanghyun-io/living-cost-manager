@@ -12,6 +12,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../app/lib/serverApi", () => ({ getServerApiBaseUrl: () => "https://api.example.test/v1" }));
 import { MarketingConsentControl } from "../app/components/MarketingConsentControl";
+import { useMarketingConsent } from "../app/lib/useMarketingConsent";
 import { __resetMarketingConsentMemoryForTests, enableMarketingConsent, readMarketingConsent, MARKETING_CONSENT_STORAGE_KEY, MARKETING_CONSENT_SCOPE_STORAGE_KEY } from "../app/lib/marketingConsent";
 import { disableMarketing, sendMarketingEvent } from "../app/lib/marketing";
 
@@ -34,15 +35,18 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
 });
 afterEach(async () => { cleanup?.(); disableMarketing(); await flush(); vi.unstubAllGlobals(); });
-function render() {
+function renderPageConsent() {
   hook.cursor = 0;
-  const tree = MarketingConsentControl();
+  const state = useMarketingConsent();
   if (hook.effect) { const effect = hook.effect; hook.effect = undefined; cleanup = effect(); }
-  return tree;
+  return state;
+}
+function render() {
+  return MarketingConsentControl(renderPageConsent());
 }
 function checkbox() {
   const tree = render();
-  return tree.props.children[0].props.children[0].props as { checked: boolean; disabled: boolean; onChange: (event: { currentTarget: { checked: boolean } }) => void };
+  return tree.props.children[1].props.children[0].props as { checked: boolean; disabled: boolean; onChange: (event: { currentTarget: { checked: boolean } }) => void };
 }
 test("control starts unchecked, requires explicit toggle, and persists revocation", () => {
   expect(checkbox().checked).toBe(false);
@@ -93,8 +97,23 @@ test("failed write AND removal visibly warn instead of claiming site-wide durabl
   checkbox().onChange({ currentTarget: { checked: false } });
   const tree = render();
   expect(checkbox().checked).toBe(false);
-  const warning = tree.props.children[1];
+  const warning = tree.props.children[2];
   expect(warning.props.role).toBe("status");
   expect(warning.props.children).toContain("보장할 수 없습니다");
   expect(warning.props.children).toContain("GPC/DNT");
+});
+
+test("closed settings retain page-lifetime cross-tab revocation and abort transport", async () => {
+  renderPageConsent();
+  renderPageConsent().setEnabled(true);
+  vi.mocked(fetch).mockReturnValue(new Promise(() => undefined));
+  expect(sendMarketingEvent("personal_cost_saved", { workspace: { sharedWorkspace: false } })).toBe(true);
+  await flush();
+  const signal = vi.mocked(fetch).mock.calls[0][1]!.signal!;
+  // No control element rendered; only the page hook remains mounted.
+  values.delete(MARKETING_CONSENT_STORAGE_KEY);
+  listeners.get("storage")!();
+  expect(signal.aborted).toBe(true);
+  expect(renderPageConsent().consent.enabled).toBe(false);
+  expect(checkbox().checked).toBe(false);
 });
