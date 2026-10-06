@@ -42,14 +42,14 @@ export function AppHeader({
         <a className="guide-link" href="/guide/">사용 안내</a>
         <ActionIcon
           variant="subtle"
-          color="teal"
-          size="lg"
+          color="gray"
+          size={44}
           aria-label="색상 모드 전환"
           onClick={() => setColorScheme(computed === "dark" ? "light" : "dark")}
         >
           <span aria-hidden="true">{computed === "dark" ? "☀" : "☾"}</span>
         </ActionIcon>
-        <Text size="xs" c={saveError ? "rose" : "dimmed"} role={saveError ? "alert" : undefined}>
+        <Text className="save-status" size="xs" c={saveError ? "rose" : "dimmed"} role={saveError ? "alert" : undefined}>
           {saveLabel}
         </Text>
         {saveError ? <Group gap="xs">
@@ -75,7 +75,7 @@ export function AppHeader({
           </>
         )}
         <Text size="sm" c="dimmed">{currentUserName ?? LOCAL_USER_NAME}</Text>
-        <Button variant="subtle" color="gray" size="xs" onClick={onOpenCoach}>AI 코치</Button>
+        <Button variant="subtle" color="gray" size="xs" onClick={onOpenCoach}>지출 코치</Button>
         {serverSession ? (
           <Button variant="default" onClick={onServerLogout}>
             서버 로그아웃

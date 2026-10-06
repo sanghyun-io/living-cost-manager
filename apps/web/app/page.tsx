@@ -171,16 +171,21 @@ export default function Home() {
         <Button variant="subtle" color={budget.localRecoveryRequired ? "rose" : "gray"} size="xs" onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? "저장 원본 내보내기" : "최근 교체 전 복구본 내보내기"}</Button>
       </section>
 
-      <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
+      <div className="dashboard-overview">
+        <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
+        <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
+      </div>
 
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
         <section className="renewal-queue" aria-label="갱신 검토 작업목록">
           <Text fw={700}>갱신 검토 작업목록</Text>
           <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
           {reviewItems.length === 0 ? <Text size="sm">현재 검토할 작업이 없습니다.</Text> : null}
-          {reviewItems.map((item) => <Button key={item.id} variant="light" m={4} onClick={() => budget.revealItem(item.id)}>
+          <div className="renewal-actions">
+          {reviewItems.map((item) => <Button key={item.id} variant="subtle" onClick={() => budget.revealItem(item.id)}>
             {item.name} · {item.renewalStatus === "cancel-planned" ? "해지 예정" : item.renewalStatus === "change-review" ? "변경 검토" : "임박 미검토"} 편집
           </Button>)}
+          </div>
         </section>
         {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
         <FixedCostTable
@@ -213,8 +218,7 @@ export default function Home() {
           onOpenData={() => ui.setIsDataModalOpen(true)}
         />
 
-        <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-        <ChartSection
+        {budget.summary.monthlyExpense > 0 ? <ChartSection
           chartMode={ui.chartMode}
           buckets={budget.buckets}
           pieSegments={budget.pieSegments}
@@ -225,7 +229,7 @@ export default function Home() {
           onChartModeChange={ui.setChartMode}
           onPieMove={(event) => ui.handlePieMove(event, budget.pieSegments)}
           onPieLeave={() => ui.setActivePieSegment(null)}
-        />
+        /> : null}
       </section>
 
       <DataModal

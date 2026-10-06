@@ -15,7 +15,7 @@ export function HeroPanel({ monthlyIncome, expenseRate, hasServerWorkspace, onIn
     <section className="hero">
       <div className="hero-strip">
         <div className="hero-left">
-           <Title order={1} size="h2" fw={700}>
+           <Title order={1} size={28} fw={700}>
              고정비와 다음 결제
           </Title>
           <p className="hero-copy">
@@ -32,7 +32,7 @@ export function HeroPanel({ monthlyIncome, expenseRate, hasServerWorkspace, onIn
             label="월 수입"
             id="monthly-income"
             size="md"
-            radius="md"
+            radius="sm"
             min={0}
             thousandSeparator=","
             allowDecimal={false}
@@ -49,9 +49,9 @@ export function HeroPanel({ monthlyIncome, expenseRate, hasServerWorkspace, onIn
           </Text>
           <Progress
             value={Math.min(expenseRate, 100)}
-            color={expenseRate > 80 ? "rose" : expenseRate > 60 ? "amber" : "teal"}
-            size="md"
-            radius="xl"
+            color={expenseRate > 80 ? "rose" : expenseRate > 60 ? "amber" : "blue"}
+            size={4}
+            radius="xs"
             aria-label="수입 대비 월 환산 고정비 비율"
           />
         </div>

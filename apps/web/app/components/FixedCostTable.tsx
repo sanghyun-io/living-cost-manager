@@ -42,25 +42,6 @@ function toNumber(value: number | string, fallback: number): number {
   return typeof value === "number" ? value : fallback;
 }
 
-// Deterministic, purely decorative category dot colors (Mantine palette vars so
-// both color schemes resolve correctly).
-const CATEGORY_COLORS = [
-  "var(--mantine-color-teal-6)",
-  "var(--mantine-color-amber-6)",
-  "var(--mantine-color-violet-6)",
-  "var(--mantine-color-blue-6)",
-  "var(--mantine-color-orange-6)",
-  "var(--mantine-color-pink-6)"
-];
-
-function categoryColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i += 1) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return CATEGORY_COLORS[Math.abs(hash) % CATEGORY_COLORS.length];
-}
-
 export function FixedCostTable({
   focusItemId,
   focusRequest,
@@ -111,8 +92,8 @@ export function FixedCostTable({
     <div className="cost-list">
       <div className="section-heading">
         <div>
-          <Text className="section-label">납부 일정</Text>
-          <Title order={2}>고정비 항목</Title>
+          <Title order={2} size={20}>고정비 항목</Title>
+          <Text size="sm" c="dimmed" mt={4}>금액은 매 청구 시 실제 결제액입니다. 월 환산은 비교용이며 실제 청구액과 다를 수 있어요.</Text>
         </div>
         {isDeleteMode ? (
           <Group className="action-group delete-actions" gap="xs">
@@ -126,16 +107,16 @@ export function FixedCostTable({
           </Group>
         ) : (
           <Group className="action-group" gap="xs">
-            <Button variant="default" onClick={onOpenCategory}>
+            <Button variant="subtle" color="gray" onClick={onOpenCategory}>
               카테고리 관리
             </Button>
-            <Button variant="default" onClick={onOpenCard}>
+            <Button variant="subtle" color="gray" onClick={onOpenCard}>
               카드 관리
             </Button>
-            <Button variant="default" onClick={onOpenData}>
+            <Button variant="subtle" color="gray" onClick={onOpenData}>
               데이터 관리
             </Button>
-            <Button color="orange" variant="light" onClick={onEnterDeleteMode}>
+            <Button color="gray" variant="subtle" onClick={onEnterDeleteMode}>
               삭제 모드
             </Button>
             <Button onClick={onAddItem}>항목 추가</Button>
@@ -148,9 +129,9 @@ export function FixedCostTable({
         </Alert>
       ) : null}
       {!isDeleteMode && onQuickAdd ? (
-        <Group gap="xs" mb="sm" align="flex-end" wrap="nowrap">
+        <Group className="quick-add" gap="xs" mb="md" align="flex-end" wrap="nowrap">
           <TextInput
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 0 }}
             label="빠른 추가"
             description="예: 넷플릭스 17000원 매달"
             placeholder="항목명과 금액, 주기를 한 줄로 입력하세요"
@@ -168,15 +149,14 @@ export function FixedCostTable({
           </Button>
         </Group>
       ) : null}
-      <div className="filter-bar" aria-label="고정비 필터">
-        {quickAddText && !isDeleteMode ? <Text role="status" size="sm">{quickPreview.valid
+      {quickAddText && !isDeleteMode ? <Text role="status" size="sm" mb="sm">{quickPreview.valid
           ? `미리보기: ${quickPreview.name} · ${formatWon(quickPreview.amount!)} · ${quickPreview.periodMonths}개월${quickPreview.defaultPeriod ? " (주기 생략: 매월)" : ""}${!Number.isInteger(quickPreview.periodMonths) ? " · 월환산 비교에 사용하며 정확한 청구 일정은 계산하지 않습니다." : ""}`
           : "이름과 유효한 금액을 입력하세요. 입력 내용은 유지됩니다."}</Text> : null}
+      <div className="filter-bar" aria-label="고정비 필터">
         <TextInput label="이름 검색" value={costFilters.query} onChange={(e) => onCostFilters({ ...costFilters, query: e.currentTarget.value })} />
         <Select label="결제수단 필터" value={costFilters.method} data={[{ value: "all", label: "모든 결제수단" }, ...methodData]} onChange={(value) => onCostFilters({ ...costFilters, method: value ?? "all" })} />
         <Select label="검토 상태 필터" value={costFilters.review} data={[{ value: "all", label: "모든 검토 상태" }, { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" }, { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" }, { value: "completed", label: "검토 완료" }]} onChange={(value) => onCostFilters({ ...costFilters, review: value ?? "all" })} />
         <Select label="정렬" value={costFilters.sort} data={[{ value: "original", label: "등록 순서" }, { value: "amount", label: "청구 금액 큰 순" }, { value: "due", label: "다음 납부일 순 (미확인 마지막)" }]} onChange={(value) => onCostFilters({ ...costFilters, sort: value ?? "original" })} />
-        <Button variant="default" onClick={onResetFilters}>필터 초기화</Button>
         <Select
           label="카테고리 보기"
           data={filterData}
@@ -185,6 +165,9 @@ export function FixedCostTable({
           allowDeselect={false}
           size="sm"
         />
+        <Button variant="default" onClick={onResetFilters}>필터 초기화</Button>
+      </div>
+      <div className="filter-summary">
         <Text size="sm">{visibleFixedCosts.length}개 항목</Text>
         <Text size="sm" fw={700} className="tnum">월 환산 {formatWon(visibleFixedCostTotal)}</Text>
       </div>
@@ -239,11 +222,6 @@ export function FixedCostTable({
               </span>
               <span>
                 <Group gap={6} wrap="nowrap" align="center">
-                  <span
-                    className="cat-dot"
-                    style={{ background: categoryColor(item.categoryId) }}
-                    aria-hidden
-                  />
                   <Select
                     aria-label="카테고리"
                     label="카테고리" classNames={{ label: "stacked-field-label" }}
@@ -316,7 +294,6 @@ export function FixedCostTable({
                 <NumberInput
                   aria-label="금액"
                   label="금액" classNames={{ label: "stacked-field-label" }}
-                  description="매 청구 시 실제 결제 금액"
                   size="xs"
                   min={0}
                   thousandSeparator=","
@@ -346,7 +323,6 @@ export function FixedCostTable({
               <span className="monthly-equivalent-cell">
                 <Text fw={700} size="sm" className="tnum">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
                 <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
-                <Text size="xs" c="dimmed">월 환산은 비교용이며 실제 청구액과 다를 수 있어요.</Text>
                 <Select size="xs" label="갱신 검토" value={item.renewalStatus ?? "unreviewed"}
                   allowDeselect={false}
                   data={[
