@@ -61,6 +61,21 @@ export function shareClientKey(request: FastifyRequest): string {
 }
 
 /**
+ * G1 backstop key for the authenticated /templates* surface: a salted hash of
+ * the already trustProxy-narrowed request.ip (never a raw IP). The coarse
+ * guard runs in onRequest — *before* authenticate — so it bounds the DB cost
+ * of auth-failure paths (signed-but-revoked 401, unverified-email 403) that
+ * the post-auth verified-sub limiter structurally cannot see. With
+ * TRUST_PROXY=off the socket is the shared proxy address, i.e. this is one
+ * aggregated instance bucket (an availability tradeoff documented in
+ * docs/templates-security-20261006.md §G1, not a per-client claim); with the
+ * verified loopback gate it becomes per-client capacity automatically.
+ */
+export function authSurfaceKey(request: FastifyRequest): string {
+  return `templates:surface:${keyedHash([requestSocketOrClientIp(request)])}`;
+}
+
+/**
  * Verified-user key for authenticated template routes. If this ever runs
  * without a prior successful authenticate, failing closed (401) is preferred
  * over inventing a shared bucket that could poison per-user limits.

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { TEMPLATE_SCENARIOS } from "@living-cost-manager/shared";
 import { buildApp } from "../src/app.js";
 import { loadEnv } from "../src/env.js";
@@ -49,6 +49,44 @@ afterAll(async () => {
 });
 
 describe("B1: rate limiting is keyed per verified user, never on a shared proxy IP", () => {
+  test("pre-auth backstop bounds revoked-token DB work across methods and IDs", async () => {
+    const limited = await gated();
+    const victim = await makeUser();
+    const token = bearer(victim);
+    await prisma.user.update({ where: { id: victim }, data: { tokenVersion: 1 } });
+    const lookup = vi.spyOn(prisma.user, "findUnique");
+    try {
+      for (let i = 0; i < 300; i++) {
+        const response = await limited.inject({ method: i % 2 ? "DELETE" : "GET", url: i % 2 ? `/templates/probe-${i}` : "/templates", headers: { authorization: `Bearer ${token}` } });
+        expect(response.statusCode).toBe(401);
+      }
+      expect(lookup).toHaveBeenCalledTimes(300);
+      const denied = await limited.inject({ method: "POST", url: "/templates/probe/publish", headers: { authorization: `Bearer ${token}`, "x-forwarded-for": "9.9.9.9" }, payload: {} });
+      expect(denied.statusCode).toBe(429);
+      expect(lookup).toHaveBeenCalledTimes(300);
+      for (const value of [victim, token, "127.0.0.1", "templates:surface:"]) expect(denied.body).not.toContain(value);
+    } finally { lookup.mockRestore(); await limited.close(); }
+  }, 30_000);
+
+  test("pre-auth backstop caps unverified-email and malformed-token traffic", async () => {
+    const limited = await gated();
+    const user = await makeUser(false);
+    const token = bearer(user);
+    const lookup = vi.spyOn(prisma.user, "findUnique");
+    try {
+      for (let i = 0; i < 300; i++) {
+        const badSignature = i % 2 === 0;
+        const response = await limited.inject({ method: "POST", url: "/templates", headers: { authorization: `Bearer ${badSignature ? "garbage.token.here" : token}` }, payload: { blueprint } });
+        expect(response.statusCode).toBe(badSignature ? 401 : 403);
+      }
+      const before = lookup.mock.calls.length;
+      expect(before).toBeGreaterThan(0);
+      expect(before).toBeLessThanOrEqual(300);
+      expect((await limited.inject({ method: "POST", url: "/templates", headers: { authorization: `Bearer ${token}` }, payload: { blueprint } })).statusCode).toBe(429);
+      expect(lookup.mock.calls.length).toBe(before);
+    } finally { lookup.mockRestore(); await limited.close(); }
+  }, 30_000);
+
   test("two legitimate authenticated users do not share a bucket (pre-fix: all customers on one key)", async () => {
     const limited = await gated();
     try {

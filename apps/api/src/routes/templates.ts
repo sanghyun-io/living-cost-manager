@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { templateBlueprintSchema, templateWriteSchema, templateUpdateSchema, templatePublishSchema } from "@living-cost-manager/shared";
 
-import { shareClientKey, shareTokenKey, verifiedUserKey } from "../services/template-rate-limit.js";
+import { authSurfaceKey, shareClientKey, shareTokenKey, verifiedUserKey } from "../services/template-rate-limit.js";
 
 const params = z.object({ id: z.string().min(1).max(100) }).strict();
 const shareParams = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict();
@@ -64,11 +64,24 @@ async function lockUser(app: FastifyInstance, tx: Prisma.TransactionClient, user
 export async function templateRoutes(app: FastifyInstance) {
   const env = app.appEnv;
 
+  // One shared store across methods and template IDs, before any JWT/DB work.
+  // This is deliberately a coarse backstop, not the verified-user quota. With
+  // untrusted proxy headers it aggregates clients behind the same socket.
+  // createRateLimit uses the plugin's existing bounded (5,000-entry) store.
+  const authSurfaceLimit = app.createRateLimit({ keyGenerator: authSurfaceKey, max: 300, timeWindow: "1 minute" });
+  const authSurfaceGuard = async (request: FastifyRequest, reply: FastifyReply) => {
+    const check = await authSurfaceLimit(request);
+    if ("isExceeded" in check && check.isExceeded) {
+      reply.header("retry-after", String(Math.max(1, Math.ceil(check.ttl / 1000))));
+      throw app.httpErrors.tooManyRequests("Template request limit reached; try again in about a minute");
+    }
+  };
+
   // Fresh option objects per registration: @fastify/rate-limit's onRoute
   // handling rewrites routeOptions.preHandler, so the literal must never be
   // shared across route registrations.
-  const auth = () => ({ preHandler: app.authenticate, bodyLimit: SIZE_LIMIT, config: { rateLimit: { ...AUTH_RATE_CONFIG } } });
-  const verified = () => ({ preHandler: app.requireVerifiedEmail, bodyLimit: SIZE_LIMIT, config: { rateLimit: { ...AUTH_RATE_CONFIG } } });
+  const auth = () => ({ onRequest: authSurfaceGuard, preHandler: app.authenticate, bodyLimit: SIZE_LIMIT, config: { rateLimit: { ...AUTH_RATE_CONFIG } } });
+  const verified = () => ({ onRequest: authSurfaceGuard, preHandler: app.requireVerifiedEmail, bodyLimit: SIZE_LIMIT, config: { rateLimit: { ...AUTH_RATE_CONFIG } } });
 
   // Anonymous share reads — two layers, and neither stores a raw IP: any
   // bucket key is a salted one-way hash (see template-rate-limit.ts).
