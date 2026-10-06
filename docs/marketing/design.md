@@ -10,16 +10,16 @@
 |---|---|
 | 마케팅 | 이 폴더의 카피·가설·질문·실험안; 공개 실행은 별도 승인 |
 | 데이터 분석 | 근거 자료와 `evidence*`; 원본 출처·기간·누락·지표 검증 |
-| runtime builder | 구현·로컬 검증 완료; 운영 승격 대기. 최종 계약은 [runtime 문서](../marketing-runtime.md) |
+| runtime 운영 | 구현·검증 완료. [측정 계약](../marketing-runtime.md)과 [실제 릴리스 기록](../marketing-release-20261005.md) 참조 |
 | 운영 도구 담당 | 캠페인 URL 생성기와 근거 CLI 구현됨; [링크 도구](../marketing-campaign-links.md), [근거 CLI 실제 명령](evidence-README.md) 참조 |
 | Owner | 인증 GSC 자료 확보, 인터뷰 기록 단독 보관, 외부 활동 승인 |
 
-GSC sitemap 수동 제출은 이미 완료되었다. 제출 성공은 색인·검색 유입 증거가 아니다. Dates.csv는 인증 대기이며 세션 우회·스크래핑하지 않는다. Dates.csv만으로 페이지별/검색어별 수요를 판정하지 않는다. 필요 시 Owner가 해당 차원의 별도 내보내기를 승인한다. 사용자 제공 배포 준비 검증상 기존 Pages 토큰은 프로젝트를 읽을 수 있으나 WebAnalytics metadata API는 403이다. analytics 설정·조회 결과는 접근 불가/미검증이며 트래픽 0이 아니다. 실제 지표 미확보 상태다.
+GSC sitemap 수동 제출은 이미 완료되었다. 제출 성공은 색인·검색 유입 증거가 아니다. Dates.csv 입력은 대기 중이며 인증 세션 우회·스크래핑하지 않는다. Dates.csv만으로 페이지별/검색어별 수요를 판정하지 않는다. 운영 준비에서 기존 Pages 자격증명의 프로젝트 조회는 성공했으나 WebAnalytics metadata API는 403이었다. 현재 자동화 권한으로 analytics 설정·집계는 미확인이며 트래픽 0을 뜻하지 않는다. 실제 마케팅 지표는 미확보다.
 
-운영 도구 입력/출력은 Git에서 무시되는 로컬 `marketing-private/`에 둔다. 디렉터리 mode `0700`을 권장하며 사용 전에 ignore·권한을 확인한다. Git ignore는 접근 통제가 아니다. 이 작업은 디렉터리 생성이나 권한 변경을 하지 않는다.
+운영 도구 입력/출력은 Git에서 무시되는 로컬 `marketing-private/`에 둔다. 사용 전에 ignore·입력 디렉터리 권한 `0700`을 확인한다. CLI는 새 출력 디렉터리를 `0700`, 보고서 파일을 `0600`으로 만든다. Git ignore는 접근 통제가 아니다.
 
-## 측정 계약 — 구현·로컬 검증 완료 / 운영 승격 대기
-사용자 제공 결과: web 205 / API 141 / 브라우저 13개 시나리오 통과. coordinator 전체 검증·독립 리뷰 진행 중이며 운영 배포 증거는 아직 없다. 실제 지표·baseline은 unknown이다.
+## 측정 계약
+전체 검증·독립 리뷰 및 배포 증거는 [릴리스 기록](../marketing-release-20261005.md)에서 확인한다. 기술 검증과 실제 고객 관측은 다르며, 실제 마케팅 지표·baseline은 여전히 unknown이다.
 - 명시적 opt-in, 기본 off. 동의하지 않아도 핵심 제품 이용을 제한하지 않는다.
 - 익명 일별 이벤트: `personal_cost_saved`, `personal_billing_date_saved`, `personal_renewal_decision_saved`.
 - 대상은 서버에 연결되지 않은 로컬 개인 데이터의 명시적 사용자 작업이며 로컬 저장 성공 후에만 전송한다. 가져오기·복원·복제에 의한 신규 행, 샘플, 모든 서버 연결 프로필(로그아웃 후에도 연결된 프로필 포함), hydration·서버 조회·낙관적 UI 변경은 제외한다.
