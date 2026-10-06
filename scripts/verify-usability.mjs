@@ -111,6 +111,7 @@ try {
   });
   web.listen(webPort, "127.0.0.1"); await once(web, "listening");
   await run("node", ["scripts/usability-browser.mjs"]);
+  await run("node", ["scripts/ui-refresh-browser.mjs"], process.env.LCM_UI_EVIDENCE ? { LCM_UI_EVIDENCE: process.env.LCM_UI_EVIDENCE } : {});
   await run("node", ["scripts/pm-local-e2e.mjs"]);
   await run("node", ["scripts/pm-sync-e2e.mjs"]);
   await run("node", ["scripts/verify-marketing.mjs"]);

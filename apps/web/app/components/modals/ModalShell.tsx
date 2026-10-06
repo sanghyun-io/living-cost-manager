@@ -26,6 +26,7 @@ export function ModalShell({ opened, sectionLabel, title, size = "md", onClose, 
       size={size}
       centered
       radius="md"
+      padding="lg"
       title={
         <div>
           <Text className="section-label" size="xs">

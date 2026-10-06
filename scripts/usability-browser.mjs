@@ -9,7 +9,7 @@ async function waitFor(check, label) {
   throw new Error(label);
 }
 try {
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 1280, 390, 360]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, acceptDownloads: true });
     const errors = [];
     await context.route("**/*", route => {
@@ -96,7 +96,7 @@ try {
       await page.getByRole("button", { name: "검증한 내용으로 교체 적용", exact: true }).click();
       await page.getByRole("dialog").getByText("검증한 2개 항목을 적용했습니다.").waitFor();
       await page.getByRole("button", { name: "데이터 관리 닫기", exact: true }).click();
-      if (width === 390) {
+      if (width <= 390) {
         assert.ok(await rows().first().getByLabel("항목명", { exact: true }).evaluate(el => el.getBoundingClientRect().height >= 44));
         assert.ok(await rows().first().getByRole("button", { name: /복제/ }).evaluate(el => el.getBoundingClientRect().height >= 44));
       }

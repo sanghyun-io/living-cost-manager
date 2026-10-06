@@ -2,7 +2,7 @@
 
 /* Quiet surfaces, clear editing controls, and scheme-aware data cues. */
 :root {
-  --app-bg: #f7f7f6;
+  --app-bg: #f5f6f8;
   --background: var(--mantine-color-body);
   --surface: var(--mantine-color-default);
   --surface-muted: var(--mantine-color-default-hover);
@@ -10,14 +10,14 @@
   --text: var(--mantine-color-text);
   --muted: var(--mantine-color-dimmed);
   --line: var(--mantine-color-default-border);
-  --accent: var(--mantine-color-teal-6);
-  --accent-strong: var(--mantine-color-teal-8);
+  --accent: var(--mantine-color-blue-7);
+  --accent-strong: var(--mantine-color-blue-8);
   --rose: var(--mantine-color-rose-6);
   --amber-fg: var(--mantine-color-amber-7);
   --amber-bg: rgba(243, 173, 34, 0.14);
   --shadow-card: none;
   --shadow-card-hover: none;
-  --hero-accent: var(--mantine-color-teal-8);
+  --hero-accent: var(--mantine-color-blue-7);
   --shadow: var(--shadow-card);
   --shadow-lg: var(--shadow-card-hover);
   --radius: 8px;
@@ -27,10 +27,15 @@
   --app-bg: #191a1b;
   --amber-fg: var(--mantine-color-amber-4);
   --amber-bg: rgba(243, 173, 34, 0.18);
-  --hero-accent: var(--mantine-color-teal-4);
-  --accent-strong: var(--mantine-color-teal-3);
+  --hero-accent: var(--mantine-color-blue-3);
+  --accent-strong: var(--mantine-color-blue-3);
   --rose: var(--mantine-color-rose-4);
 }
+
+/* Stronger specificity than Mantine's generated scheme variables. Secondary
+   text is still readable on white/quiet surfaces, not placeholder gray. */
+:root[data-mantine-color-scheme="light"] { --mantine-color-dimmed: #596579; --mantine-color-text: #202938; }
+:root[data-mantine-color-scheme="dark"] { --mantine-color-dimmed: #a8b1bf; }
 
 * {
   box-sizing: border-box;
@@ -46,6 +51,7 @@ body {
   font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
     "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   font-size: 14px;
+  line-height: 1.6;
   color: var(--text);
 }
 
@@ -75,7 +81,7 @@ body {
   gap: 12px;
   width: min(1240px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 12px 0;
+  padding: 8px 0;
 }
 
 .local-note {
@@ -114,8 +120,8 @@ body {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 24px 0 8px;
+  gap: 32px;
+  padding: 32px 0 16px;
 }
 
 .hero-left {
@@ -135,7 +141,7 @@ body {
   max-width: 620px;
   margin: 0;
   color: var(--muted);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.7;
 }
 
@@ -162,36 +168,46 @@ body {
   padding: 20px;
 }
 
-/* METRIC BAND — five KPI cells in one continuous card. */
-.metric-grid {
+/* Two primary budget figures; secondary facts remain compact text. */
+.dashboard-overview {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0;
-  margin-bottom: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.budget-overview {
+  min-width: 0;
+  padding: 24px;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 0;
 }
 
 .metric-cell {
-  padding: 16px;
+  padding: 0 16px 16px 0;
   min-width: 0;
   overflow-wrap: anywhere;
   background: transparent;
-  border-right: 1px solid var(--line);
-}
-
-.metric-cell:last-child {
-  border-right: none;
 }
 
 .metric-cell .metric-value {
-  font-size: 21px;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.5;
 }
+
+.budget-facts { margin: 8px 0 0; border-top: 1px solid var(--line); padding-top: 12px; }
+.budget-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 4px 0; font-size: 13px; }
+.budget-facts dt { color: var(--muted); flex-shrink: 0; }
+.budget-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 
 .metric-value.is-danger {
   color: var(--rose);
@@ -217,28 +233,27 @@ body {
 }
 
 .filter-bar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
   gap: 12px;
   align-items: flex-end;
-  justify-content: flex-end;
-  border: none;
-  border-radius: 6px;
-  background: var(--surface-subtle);
-  box-shadow: var(--shadow);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   margin-bottom: 12px;
-  padding: 10px 12px;
+  padding: 16px 0;
 }
+
+.filter-summary { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0 16px; }
 
 .workspace {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 14px;
+  gap: 24px;
 }
 
 .table {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 /* Keep date entry readable; narrower screens use stacked editing fields. */
@@ -248,16 +263,12 @@ body {
   gap: 12px;
   align-items: center;
   min-height: 68px;
-  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
-  border-radius: 10px;
-  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 16px 0;
   background: var(--surface);
   overflow: visible; /* keep input focus rings from being clipped by the radius */
-  transition: border-color 140ms ease;
-}
-
-.table-row:hover {
-  border-color: var(--muted);
 }
 
 .table-row.delete-mode {
@@ -265,10 +276,10 @@ body {
 }
 
 .table-empty {
-  border: 1px dashed var(--line);
+  border: 0;
   border-radius: var(--radius);
   padding: 28px 20px;
-  text-align: center;
+  text-align: left;
   background: var(--surface);
 }
 
@@ -276,21 +287,11 @@ body {
   min-height: auto;
   border: 0;
   background: transparent;
-  padding: 0 16px;
-  font-weight: 700;
+  padding: 0 0 12px;
+  font-weight: 600;
   box-shadow: none;
   color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-/* Deterministic, decorative category dot before the category select. */
-.cat-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  flex: 0 0 auto;
+  font-size: 12px;
 }
 
 .delete-select-cell {
@@ -331,7 +332,7 @@ body {
 .bar-track {
   height: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: 2px;
   background: var(--surface-muted);
 }
 
@@ -501,25 +502,8 @@ body {
     flex: 1 1 auto;
   }
 
-  /* Metric band re-wraps to 2 columns with internal borders restored. */
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .metric-cell {
-    border-right: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .metric-cell:nth-child(2n) {
-    border-right: none;
-  }
-
-  /* Last cell (5th, odd → starts a final single-column row): drop both edges. */
-  .metric-cell:last-child {
-    border-right: none;
-    border-bottom: none;
-  }
+  .dashboard-overview { grid-template-columns: 1fr; gap: 16px; }
+  .filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .bars,
   .pie-layout {
@@ -546,25 +530,19 @@ body {
 }
 
 @media (max-width: 560px) {
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .metric-cell {
-    padding: 12px;
-    border-bottom: 1px solid var(--line);
+    padding: 0 8px 12px 0;
   }
 
-  .metric-cell:last-child {
-    border-bottom: none;
-    grid-column: 1 / -1;
-  }
-
-  .table-row,
-  .table-row.delete-mode,
   .sync-summary-grid {
     grid-template-columns: 1fr;
   }
+  .table-row, .table-row.delete-mode { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .table-row > span:nth-child(1), .table-row > span:nth-child(4),
+  .table-row > span:nth-child(5), .table-row > span:nth-child(8),
+  .table-row > .delete-select-cell { grid-column: 1 / -1; }
+  .monthly-equivalent-cell { border-top: 1px solid var(--line); padding-top: 12px; }
+  .monthly-equivalent-cell .mantine-InputWrapper-root { margin-top: 8px; }
 
   .section-heading {
     display: grid;
@@ -617,14 +595,19 @@ body {
 
 .insights-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-  padding: 20px;
-  margin-bottom: 20px;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  padding: 24px;
+  margin-bottom: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
 }
+
+.due-total { font-size: 28px; line-height: 1.5; }
+.renewal-queue { border-bottom: 1px solid var(--line); padding: 0 0 16px; }
+.renewal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.renewal-actions:empty { display: none; }
 
 .insights-block {
   min-width: 0;
@@ -700,12 +683,13 @@ body {
 
   .cost-list,
   .diagram,
-  .insights-panel {
-    padding: 14px;
+  .insights-panel,
+  .budget-overview {
+    padding: 16px;
   }
 
   .metric-cell .metric-value {
-    font-size: 18px;
+    font-size: 22px;
   }
 
   .insights-row {
@@ -720,8 +704,20 @@ body {
 .renewal-queue .mantine-Button-root { max-width: calc(100% - 8px); height: auto; min-height: 44px; }
 .renewal-queue .mantine-Button-label { white-space: normal; overflow-wrap: anywhere; padding-block: 8px; }
 @media (max-width: 48em) {
-  .cost-list .mantine-Input-input, .cost-list .mantine-Button-root,
+  .mantine-Input-input, .mantine-Button-root,
   .mantine-Modal-content .mantine-Button-root, .mantine-Modal-close { min-height: 44px; }
   .cost-list .mantine-Checkbox-body { min-height: 44px; align-items: center; }
   .cost-list .mantine-Checkbox-label { padding-block: 12px; }
+}
+
+@media (min-width: 861px) and (max-width: 1100px) {
+  .filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.table-row > span, .quick-add > * { min-width: 0; }
+.table-row .mantine-NumberInput-input { font-variant-numeric: tabular-nums; }
+.app-header .save-status { font-variant-numeric: tabular-nums; }
+.mantine-Modal-title { line-height: 1.5; }
+:where(a, button, summary, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
 }

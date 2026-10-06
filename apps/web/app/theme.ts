@@ -44,18 +44,18 @@ const amber: MantineColorsTuple = [
 ];
 
 export const theme = createTheme({
-  primaryColor: "teal",
+  primaryColor: "blue",
   autoContrast: true,
-  // Dark mode uses the brighter teal (index 4) for contrast on the dark canvas.
-  primaryShade: { light: 8, dark: 4 },
-  colors: { teal, rose, amber },
+  // Both solid-action shades keep white button labels above AA contrast.
+  primaryShade: { light: 7, dark: 6 },
+  colors: { teal, rose, amber, blue: ["#eff5ff", "#dce8ff", "#b8d0ff", "#8db5ff", "#6798f5", "#487fe9", "#326ddd", "#245ac4", "#19479f", "#173a7a"] },
   fontFamily:
     "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif",
   headings: {
     fontFamily: "'Pretendard Variable', Pretendard, sans-serif",
     fontWeight: "700"
   },
-  fontSizes: { xs: "12px", sm: "13px", md: "14px", lg: "16px", xl: "20px" },
+  fontSizes: { xs: "12px", sm: "14px", md: "14px", lg: "16px", xl: "20px" },
   radius: { xs: "4px", sm: "6px", md: "8px", lg: "10px", xl: "12px" },
   defaultRadius: "sm",
   shadows: {

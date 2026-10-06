@@ -71,17 +71,6 @@ export function InsightsPanel({
   const dueSummary = buildThirtyDayDueSummary(fixedCosts, new Date());
   const savings = summarizeRenewalSavings(fixedCosts);
 
-  if (
-    upcoming.length === 0 &&
-    insights.length === 0 &&
-    trend.length === 0 &&
-    !monthlyReport &&
-    !canShare &&
-    fixedCosts.length === 0
-  ) {
-    return null;
-  }
-
   async function handleShare() {
     const text = buildShareSummary({
       monthlyIncome,
@@ -111,9 +100,9 @@ export function InsightsPanel({
   return (
     <section className="insights-panel" aria-label="예측 및 절감 인사이트">
       <div className="insights-block">
-        <Title order={2} size="h4">앞으로 30일 실제 납부 예정</Title>
-        <Text fw={700} size="xl" className="tnum">{formatWon(dueSummary.total)} · {dueSummary.dues.length}회</Text>
-        <Text size="sm">등록한 일정 기준 예상 청구액입니다. 월 환산 비용은 {formatWon(dueSummary.monthlyNormalized)}입니다.</Text>
+        <Title order={2} size={14} fw={600}>앞으로 30일 실제 납부 예정</Title>
+        <Text fw={700} className="due-total tnum">{formatWon(dueSummary.total)} <Text span size="sm" fw={400} c="dimmed">· {dueSummary.dues.length}회</Text></Text>
+        <Text size="sm" c="dimmed">등록한 일정 기준 예상 청구액입니다. 월 환산 비용은 {formatWon(dueSummary.monthlyNormalized)}입니다.</Text>
         {dueSummary.unknownCount > 0 ? <Text size="sm" c="dimmed">일정 미확인 {dueSummary.unknownCount}건은 합계와 알림에서 제외됩니다. 기준 납부일과 정수 개월 주기를 입력하세요.</Text> : null}
         <a className="guide-link" href="#fixed-costs">납부일·갱신 계획 수정</a>
       </div>
@@ -135,7 +124,7 @@ export function InsightsPanel({
             })}
           </ul>
         </div>
-      ) : null}
+      ) : <Text size="sm" c="dimmed">{fixedCosts.length === 0 ? "항목과 기준 납부일을 등록하면 예정 결제를 볼 수 있습니다." : dueSummary.unknownCount === fixedCosts.length ? "기준 납부일을 입력하면 가까운 결제가 표시됩니다." : "확인된 일정 중 30일 이내 납부가 없습니다."}</Text>}
 
       <details className="insights-details">
         <summary>절감 검토와 고정비 요약</summary>
