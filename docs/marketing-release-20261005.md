@@ -1,337 +1,190 @@
-# Marketing paired release — 2026-10-05
+# Marketing release — deployed 2026-10-06
 
-## Status / authorization
+## Current result
 
-**PREPARATION ONLY; no production changes.** Full application verification is
-reported complete below; await final root review and coordinator's tested SHA.
-Local documents, isolated ops worktree/helpers
-are authorized. Dirty checkouts are not release inputs. No new paid resources,
-broader credentials, global security-log weakening, DB mutations/customer reads,
-dumps, test accounts, mail or push. Historical dump/migration instructions in the
-prior release runbooks do not authorize those operations for this release.
+Paired OCI + Cloudflare Pages promotion completed from **one clean Git archive**:
+`b5bdb0bcf4c032b43cf1a33efdae1b0abc8709f5`. Normal source-main fast-forward;
+no force push, migration, DB dump/customer query, production synthetic event,
+new paid resource or expanded credential scope.
 
-Read AGENTS, generated `.ai/gamja-ops-policy.md`, `usability-release-20261005.md`,
-`production-release-20261003.md`, and authoritative ops LCM runbook at `987e6fa`.
+| Evidence | Actual result |
+| --- | --- |
+| OCI image | `yny.ocir.io/axuouply2298/livingcost/backend@sha256:710811eed1afdbc63b97a27e4bf1353dfb577445ccae546e19318752905ecdad` |
+| Platform / runtime user | `linux/arm64`, UID/GID `0:0` |
+| Pages production deployment | `49e9519c-2a2f-4d19-a7bb-26968335b222` |
+| Pages created | `2026-10-06T00:21:36.764598Z`; success, ad_hoc, main, source null/direct upload |
+| Public identity | API header/body and canonical + pages.dev release metadata equal full source SHA; `releaseId=lcm-<SHA>` |
+| Readiness | Fresh-container **SELECT 1 only**, internal/public health pass |
+| Runtime | Backend only recreated, `unless-stopped`; existing DB/tunnel untouched; reminder timer active |
 
-## Read-only evidence
+Coordinator independently reconfirmed API/FE identity and **all13 public privacy
+scenarios passed** on the canonical production site with every analytics POST
+intercepted: blank Add persisted with zeroPOST → valid Quick Add one intercepted
+event; failed-remove revocation across two tabs and clean reload stayed OFF with
+zeroPOST; GPC/DNT/default-off/failed-save/revoke/error cases passed. No real aggregate
+pollution. Evidence: approved-root `lcm-marketing-public-verified.log`.
 
-- `ssh gamja-oci` uses actual `gamja-oci-proxy` Bastion, not Meshnet.
-- Baseline source: `e44808e28da2f9d91b1b50bd41ed6cb0f079f786`.
-- OCI: `yny.ocir.io/axuouply2298/livingcost/backend@sha256:c565ec1b63192338dd7570db5293f8b7d9ff6d76ec414737b85532d414673be6`.
-- `livingcost-backend`: UID/GID **0:0**, no mounts, restart `unless-stopped`.
-  Inspect candidate UID rather than assuming `node`. Reminder timer active.
-- Compose `/opt/livingcost/docker-compose.yml`; protected env reference
-  `/opt/livingcost/api/.env` (never print). Existing filesystem ~50 GB available.
-- Pages `living-cost-manager`: source null/direct-upload, production branch `main`,
-  successful `0e2ad67f-4a64-47de-9b5b-d326877075d3`, matching source SHA.
-- Existing protected Pages credential works. Web Analytics metadata endpoint
-  `/rum/site_info/list` returned **403**; dashboard/configuration remain unverified.
-  No permissions expanded, GSC auth scraping or repeat sitemap submission.
-- Authoritative dirty `/Users/sanghyun/services/gamja-ops` preserved. Separate
-  approved-temp-root `lcm-marketing-ops` worktree, branch
-  `docs/lcm-marketing-20261005`, created from latest LCM ops commit `987e6fa`.
+The first harness attempt correctly failed on an unrecognized Cloudflare-versioned
+script. The rerun used the exact observed version
+`v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495` via harness environment configuration;
+the script request was still aborted before execution/no analytics egress. This was
+a transparent harness adjustment, not an application-source change or weakened
+production security rule.
 
-## Logging / privacy boundary
+Coordinator also passed public usability at1440/390: baseline actions, IME/focus,
+renewal queue, duplicate/filter/undo, quota export/retry, import, accessibility,
+overflow and reload; contexts closed and writes blocked. Five canonical guides
+returned200 with single H1/canonical checks. Evidence:
+`lcm-marketing-public-usability.log`. No further application tests are pending.
 
-Analytics service/file must contain only allowlisted daily counts: no IP, UA,
-query, body, referrer, financial values or identities. Existing CF infrastructure
-security metadata processing may continue; transport is not anonymous to CF.
-Do not weaken global security logs. Builder's earlier blanket all-ingress
-suppression prerequisite is superseded by this scope; final docs must reflect it.
+## Immutable build and verification
 
-Actual API gateway is **host Nginx on8080**, not website `gamja-top-nginx`.
-Read-only `nginx -T` shows `/living-cost-manager/v1/` proxy and inherited
-`access_log /var/log/nginx/access.log` without explicit format: default combined
-includes raw query in `$request`. No custom request-body dump/debug directive
-appeared in inspected gateway configuration. Default error logs can include URI
-context on errors. No production log/customer request contents were read.
+- Source tar SHA256: `64714fb197be3bc8d41f38dacbe191194b0d87616caafc43f4bffbb29af07db0`.
+- Production FE tar SHA256: `758d37f1ce11bace39410319c5d0ab84e580a09d033306f2f728797d1859918b`.
+- OCI build from exact archive; existing OCIR push, remote manifest and digest pull
+  verified. Revision/platform and compatible rollback digest verified. Temporary
+  registry credentials logged out and removed.
+- FE frozen install/build uses `https://api.gamja.top/living-cost-manager/v1`;
+  exported JS contains production URL, no loopback URLs. Same-SHA metadata verified;
+  local/OCI tar checksums match. No development artifacts promoted.
+- Final source verification after both high-risk fixes: **446 application tests**
+  (shared92/web209/API145), operator17, ownership2, SW3; production builds/base E2E
+  and13 privacy scenarios pass. Final independent application review passed.
+- Failed-remove consent revocation persists across two tabs/reload with zeroPOST.
+  Focused real-UI check: blank ordinary Add gives zeroPOST; valid Quick Add gives one
+  cost event. `personal_cost_saved` measures **valid Quick Add only**, not manual Add.
+- Isolated same-image/network-none temporary-file tests passed: valid202 increment,
+  GPC/DNT202 unchanged, malformed400, GET404, oversized413, serialized exact counts,
+  atomic replacement, permissions, capacity507, corruption503 and disabled404.
+  Zero DB accesses. Candidate container/synthetic directory removed.
+- Public non-recording checks passed: GET404, malformed POST400, query rejection400,
+  encoded alias400. **No valid synthetic event was sent to the real aggregate.**
 
-Optional local snippet sanitizes **only marketing-route access logging** by
-normalized `$uri`, independent of query strings, preserving other routes and
-security/error logs. Review before installing; no global logging suppression.
-This alone is NOT a query-free guarantee for all infrastructure/error processing.
+## Ingress approval and installed scope
 
-Independent review identified historical ops snapshots describing loopback8081,
-`location ^~` and commented logging. Those snapshots differ from the **live
-read-only `ss`/`nginx -T` evidence collected for this preparation** above; they do
-not supersede it. Recheck live listener, effective location modifiers, inherited
-logs and Nginx version immediately before any installation. Merge directives into
-the actual existing location without changing its modifier, proxy or headers.
-Derive route coverage from the final tested SHA; do not assume future endpoints
-are covered by the single-route example. Require `nginx -t` before reload.
+Actual target Nginx1.24.0 received only the reviewed gateway insertion and new
+`/etc/nginx/conf.d/lcm-marketing-status.conf`. The nested marketing location has
+status-only access logging and `error_log /dev/null`. It covers canonical/nested
+suffixes, all trailing slashes and decoded LF/CR; a raw-URI guard rejects encoded
+aliases before forwarding to the app. Other routing, proxy headers, CORS behavior
+and global/server/other-route security logs are unchanged.
 
-Ingress proposal reference in ops worktree:
-`runbooks/livingcost-marketing-nginx-proposed.diff`, with full directives in
-`runbooks/livingcost-marketing-nginx.conf.example`. The map is method-independent
-and now covers **all** trailing slash counts, including query-bearing OPTIONS,
-rejected POST and GET. Candidate tests use synthetic canaries only, no customer
-tokens, auth resets or real event submissions. Nginx normalized-path matching is
-for the production LCM prefix and events suffix, including rejected nested paths
-covered by the application suffix predicate; other services remain unchanged.
-Final predicate/route coverage must be compared again before approval. Error-log request/query context remains
-possible and disclosed; global/error security logs are not weakened. CF security
-metadata continues independently. Config diff is a review proposal, not installed.
+| Artifact | SHA256 |
+| --- | --- |
+| Exact approved diff | `04859d6a1e6c55346d209f0592435576871da3e6f4e82a458153515fae2f35d3` |
+| Installed gateway | `fec19f4268ff81abfcb5c9e4963187badeed4e7cb00f5f9d5fb3f6b65c61deb0` |
+| Status format | `c7207ac0c251f59df09a6951082d5a97b5b95f98cee2da708218ae93fc7f0c1a` |
+| Unchanged nginx.conf | `48c6a4ec1e1fd28ccf968490f07e34a1d7f755793b2108a3ed8670b1ee2a0aa2` |
 
-Independent review approves local template commit only (example SHA256
-`5156343e1cb01a61c41f7aee1f614a9bac248790fe93e706622ef4491e59ab3e`, diff
-`534e9bbf63a67a11c9b6fb2e59dbd8a8b04386548be0924a7960c20aae903acc`).
-Before application enumerate inherited AND same-location log destinations/formats/
-conditions: inherited sinks can be overridden, same-level logs can duplicate.
-Preserve unrelated security sinks; check rewrites/internal redirects/error_page and
-more-specific locations against mutable normalized `$uri`. Contextual upstream IP
-in proposal must not replace live routing. Actual target diff review/version and
-`nginx -t` remain required; latest read-only SSH version check timed out.
+Reviewer `ses_ef7dc1dd8ffewg7k4LsMgdpdtk` explicitly approved **ingress GATE PASS**
+after target tests: **110 cases ×3 fixtures =330 requests**, three `nginx -t`
+checks, query/body/header canaries, aliases/query spoofing, OPTIONS/GET/rejections,
+oversized413, upstream502/504, unrelated-log preservation and parent `^~` precedence.
+Matched logs contain status only, no canaries. All isolated processes/files cleaned.
+Live baseline hashes were rechecked; actual-tree `nginx -t` passed before reload.
 
-## Pending runtime / backup contract
+**Boundary:** malformed HTTP/errors before location selection and Cloudflare
+security/network metadata may still be logged. This is not universal transport
+anonymity. The older map/access-only proposal is **superseded; do not install it**.
 
-Draft env: `MARKETING_METRICS_ENABLED=true`,
-`MARKETING_METRICS_FILE=/var/lib/lcm-marketing/aggregate.json` (verify final SHA).
-Proposed existing-disk host `/opt/livingcost/marketing-data` mounted as writable
-directory at `/var/lib/lcm-marketing`; directory0700, files0600, candidate UID/GID.
-Never public/static. One API process/writer, including rollout; no overlapping
-containers. Atomic sibling replacement; <=90 UTC dates including today. No public
-or ordinary-JWT aggregate read endpoint. No DB migration.
+## Aggregate storage and backup
 
-Backend completion handoff (final source SHA still pending):
+- Explicit Compose env: `MARKETING_METRICS_ENABLED=true`,
+  `MARKETING_METRICS_FILE=/var/lib/lcm-marketing/aggregate.json`.
+- Exactly one writer. Host `/opt/livingcost/marketing-data` is mounted writable as
+  `/var/lib/lcm-marketing`; root-owned directory0700, file0600 verified. Existing
+  unsafe modes/symlinks are rejected. Stop the writer before repair/maintenance.
+- Bounded90 UTC dates,90 entries,65536 bytes;5000/event/day,10000 total/day;
+  API120/min,32 pending writes,256-byte body. Fixed sibling temp file; file fsync →
+  rename → directory fsync. Ambiguity/corruption latches metrics503 without retry;
+  financial API health may remain200. No public/JWT aggregate read endpoint.
+- Startup prune plus60-second cleanup after5 minutes idle. This is not instantaneous
+  midnight deletion and cannot clean a stopped process's file.
+- Private `/opt/livingcost/marketing-backups`: root0700/files0600; at most **seven
+  daily snapshots**, each pruned to today-minus89 through today; total managed logical
+  bytes **<1,000,000**, including temp/lock. Backup never modifies the live file.
+- `livingcost-marketing-backup.timer`: enabled/active, daily00:00 UTC, persistent;
+  first manual service run `Result=success`, `ExecMainStatus=0`, private snapshot
+  verified. Installed unit has live directory RO and backup directory RW.
+- No aggregate data in Git, forever release folders or new offsite resources.
+  Inspected existing PostgreSQL backup scripts do not include these directories.
+  Do not add them to general/volume backups without enforcing equivalent retention.
+- Unsafe/aliased/over-budget directories fail closed and can prevent retention;
+  failures require monitored operator remediation, not an unconditional guarantee.
 
-- Enabled only with literal `MARKETING_METRICS_ENABLED=true` and an absolute file
-  path; otherwise route404. Valid request202 `{ok:true}`; GPC/DNT202 without store.
-- 90 UTC dates, at most90 entries,65536-byte file bound,5000 per event/day and10000
-  across events/day. API limits120/min globally,32 pending writes and256-byte bodies
-  are API concerns, not backup limits.
-- Directory0700/file0600; pre-existing unsafe0755/0644 permissions are rejected
-  following the root-review fix. One bounded fixed `aggregate.json.tmp` sibling. Unsafe
-  orphan/symlink rejected. Backup reads only the published `aggregate.json`.
-- File fsync → rename → directory fsync. Ambiguous durability returns latched503,
-  no automatic retry; corruption also isolates metrics with503 while health works.
-  Health200 alone does not establish metrics readiness. Stop the single writer
-  before repair/maintenance; never delete/retry around a latched error blindly.
-- Startup pruning and a60-second timer after5 minutes idle; this is not continuous
-  midnight deletion. Stopped-process cleanup remains operator-owned. Existing root
-  UID0 is unchanged.
-- Backup must mirror5000/10000/90-entry limits, not the rejected100000/490 values;
-  recheck exact final SHA. No writer-provided backup interface is assumed.
+### Monitoring and stopped-file cleanup
 
-Latest full verification includes API145 tests; final root review and tested SHA
-remain pending. Test success is not deployment approval.
+**Owner: service deployment/operations owner.** Check daily00:05 UTC and before
+exports/recovery; external automated notification delivery is not configured:
 
-Private backup proposal (not installed):
-
-- `/opt/livingcost/marketing-backups`, directory0700/files0600, maintenance owner.
-- Proposed maintenance service UID/GID **0:0**, matching currently verified runtime,
-  with root-owned backup directory/files. Candidate runtime ownership remains a
-  final-SHA check; do not broaden directory permissions to make backup access work.
-  Restrict the maintenance unit to read-only live-directory access and writable
-  backup directory; verify access under the effective unit user before activation.
-- <=7 daily sanitized snapshots, never raw events. On every safe-directory run expire old
-  snapshots and prune dates before today minus89 from **every** retained snapshot,
-  then atomically publish today. Strict schema/byte bounds; storage<1MB.
-- Daily UTC existing-host timer with persistent catch-up, no new resources.
-  Missing source must not prevent backup cleanup. Monitor failure; prune before
-  export. Stopped hosts/failed timers cannot guarantee instantaneous expiration.
-- Backup helper NEVER modifies live file; it reads the atomically published file.
-  Read exactly `aggregate.json`, never sibling temporary files or a directory glob.
-  Builder must provide in-process idle retention and disabled/stopped cleanup
-  contract. External live-file maintenance requires API stopped/no active writer;
-  never run a competing writer. Backup maintenance continues when API disabled.
-  **Accountable owner:** deployment/operations operator for this LCM release,
-  handing ongoing responsibility to the service owner before closeout. That
-  operator must check timer failures and perform approved stopped/disabled-file
-  cleanup with writer absence verified; a backup timer cannot clean the live file.
-  Until the concrete live-file procedure and monitoring check are verified,
-  activation remains blocked—there is no unconditional retention guarantee.
-- No snapshots in forever release folders, Git, generic backups or offsite copies.
-  Restore only with writer stopped, current-window sanitation, correct ownership,
-  atomic replacement; then restart one writer. No DB restore.
-  Restore source is one validated private snapshot; reapply today-minus89 through
-  today date bounds before atomic publication into the live directory, assigning
-  the verified API UID/GID (not blindly preserving backup root ownership).
-  The <1 MB bound applies to the whole managed backup tree, including lock and
-  temporary files, not to each individual snapshot.
-
-## Procedure after coordinator handoff
-
-1. Record full tested SHA/review and confirm no migration/schema change. Archive
-   exact commit, checksum; never dirty tree or loopback development artifacts.
-2. Build production FE from archive with actual production API URL; write/verify
-   exact SHA metadata and reject loopback inputs. Build OCI linux/arm64 from same
-   archive with release label. Reuse existing protected credentials without output.
-3. Push existing OCIR, inspect remote manifest, pull by digest; verify platform,
-   revision and candidate UID. Verify baseline digest availability. Clean temporary
-   registry credentials after use.
-4. Protected release directory holds source/FE checksums, metadata, Compose backup
-   and original image reference ONLY. No DB dump/count/digest query or aggregates.
-   Configuration backups0600; rollback originals preserved.
-5. Verify mount/env, retention maintenance and narrow logging decision. Update ops
-   service/backup/env references and runbook same session; syntax-check configs.
-6. Stop old writer before candidate; backend-only Compose recreation with digest,
-   `--no-deps --no-build --pull never`. No DB/tunnel recreation or timer disruption.
-7. Fresh-container readiness **SELECT 1 only**, internal/public health and exact
-   header/body SHA/releaseId. **Never submit a valid synthetic marketing event to
-   the real aggregate**: anonymous customer overlap cannot later be identified or
-   subtracted. Verify the final documented success response (current draft:
-   HTTP202 with `{ "ok": true }`, not204) using identical candidate code in an isolated
-   container/API with a temporary aggregate file, disabled jobs and no customer DB
-   access. Public checks are malformed400 and GET404 only; verify browser opt-in/
-   out with intercepted requests, not real collection. Do not manufacture/repair
-   production counters to simulate a smoke test.
-   GPC/DNT currently also return202 without recording: an HTTP success alone is
-   not proof of persistence. In the isolated temporary-file test only, verify an
-   allowed valid event increments its bucket and GPC/DNT leave it unchanged.
-   Reconfirm status/body and suppression behavior at the final tested SHA.
-8. Direct-upload clean same-SHA FE to existing Pages production; verify deployment
-   status/metadata and both canonical/pages.dev release identities. Public browser
-   verification uses new local-only contexts with network writes blocked.
-9. Verify aggregate GET unavailable; check file permissions/size/timer status, not
-   contents. Retain CF403/GSC readiness limits; no traffic or unique-user claims.
-10. Independent helper review; ops `verify-assets.rb` and `check-local-drift.rb`.
-    Classify historical Mac/other-service drift separately. Record ops commit and
-    branch, never claim main merge without evidence.
-
-## Paired rollback
-
-Restore protected prior Compose and baseline digest, disabling new metrics env/
-mount; recreate backend without overlapping writers. Roll Pages back to
-`0e2ad67f-4a64-47de-9b5b-d326877075d3`. Verify identities match baseline and
-SELECT1 passes. Continue backup retention and coordinate stopped live-file cleanup.
-No reset/down migration, customer dump or DB restore.
-
-## Pending evidence
-
-Tested SHA, archive checksums, remote digest/platform/UID, Pages ID, actual mount,
-target logging decision/tests, readiness/public identity, root review and installed
-monitoring/cleanup checks remain pending. Local backup review/unit validation and
-ops commits are complete below. This document is not proof of deployment.
-
-### Coordinator full-application verification (before source commit)
-
-Coordinator reports final repeated `verify:usability` exit0 **after both high-risk
-fixes**: shared92 + web209 + API145 = **446 application tests**, plus operator17,
-ownership2 and service-worker3. Production builds, base desktop/mobile E2E, local
-persistence, isolated DB sync/deletion and13 marketing privacy browser scenarios
-pass, including failed-remove revocation across two tabs/reload with zeroPOST.
-Prior full-run cleanup confirmed temporary PostgreSQL/API/web stopped and purpose
-cluster removed; final-run cleanup remains part of coordinator closeout evidence.
-
-Additional latest focused real-UI consent harness: opt-in → blank ordinary Add
-persisted with **zero POST** → valid Quick Add emitted **one cost event**: PASS.
-`personal_cost_saved` is narrowed to **valid Quick Add only**, not ordinary manual
-Add. Do not interpret all local persisted rows as measured cost-save events.
-
-These are reported **tree-level** results, not verification of a recorded source
-SHA yet. Final root-review approval remains pending. Coordinator will select and fast-forward push the
-tested source SHA; do not infer it from current HEAD or promote before handoff.
-
-Earlier root-review blockers were consent revocation persistence after `removeItem`
-failure and acceptance of unsafe0755 directories/0644 files. Both are now reported
-fixed with regression coverage and the repeated446-test run above. The earlier
-pre-fix test result was not release proof and is superseded by this run.
-Root review separately rechecked ops helper31tests and confirmed its prior high/
-medium findings fixed. Installation gates (actual ownership/mount, monitoring and
-stopped-file cleanup) remain. No tested source SHA has been handed off.
-
-Local preparation checks: archive-helper `bash -n` passed; ops
-`ruby scripts/verify-assets.rb` passed with existing unknown-retention warnings.
-`check-local-drift.rb` failed on historical Mac LaunchDaemon/backup paths and
-other-service entries; no runtime asset changes have been made by this preparation.
-
-### Ops main integration assessment
-
-Read-only remote fetch of ops `origin/main` on2026-10-05 returned
-`eb963842234d5178920d7ced31eae2025d17edb6`. This is already an ancestor of
-`987e6fa` (left/right count4/0); the four additional commits are LCM release
-documentation/registry history. No merge conflict or ancestry rewrite is currently
-needed. Preserve this fetched ancestry, refetch before integration and use ordinary
-fast-forward/merge or PR, never force. If new upstream changes produce unrelated
-conflicts, stop/report rather than resolving other services. Dirty root remains
-untouched. No ops push or main integration has yet been performed.
-
-Operational helper contents live in isolated ops worktree:
-`scripts/livingcost-prepare-archive.sh`, `scripts/livingcost-marketing-backup.py`,
-`scripts/test-livingcost-marketing-backup.py`; optional logging example is
-`runbooks/livingcost-marketing-nginx.conf.example`. All actual maintenance scripts
-and unit definitions require code review/test evidence before production use.
-Draft unit content: `runbooks/livingcost-marketing-backup.service` and `.timer`.
-They are not installed: root oneshot, live directory read-only, backup directory
-only writable application path, network isolation, daily UTC persistent timer.
-Bounded timeout/resource limits do not replace failure monitoring. Verify target
-systemd version and unit syntax locally/on approved candidate before activation.
-Archive-helper/docs independent re-review reports no local-preparation blockers;
-backup helper approval is recorded below. Final runtime gates remain separate.
-
-### Maintenance code review gate
-
-Initial helper revisions were rejected after independent reviewers reproduced
-overlap/hard-link mutation, duplicate-key, budget, race, bound and permission defects.
-Those revisions are not installation candidates. Corrected helper passes31 tests,
-including process contention, FIFO replacement and source-alias metadata checks;
-final independent approval and committed hashes are recorded below.
-
-Budget is logical bytes (not filesystem block allocation), on trusted local POSIX
-directories; hostile same-UID/root actors are outside this helper's threat model.
-Unsafe/over-budget destinations fail closed and need operator remediation. Live
-stopped/disabled-file cleanup remains the operations owner's responsibility, not
-an action performed by this backup helper.
-
-Approved correction passes31 tests and extends source immutability checks
-to bytes/mode/inode/link-count/ctime plus unchanged destination for snapshot,
-temporary-name and lock hard-link aliases. Approved helper/test hashes:
-
-```text
-7b5737ca37332b82c99ce9507facca20718f847764c62d2dcfb22e8837b70883  scripts/livingcost-marketing-backup.py
-1395dae7f3ab7e76ec560c9a29c72197b6590c04d8c01714ab252e63642e01c8  scripts/test-livingcost-marketing-backup.py
+```sh
+ssh gamja-oci 'systemctl is-active livingcost-marketing-backup.timer; systemctl show livingcost-marketing-backup.service -p Result -p ExecMainStatus; systemctl list-timers livingcost-marketing-backup.timer --no-pager'
 ```
 
-Unsafe/over-budget destination validation happens before writes and may prevent
-retention too; this is a monitored operator-remediated exception, not a promise to
-clean arbitrary unsafe directories. Existing local Colima Ubuntu24.04/systemd was
-used for isolated synthetic unit validation below; no OCI test deployment/new VM.
+On failure inspect only category/status output, protect private files and remediate.
+For disabled/stopped metrics, the owner must explicitly stop the backend, prevent
+any concurrent writer and invoke the reviewed helper with the recorded digest/SHA:
 
-### Final operational-code approval
+```sh
+# On OCI, only within an approved stopped-backend maintenance window:
+sudo env LCM_STOPPED_MAINTENANCE_APPROVED=yes \
+  /opt/livingcost/ops/livingcost-marketing-prune-stopped.sh "$IMAGE_DIGEST" "$SOURCE_SHA"
+```
 
-Independent OpenAI reviewer approved the second-correction hashes above:31/31
-tests plus independent snapshot/temp/lock alias reproductions preserved live bytes,
-mode, inode, link count, mtime/ctime and destination metadata. Parent independently
-reran31 tests, archive-helper shell syntax and ops asset validation successfully.
-Reviewed unit hashes: service
-`ac19971ceafca0ac0e2bdac54aa91ce8aedbf29039af6ea04e8d1be4d91c1a2c`, timer
-`a22ba15f1b9c4791ac795de6ea6676b0750c7225607445f37af26b00c52b6cad`.
-This supersedes earlier pending code-review status, **not** tested-SHA, actual
-installed-path/ownership or failure-monitoring gates. Local Linux validation follows.
+It checks stopped state, successful container inspection, overlapping mounts,
+ownership/symlinks and image identity, then runs the same Store startup prune in an
+isolated maintenance container with no network/DB/events. It does not silently
+repair corruption. Keep backend stopped until it completes, then perform approved
+restart/readiness checks. This maintenance was **not unnecessarily run on live data**.
 
-Local ops preparation commit:
-`dca74bec515d4b75ee57a80be8e9c1d1b31c7d21` on
-`docs/lcm-marketing-20261005`. All four committed helper/test/service/timer blob
-SHA256 values match independently reviewed values exactly. Ops worktree clean;
-fetched origin/main ancestry preserved. No push/main integration or production
-installation performed by this commit.
-Follow-up local ops commits: `c85b505` records Linux unit evidence; `a741174` records
-reviewed ingress templates. No ops push or main integration performed yet.
+Independent code review: backup31tests; stopped-helper14 mocked guards at Python
+optimization0/1/2. Approved/installed hashes:
 
-### Completed local Linux unit validation
+```text
+7b5737ca37332b82c99ce9507facca20718f847764c62d2dcfb22e8837b70883  backup.py
+2397ca8fe30f417400a1dd8d1901af452246964533679a17dcc3fbdd43085da4  prune-stopped.sh
+ac19971ceafca0ac0e2bdac54aa91ce8aedbf29039af6ea04e8d1be4d91c1a2c  backup.service
+a22ba15f1b9c4791ac795de6ea6676b0750c7225607445f37af26b00c52b6cad  backup.timer
+```
 
-Existing Colima0.10.3/Ubuntu24.04.4 arm64/systemd255/Python3.12.3 validated original
-unit hashes and isolated path-remapped units with `systemd-analyze verify`.
-Synthetic root probe confirmed live-path write/create/delete/chmod deniedEROFS,
-backup-path RW with0700/0600, IPv4/IPv6 sockets denied and abstract Unix isolation.
-**Filesystem Unix sockets remain reachable**; do not claim complete IPC or all
-indirect-network isolation. No real host sockets/customer data were accessed.
+Local Linux unit tests verified root/permissions, live RO, backup RW, IP socket
+denial, failure propagation and shortened timeout. Filesystem Unix sockets are not
+fully isolated. Target unit syntax passed; unrelated existing OCI monitoring units
+produced executable-mode warnings and were not altered.
 
-Synthetic exit23 propagated failure; a test-only2-second timeout terminated in
-2.112s. UTC calendar and persistent flags verified; timer never enabled/started.
-Only paths/probe executable were remapped, plus the timeout-test override; original
-units unchanged. Synthetic units and directories were removed and independently
-checked absent. Report/harness/evidence: approved-root
-`lcm-marketing-unit-verification/REPORT.md`, `validate.py`, `evidence.log`.
+## Rollback and evidence locations
 
-This closes local Linux syntax/sandbox validation, not actual production ownership,
-reboot catch-up, full30-second timeout/escalation or monitoring handoff. Production
-still waits for coordinator SHA/root review and installation-time verification.
+Paired baseline source `e44808e28da2f9d91b1b50bd41ed6cb0f079f786`:
+OCI digest `sha256:c565ec1b63192338dd7570db5293f8b7d9ff6d76ec414737b85532d414673be6`,
+Pages `0e2ad67f-4a64-47de-9b5b-d326877075d3`. Restore protected prior Compose,
+backend-only recreation without overlapping writers, rollback Pages, then verify
+identity and SELECT1. No DB restore/reset/migration. Keep backup retention active
+and assign stopped-file cleanup even after metrics rollback.
 
-## Source-document freeze
+Protected OCI release directory:
+`/opt/livingcost/releases/marketing-b5bdb0bcf4c032b43cf1a33efdae1b0abc8709f5/`.
+It contains source/FE archives, remote manifests, isolated-test evidence, reviewed
+ops files, Compose and gateway backups, installed hashes and activation timestamps;
+**no customer DB dump or real aggregate snapshots**. Compose backup SHA256
+`6c8b35b76e3317aec8a8da0de7741d8df2132361466813ff4cc18659c2bbdab1`.
 
-This preflight document is ready for the coordinator's application source commit.
-No release SHA or runtime promotion is claimed. Subsequent ingress-test results and
-deployment proof will be recorded in a separate documentation commit after the
-coordinator fixes the exact tested source identity; they will not alter this frozen
-application source input before handoff.
+Local approved-root evidence: `lcm-marketing-ingress-gate-final/REPORT.md`,
+`lcm-marketing-unit-verification/REPORT.md`, `lcm-marketing-release-b5bdb0b/`.
+Ops main fast-forward completed `eb96384 → f6348e90895430020c3ac322d6d97dc56dbf40e7`;
+remote main verified, no force/conflict. Isolated `lcm-marketing-ops` is clean;
+original dirty checkout preserved. Registry reviewer approved scoped assets and
+`verify-assets.rb` passed. `check-local-drift.rb` still reports historical Mac/
+other-service entries and incorrectly checks the OCI backup path on Mac; actual OCI
+path/permissions were verified. Full output: local release `ops-local-drift.log`.
+The exact reviewed unified diff retains its required blank-context space; Git's
+blank-at-EOL check was disabled for that validation invocation only, not repo config.
+
+## External limitations
+
+- Cloudflare Web Analytics metadata returned403 with the existing Pages credential;
+  no permission expansion or dashboard-configuration success claimed.
+- GSC/manual CSV steps remain operator-owned; no auth scraping or repeat submission.
+- Counts are anonymous submitted milestones, not unique people/conversion/retention;
+  public submissions can be forged. No traffic outcome claimed from deployment.
+- One Python-urllib public probe received403; ordinary curl verified health and all
+  listed non-recording checks. No Cloudflare rule/security setting was weakened.
