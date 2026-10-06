@@ -2,6 +2,8 @@ import { z } from "zod";
 
 // LCM's own service price, not a user's tracked subscription expense.
 // This is a preparation catalog, never payment authorization or entitlement.
+// Never flip checkoutEnabled alone: merchant/legal/tax/security gates and the
+// planned-only copy must be reviewed together before any production checkout.
 export const SERVICE_PRICING = Object.freeze({
   version: "lcm-990-9900-preparation-v1",
   currency: "KRW",
@@ -16,6 +18,12 @@ const previewRequestSchema = z.strictObject({ planId: z.enum(["monthly", "annual
 
 /** Accept only a catalog ID. Client prices/currency/discounts are rejected. */
 export function previewServicePrice(input: unknown) {
+  // Zod's object parser may ignore a JSON own __proto__ key. Inspect the raw
+  // own-key set before parsing so every client-authoritative field fails closed.
+  if (input === null || typeof input !== "object" || Array.isArray(input) ||
+      !Object.hasOwn(input, "planId") || Reflect.ownKeys(input).length !== 1) {
+    throw new TypeError("Price preview requires only an own planId field");
+  }
   const { planId } = previewRequestSchema.parse(input);
   const plan = SERVICE_PRICING[planId];
   return Object.freeze({

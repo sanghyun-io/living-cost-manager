@@ -46,7 +46,7 @@ try {
         assert.ok((await pricing.innerText()).includes(text), text);
       }
       assert.equal(await pricing.locator("button,input,form").count(), 0, "no fake checkout/card collection");
-      assert.equal(await pricing.getByRole("link").getAttribute("href"), "https://gamja.top/#contact");
+      assert.equal(await pricing.getByRole("link", { name: "기존 문의 페이지", exact: true }).getAttribute("href"), "https://gamja.top/#contact");
       assert.equal(await page.locator('script[src*="portone"],script[src*="tosspayments"]').count(), 0);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await page.goto(`${origin}/guide/faq/`, { waitUntil: "networkidle" });
@@ -56,7 +56,10 @@ try {
       }
       const structured = await page.locator('script[type="application/ld+json"]').allTextContents();
       const faq = structured.map(text => JSON.parse(text)).find(value => value["@type"] === "FAQPage");
-      assert.ok(faq.mainEntity.find(item => item.name === "이용 요금과 유료 결제는 어떻게 되나요?").acceptedAnswer.text.includes(copy.availability));
+      assert.ok(faq, "FAQ structured data must exist");
+      const pricingAnswer = faq.mainEntity.find(item => item.name === "이용 요금과 유료 결제는 어떻게 되나요?");
+      assert.ok(pricingAnswer, "pricing answer must exist in FAQ structured data");
+      assert.ok(pricingAnswer.acceptedAnswer.text.includes(copy.availability));
       assert.equal(await page.locator("h1").count(), 1);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       assert.deepEqual(unexpected, []); assert.deepEqual(errors, []);

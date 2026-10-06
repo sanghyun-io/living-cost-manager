@@ -8,7 +8,7 @@ describe("LCM preparation pricing", () => {
     for (const planId of ["monthly", "annual"]) expect(Number.isSafeInteger(previewServicePrice({ planId }).totalAmount)).toBe(true);
   });
 
-  test("two monthly payments discount is exactly one sixth, not 20%", () => {
+  test("annual price versus twelve monthly payments saves exactly one sixth, not 20%", () => {
     expect(compareServicePrices()).toEqual({ monthlyForYear: 11880, annualTotal: 9900, annualMonthlyEquivalent: 825, annualSavings: 1980, discountFraction: 1 / 6 });
   });
 
@@ -32,6 +32,21 @@ describe("LCM preparation pricing", () => {
     expect(Object.isFrozen(SERVICE_PRICING)).toBe(true);
     expect(Object.isFrozen(SERVICE_PRICING.monthly)).toBe(true);
     expect(Object.isFrozen(SERVICE_PRICING.annual)).toBe(true);
+  });
+
+  test.each(["monthly", 990, true, ["monthly"], [{ planId: "monthly" }]])("rejects primitive or array requests: %j", request => {
+    expect(() => previewServicePrice(request)).toThrow();
+  });
+
+  test("rejects own __proto__ and other unknown own keys", () => {
+    const ownProto = JSON.parse('{"planId":"monthly","__proto__":{"checkoutEnabled":true}}');
+    expect(Object.hasOwn(ownProto, "__proto__")).toBe(true);
+    expect(() => previewServicePrice(ownProto)).toThrow();
+    for (const key of ["constructor", "prototype", "toString"]) {
+      expect(() => previewServicePrice({ planId: "annual", [key]: true })).toThrow();
+    }
+    expect(() => previewServicePrice(Object.create({ planId: "monthly" }))).toThrow();
+    expect(() => previewServicePrice({ planId: "annual", [Symbol("amount")]: 1 })).toThrow();
   });
 
   test("guide and FAQ share factual price, availability and tax copy", () => {
