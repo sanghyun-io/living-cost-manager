@@ -7,7 +7,7 @@ import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
 import { getMonthlyEquivalentAmount } from "./lib/budget";
 import { AppHeader } from "./components/AppHeader";
-import { MarketingConsentControl } from "./components/MarketingConsentControl";
+import { useMarketingConsent } from "./lib/useMarketingConsent";
 import { HeroPanel } from "./components/HeroPanel";
 import { MetricGrid } from "./components/MetricGrid";
 import { InsightsPanel } from "./components/InsightsPanel";
@@ -37,6 +37,7 @@ export default function Home() {
   // The two async back-edges (auth → users/sync) go through latest-value refs
   // below — their handlers only run from events/post-boot effects.
   const ui = useUIState();
+  const marketingConsent = useMarketingConsent();
   const usersRef = useRef<LocalUsersApi | null>(null);
   const budgetRef = useRef<BudgetDataApi | null>(null);
   const syncRef = useRef<WorkspaceSyncApi | null>(null);
@@ -135,9 +136,8 @@ export default function Home() {
   }
 
   return (
-    <main className="page-shell">
+    <>
       <a className="skip-link" href="#fixed-costs">고정비 편집으로 건너뛰기</a>
-      <MarketingConsentControl />
       <AppHeader
         saveError={budget.saveError}
         onRetrySave={budget.retrySave}
@@ -154,6 +154,7 @@ export default function Home() {
           users.handleLogout();
         }}
       />
+      <main className="page-shell">
       <HeroPanel
         monthlyIncome={budget.monthlyIncome}
         expenseRate={budget.summary.expenseRate}
@@ -228,6 +229,7 @@ export default function Home() {
       </section>
 
       <DataModal
+           marketingConsent={marketingConsent}
           importMessage={ui.importMessage}
           importPreview={budget.pendingImport ? { currentCount: budget.fixedCosts.length, targetCount: budget.pendingImport.snapshot.fixedCosts.length,
             currentAmount: budget.summary.monthlyExpense, targetAmount: budget.pendingImport.snapshot.fixedCosts.reduce((sum, item) => sum + getMonthlyEquivalentAmount(item), 0) } : null}
@@ -402,5 +404,6 @@ export default function Home() {
           onClose={() => ui.setIsCardModalOpen(false)}
         />
     </main>
+    </>
   );
 }

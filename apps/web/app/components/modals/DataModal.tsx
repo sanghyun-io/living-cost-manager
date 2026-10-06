@@ -3,9 +3,11 @@ import type { DataModalProps } from "../../lib/pageTypes";
 import { ModalShell } from "./ModalShell";
 import { ServerSyncPanel } from "./ServerSyncPanel";
 import { AnalyticsDashboard } from "../AnalyticsDashboard";
+import { MarketingConsentControl } from "../MarketingConsentControl";
 import { formatWon } from "../../lib/formatting";
 
 export function DataModal({
+  marketingConsent,
   importPreview, importMessage, onApplyImport, onCancelImport,
   opened,
   hasServerApi,
@@ -21,6 +23,7 @@ export function DataModal({
 }: DataModalProps) {
   return (
     <ModalShell opened={opened} sectionLabel="관리" title="데이터 관리" size="lg" onClose={onClose}>
+      <MarketingConsentControl {...marketingConsent} />
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Card withBorder padding="md" radius="sm">
           <Text className="section-label" size="xs">엑셀 템플릿</Text>

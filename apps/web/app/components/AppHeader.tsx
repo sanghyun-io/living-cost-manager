@@ -36,8 +36,8 @@ export function AppHeader({
   const computed = useComputedColorScheme("light", { getInitialValueInEffect: true });
 
   return (
-    <div className="app-header-shell">
-      <Group component="header" className="app-header" justify="flex-end" gap="sm" wrap="wrap">
+    <header className="app-header-shell">
+      <Group className="app-header" justify="flex-end" gap="sm" wrap="wrap">
         <Text fw={700} className="app-brand">생활비 관리자</Text>
         <a className="guide-link" href="/guide/">사용 안내</a>
         <ActionIcon
@@ -82,6 +82,6 @@ export function AppHeader({
           </Button>
         ) : null}
       </Group>
-    </div>
+    </header>
   );
 }

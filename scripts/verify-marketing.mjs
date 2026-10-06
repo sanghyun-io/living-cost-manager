@@ -7,7 +7,7 @@
 // node scripts/verify-marketing.mjs --self-test
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { once } from "node:events";
 
@@ -231,9 +231,69 @@ async function runScenario(browser, target, scenario, publicSafe) {
     landing.searchParams.set("utm_campaign", "privacy-query-canary");
     await page.goto(landing.href);
     await page.getByText("아직 등록된 고정비가 없어요", { exact: true }).waitFor();
-    const consent = page.getByTestId("marketing-consent");
+    assert.equal(await page.getByTestId("marketing-consent").count(), 0, "consent is not in the header or a forced popup");
+    const openSettings = async targetPage => {
+      if (await targetPage.getByRole("dialog").count() === 0) {
+        await targetPage.getByRole("button", { name: "데이터 관리", exact: true }).first().click();
+      }
+      await targetPage.clock.runFor(300);
+      await targetPage.getByTestId("marketing-consent").waitFor();
+    };
+    const closeSettings = async targetPage => {
+      await targetPage.getByRole("button", { name: "데이터 관리 닫기", exact: true }).click();
+      await targetPage.clock.runFor(300);
+      await targetPage.getByRole("dialog").waitFor({ state: "hidden" });
+    };
+    // Exercise the real settings control, closing it before editing the budget.
+    const consentControl = targetPage => Object.fromEntries(["waitFor", "isChecked", "isEnabled", "check", "uncheck", "click"].map(method => [method, async () => {
+      await openSettings(targetPage);
+      const result = await targetPage.getByTestId("marketing-consent")[method]();
+      await closeSettings(targetPage);
+      return result;
+    }]));
+    const waitForConsent = async (targetPage, enabled) => {
+      await openSettings(targetPage);
+      await targetPage.waitForFunction(expected => document.querySelector('[data-testid="marketing-consent"]')?.checked === expected, enabled);
+      await closeSettings(targetPage);
+    };
+    const consent = consentControl(page);
     await consent.waitFor();
     assert.equal(await consent.isChecked(), false, "fresh context must default off");
+    if (scenario === "consent") {
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        const geometry = await page.evaluate(() => {
+          const outer = document.querySelector(".app-header-shell").getBoundingClientRect();
+          const inner = document.querySelector(".app-header").getBoundingClientRect();
+          const main = document.querySelector("main.page-shell").getBoundingClientRect();
+          return { left: outer.left, width: outer.width, viewport: innerWidth,
+            innerLeft: inner.left, mainLeft: main.left, innerWidth: inner.width, mainWidth: main.width,
+            border: getComputedStyle(document.querySelector(".app-header-shell")).borderBottomWidth,
+            overflow: document.documentElement.scrollWidth > innerWidth };
+        });
+        assert.equal(geometry.left, 0); assert.equal(geometry.width, geometry.viewport);
+        assert.equal(geometry.innerLeft, geometry.mainLeft); assert.equal(geometry.innerWidth, geometry.mainWidth);
+        assert.equal(geometry.border, "1px"); assert.equal(geometry.overflow, false);
+        assert.equal(await page.getByRole("banner").getByRole("checkbox").count(), 0);
+        const screenshots = option("--screenshots");
+        if (screenshots) {
+          await mkdir(screenshots, { recursive: true });
+          await page.screenshot({ path: path.join(screenshots, `header-${width}.png`), animations: "disabled" });
+        }
+        const trigger = page.getByRole("button", { name: "데이터 관리", exact: true }).first();
+        await trigger.focus(); await page.keyboard.press("Enter"); await page.clock.runFor(300);
+        const setting = page.getByRole("checkbox", { name: "서비스 개선을 위한 사용 통계 제공(선택)", exact: true });
+        await setting.waitFor(); await setting.focus();
+        assert.equal(await setting.evaluate(el => document.activeElement === el), true);
+        assert.ok((await page.getByRole("dialog").innerText()).includes("과거 기록이나 아래의 개인 기기 통계를 업로드하지 않습니다"));
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        if (screenshots) await page.screenshot({ path: path.join(screenshots, `settings-${width}.png`), animations: "disabled" });
+        await page.keyboard.press("Escape"); await page.clock.runFor(300);
+        await page.getByRole("dialog").waitFor({ state: "hidden" });
+        assert.equal(await trigger.evaluate(el => document.activeElement === el), true, "closing restores keyboard focus");
+        console.log(`PASS settings ${width}px: full-width header, aligned inner content, no overflow, keyboard discovery and restored focus`);
+      }
+    }
     // Advance timers, rather than a 650ms wall-clock guess. Covers debounce and
     // delayed dispatch/retry up to a bounded 10s horizon after each real action.
     const settle = async (targetPage = page) => {
@@ -318,8 +378,8 @@ async function runScenario(browser, target, scenario, publicSafe) {
       await other.clock.install();
       try {
         await other.goto(landing.href);
-        const otherConsent = other.getByTestId("marketing-consent");
-        await other.waitForFunction(() => document.querySelector('[data-testid="marketing-consent"]')?.checked === true);
+        const otherConsent = consentControl(other);
+        await waitForConsent(other, true);
         assert.equal(await consent.isChecked(), true, "revoking tab initially consented");
         assert.equal(await otherConsent.isChecked(), true, "second tab initially consented");
         assert.equal(posts.length, 0, "no existing sends/dedup can mask revocation");
@@ -328,7 +388,7 @@ async function runScenario(browser, target, scenario, publicSafe) {
         await page.waitForFunction(() => window.__privacyFaultHits > 0);
         assert.equal(await consent.isChecked(), false, "revoking tab shows OFF despite removeItem failure");
         // Real storage propagation must notify an already-consented document.
-        await other.waitForFunction(() => document.querySelector('[data-testid="marketing-consent"]')?.checked === false);
+        await waitForConsent(other, false);
         assert.equal(await otherConsent.isChecked(), false, "other tab observes persisted OFF fallback");
         await add("privacy-remove-failed-other-canary", other);
         assert.equal(posts.length, 0, "other tab fresh save blocked after failed-remove revocation");
@@ -373,11 +433,12 @@ async function runScenario(browser, target, scenario, publicSafe) {
       await consent.check();
       const other = await context.newPage();
       try {
+        await other.clock.install();
         await other.goto(landing.href);
-        await other.waitForFunction(() => document.querySelector('[data-testid="marketing-consent"]')?.checked === true);
-        await other.getByTestId("marketing-consent").uncheck();
+        await waitForConsent(other, true);
+        await consentControl(other).uncheck();
         // A real same-context tab emits the browser storage event; no synthetic event.
-        await page.waitForFunction(() => document.querySelector('[data-testid="marketing-consent"]')?.checked === false);
+        await waitForConsent(page, false);
         await add("privacy-cross-tab-canary");
         await editBilling("2026-10-22");
         await editRenewal("해지 예정", "cancel-planned");

@@ -73,7 +73,7 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  width: 100%;
+  width: min(1240px, calc(100% - 40px));
   margin: 0 auto;
   padding: 12px 0;
 }
@@ -473,8 +473,12 @@ body {
 }
 
 @media (max-width: 860px) {
+  .app-header,
   .page-shell {
     width: min(100% - 28px, 720px);
+  }
+
+  .page-shell {
     padding-top: 0;
   }
 
