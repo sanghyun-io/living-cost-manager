@@ -114,6 +114,7 @@ try {
   await run("node", ["scripts/pm-local-e2e.mjs"]);
   await run("node", ["scripts/pm-sync-e2e.mjs"]);
   await run("node", ["scripts/verify-marketing.mjs"]);
+  await run("node", ["scripts/verify-pricing.mjs"]);
   console.log("PASS: shared/web/API tests, builds, service worker, desktop/mobile and sync browser regressions");
 } catch (error) {
   console.error(error); process.exitCode = 1;

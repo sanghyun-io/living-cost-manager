@@ -13,6 +13,7 @@
     "verify:usability": "node scripts/verify-usability.mjs",
     "test:marketing": "node --test scripts/marketing/*.test.mjs",
     "verify:marketing": "node scripts/verify-marketing.mjs",
+    "verify:pricing": "node scripts/verify-pricing.mjs",
     "smoke:public": "pwsh -NoProfile -File scripts/public-smoke.ps1",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

@@ -10,7 +10,7 @@ Console access or external publication was performed for this report.
 |---|---|---|
 | [Usability release](../usability-release-20261005.md) | Records 352 tests and paired FE/API release; five canonical guides and local-only browser scenarios | Customer adoption, organic traffic, conversion, revenue or savings |
 | [Production release](../production-release-20261003.md) | Records static guides, sitemap and release identity verification | Historical record does not establish current indexing or search performance |
-| [PM readiness](../pm-subscription-readiness.md) | Defines subscription decision journey and privacy prerequisites | Paid readiness, retention, willingness to pay; 2,900 KRW is a hypothesis |
+| [PM readiness](../pm-subscription-readiness.md) | Defines subscription decision journey and privacy prerequisites | Paid readiness, retention, willingness to pay remain unverified; preparation basis updated Oct 6 to monthly 990 / annual 9,900 KRW, not purchasable |
 | [PM implementation verification](../pm-implementation-verification.md) | Distinguishes local tests, release follow-up and on-device analytics | Central operator funnel measurement from on-device analytics |
 
 These are repository-document assertions reviewed locally, not fresh independent

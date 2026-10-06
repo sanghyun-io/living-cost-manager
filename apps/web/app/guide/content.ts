@@ -1,3 +1,5 @@
+import { servicePricingCopy } from "@living-cost-manager/shared";
+
 export type Guide = {
   slug: string;
   title: string;
@@ -88,7 +90,9 @@ export const guides: Guide[] = [
   }
 ];
 
+const pricingCopy = servicePricingCopy();
 export const faqs = [
+  { question: "이용 요금과 유료 결제는 어떻게 되나요?", answer: [pricingCopy.free, `${pricingCopy.monthly} / ${pricingCopy.annual} 가격안을 준비하고 있습니다.`, pricingCopy.availability, pricingCopy.comparison, pricingCopy.tax].join(" ") },
   { question: "생활비 고정비 관리자는 어떤 서비스인가요?", answer: "반복 지출의 금액과 청구 기준일을 정리하고, 다음 결제와 갱신 결정을 기록하는 로컬 중심 대시보드입니다. 유지·해지 예정·변경 검토·완료 상태와 예상 절감·직접 확인 절감을 구분합니다." },
   { question: "로그인 없이 사용할 수 있나요?", answer: "공개 안내와 로컬 대시보드는 로그인 없이 이용할 수 있습니다. 서버에 데이터를 업로드하거나 불러오는 기능은 계정과 워크스페이스를 사용합니다." },
   { question: "은행이나 카드 거래를 자동으로 가져오나요?", answer: "아니요. 고정비 금액과 일정은 직접 등록합니다. 은행·카드 거래 자동 연동이나 실제 청구 검증 기능은 없습니다." },

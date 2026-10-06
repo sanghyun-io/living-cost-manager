@@ -10,6 +10,7 @@
 | [seo-opportunities.csv](seo-opportunities.csv) | 기존 가이드 5개의 사실과 검색 기회 가설 분리 |
 | [experiments.csv](experiments.csv) | 실행 전 조건, 지표 정의, 중단 기준 |
 | [cadence.md](cadence.md) | 매주 자료 확인 → 판단 → 다음 작업 |
+| [가격/결제 준비](../payment-readiness-20261006.md) | 월 990원 / 연 9,900원 기준, 공식 PG 요금 비교와 과금 OFF 개통 게이트 |
 
 ## 먼저 할 일
 1. Owner가 타깃·인터뷰 동의/보존안을 검토한다. 아직 모집·연락하지 않는다.

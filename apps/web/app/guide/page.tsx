@@ -1,6 +1,7 @@
 import { guides } from "./content";
 import { absoluteUrl, publicMetadata, SITE_NAME } from "./site";
 import { StructuredData } from "./structured-data";
+import { PricingPreview } from "./pricing-preview";
 import styles from "./guide.module.css";
 
 const title = "구독·고정비 갱신 관리, 다음 결제 전에 정리하세요";
@@ -32,6 +33,7 @@ export default function GuideHome() {
       <h2 id="guides">고정비를 정리할 때 필요한 안내</h2>
       {guides.map((guide) => <article key={guide.slug} className={styles.section}><h3><a href={`/guide/${guide.slug}/`}>{guide.title}</a></h3><p>{guide.description}</p></article>)}
     </section>
+    <PricingPreview />
     <section className={styles.section} aria-labelledby="scope">
       <h2 id="scope">내 데이터는 어디에 저장되나요?</h2>
       <p>로컬 데이터는 현재 브라우저에 저장됩니다. 브라우저 데이터를 지우거나 기기를 바꾸기 전에 전체 백업을 내보내세요. 서버 기능은 계정과 워크스페이스를 사용하며 수동으로 기준본을 맞춘 뒤 자동 업로드를 켤 수 있습니다.</p>
