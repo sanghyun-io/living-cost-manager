@@ -33,6 +33,7 @@ import type { WorkspaceSyncApi } from "./lib/useWorkspaceSync";
 import { useLedgers } from './lib/useLedgers';
 import { LedgerControls } from './components/LedgerControls';
 import { LedgerSummary } from './components/LedgerSummary';
+import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
 
 export default function Home() {
   // Hook creation order respects render-time data flow:
@@ -66,6 +67,20 @@ export default function Home() {
   const viewer = !users.isSampleMode && sync.currentWorkspaceRole === 'viewer';
   const canEdit = !viewer && !ledgers.aggregateMode && !!budget.localScopeKey;
   const syncAvailable = !!budget.localScopeKey && !budget.saveError && !users.isSampleMode && !ledgers.mutationPending;
+  const focusReady = users.isBootLoaded && users.isLoaded && (!!budget.localScopeKey || !!budget.saveError);
+  const focusScope = JSON.stringify([auth.serverSession?.user.id ?? null, auth.serverSession?.workspace?.id ?? null, users.isSampleMode]);
+  const [, notifyFocus] = useState(0);
+  const focusController = useRef<ReturnType<typeof createFocusIntentController> | null>(null);
+  if (!focusController.current) focusController.current = createFocusIntentController(() => notifyFocus(value => value + 1));
+  const focusTargets = useRef<Record<FocusDestination, HTMLElement | null>>({ ledger: null, create: null, rename: null, aggregate: null, sample: null });
+  const focusIntent: FocusIntentHandler = (destination, source, nextWorkspaceId) => {
+    const toScope = JSON.stringify([auth.serverSession?.user.id ?? null, nextWorkspaceId ?? auth.serverSession?.workspace?.id ?? null,
+      destination === 'sample' ? !users.isSampleMode : users.isSampleMode]);
+    const ticket = focusController.current!.begin({ destination, source, fromScope: focusScope, toScope });
+    return completed => focusController.current!.complete(ticket, completed);
+  };
+  useEffect(() => { focusController.current!.flush(focusScope, focusReady, focusTargets.current); });
+  useEffect(() => () => focusController.current!.cancel(), []);
   const [reviewDate, setReviewDate] = useState(() => new Date().toDateString());
   const [referenceInstant, setReferenceInstant] = useState(() => new Date());
   useEffect(() => {
@@ -158,7 +173,8 @@ export default function Home() {
     <>
       <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
       <AppHeader
-        ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={id => void sync.handleSelectServerWorkspace(id)} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError && !users.isSampleMode} /> : null}
+        ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={sync.handleSelectServerWorkspace} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError && !users.isSampleMode}
+          onFocusIntent={focusIntent} focusRef={(destination, element) => { focusTargets.current[destination] = element; }} /> : null}
         saveError={budget.saveError}
         onRetrySave={budget.retrySave}
         onExportUnsaved={budget.handleExportBackup}
@@ -189,7 +205,12 @@ export default function Home() {
 
       <section className="workspace-note" aria-label="시작 방식">
         <Text size="sm">{users.isSampleMode ? "샘플 체험 중 · 내 데이터와 분리된 예시입니다." : "내 데이터 · 기준 납부일을 입력하면 다음 30일 예정액을 확인할 수 있습니다."}</Text>
-        <Button variant="default" size="xs" onClick={() => void users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample").catch(() => setTemplateError('가계부 저장에 실패하여 샘플 전환을 중단했습니다. 현재 내용을 백업하세요.'))}>
+        <Button ref={element => { focusTargets.current.sample = element; }} variant="default" size="xs" onClick={event => {
+          const done = focusIntent('sample', event.currentTarget);
+          void users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample").then(() => done()).catch(() => {
+            done(false); setTemplateError('가계부 저장에 실패하여 샘플 전환을 중단했습니다. 현재 내용을 백업하세요.');
+          });
+        }}>
           {users.isSampleMode ? "내 데이터로 시작 / 돌아가기" : "분리된 샘플 체험"}
         </Button>
         <Text size="xs" c="dimmed">샘플은 별도 게스트 예시이며 서버로 업로드하지 않습니다. 돌아갈 때 계정과 가계부 권한을 다시 확인합니다.</Text>
