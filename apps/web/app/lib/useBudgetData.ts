@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ledgerProfileId, migrateLedgerCache } from './ledgerStorage';
+import type { ServerSession } from './serverApi';
 import {
   buildBudgetSummary,
   createCategory,
@@ -44,6 +46,7 @@ interface UseBudgetDataOptions {
   users: LocalUsersApi;
   ui: UIStateApi;
   marketingPersonal?: boolean;
+  session?: ServerSession | null;
 }
 
 /**
@@ -51,7 +54,13 @@ interface UseBudgetDataOptions {
  * per-user localStorage load & save, every CRUD handler, and the derived
  * summaries the dashboard renders.
  */
-export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudgetDataOptions) {
+export function useBudgetData({ users: accountUsers, ui, marketingPersonal = false, session = null }: UseBudgetDataOptions) {
+  const currentLedgerUser = useMemo(() => session?.workspace && accountUsers.currentUser?.serverUserId === session.user.id
+    ? { ...accountUsers.currentUser, id: ledgerProfileId(session.user.id, session.workspace.id), name: session.workspace.name }
+    : accountUsers.currentUser, [accountUsers.currentUser, session?.user.id, session?.workspace?.id]);
+  const users = { ...accountUsers, currentUser: currentLedgerUser };
+  const storedValue = useRef<string | null>(null);
+  const freshLedgerCache = useRef<{ id: string; initial: string } | null>(null);
   const pendingMarketing = useRef<PendingMarketingSignal[]>([]);
   const [monthlyIncome, setMonthlyIncome] = useState(3_000_000);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(seedFixedCosts);
@@ -59,6 +68,7 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
   const [cards, setCards] = useState<PaymentCard[]>(DEFAULT_CARDS);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState("");
+  const [erasedScope, setErasedScope] = useState<string | null>(null);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [costFilters, setCostFilters] = useState(emptyCostFilters);
   const [focusItemId, setFocusItemId] = useState<string | null>(null);
@@ -90,9 +100,16 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
 
   useEffect(() => {
     if (!currentUser) return;
-    const erase = () => {
-      if (!window.localStorage.getItem(getUserErasureKey(currentUser.id))) return;
+    const erase = (event?: StorageEvent) => {
+      if (!window.localStorage.getItem(getUserErasureKey(currentUser.id))) {
+        if (event?.key === getUserDataKey(currentUser.id) && event.newValue !== storedValue.current) {
+          setBlockedSaveUserId(currentUser.id);
+          setSaveError('다른 탭에서 이 장부를 변경했습니다. 현재 내용을 백업하고 새로고침하세요.');
+        }
+        return;
+      }
       applyBudgetSnapshot(emptyBudgetSnapshot);
+      setErasedScope(currentUser.id);
       setBlockedSaveUserId(currentUser.id);
       setSaveError("다른 탭에서 계정이 삭제되어 저장과 동기화를 중단했습니다.");
     };
@@ -115,9 +132,24 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
 
     setIsLoaded(false);
     setDeletedBatch(null);
+    if (window.localStorage.getItem(getUserErasureKey(currentUser.id))) {
+      applyBudgetSnapshot(emptyBudgetSnapshot); setErasedScope(currentUser.id); setBlockedSaveUserId(currentUser.id);
+      setSaveError('다른 탭에서 계정이 삭제되어 저장과 동기화를 중단했습니다.'); setLoadedUserId(currentUser.id); setIsLoaded(true); return;
+    }
+    try {
+      if (session?.workspace && currentUser.id.startsWith('ledger:') && accountUsers.currentUser) {
+        const conflict = migrateLedgerCache(window.localStorage, session.user.id, session.workspace.id, accountUsers.currentUser.id);
+        if (conflict) setImportMessage('이전 단일 장부의 캐시와 현재 장부 캐시가 달라 두 원본을 모두 보존했습니다. 자동으로 덮어쓰거나 업로드하지 않습니다. 이전 캐시는 기존 계정 저장 키에 남아 있습니다.');
+      }
+    } catch {
+      setSaveError('기존 공간을 안전하게 보존하지 못해 전환을 중단했습니다. 백업을 내보내세요.');
+      setBlockedSaveUserId(currentUser.id); return;
+    }
     const stored = window.localStorage.getItem(getUserDataKey(currentUser.id));
+    storedValue.current = stored;
     const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    const parsed = parseBudgetSnapshot(stored ?? legacyStored);
+    const parsed = parseBudgetSnapshot(stored ?? (currentUser.id.startsWith('ledger:') ? JSON.stringify(emptyBudgetSnapshot) : legacyStored));
+    freshLedgerCache.current = stored === null && currentUser.id.startsWith('ledger:') ? { id: currentUser.id, initial: JSON.stringify({ monthlyIncome: parsed.snapshot.monthlyIncome, categories: parsed.snapshot.categories, cards: parsed.snapshot.cards, fixedCosts: parsed.snapshot.fixedCosts }) } : null;
 
     let recoveryFailed = false;
     if (parsed.recovered && stored) {
@@ -157,7 +189,10 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
         importedWrite.current = null;
         if (imported.value === JSON.stringify({ monthlyIncome, fixedCosts, categories, cards })) return;
       }
-      window.localStorage.setItem(getUserDataKey(currentUser.id), JSON.stringify({ monthlyIncome, fixedCosts, categories, cards }));
+      if (window.localStorage.getItem(getUserDataKey(currentUser.id)) !== storedValue.current) throw new Error('Concurrent tab write');
+      const value = JSON.stringify({ monthlyIncome, fixedCosts, categories, cards });
+      window.localStorage.setItem(getUserDataKey(currentUser.id), value);
+      storedValue.current = value;
       setLastSavedAt(new Date());
       setSaveError("");
       if (marketingPersonal && !users.isSampleMode && !currentUser.serverUserId) {
@@ -182,7 +217,7 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
     [categoryFilterId, fixedCosts, costFilters]
   );
   const visibleFixedCostTotal = useMemo(
-    () => visibleFixedCosts.reduce((total, item) => total + getMonthlyEquivalentAmount(item), 0),
+    () => visibleFixedCosts.reduce((total, item) => total + (item.periodMonths > 0 ? item.amount / item.periodMonths : 0), 0),
     [visibleFixedCosts]
   );
   const pieBackground = buildPieBackground(pieSegments);
@@ -224,6 +259,7 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
       }
       const value = JSON.stringify({ monthlyIncome: snapshot.monthlyIncome, fixedCosts: snapshot.fixedCosts, categories: snapshot.categories, cards: snapshot.cards });
       window.localStorage.setItem(getUserDataKey(userId), value);
+      storedValue.current = value;
       importedWrite.current = { userId, value };
       setBlockedSaveUserId(null);
       setDeletedBatch(null);
@@ -554,6 +590,33 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
     };
   }
 
+  function saveBeforeSwitch(): boolean {
+    if (!currentUser || loadedUserId !== currentUser.id || !isLoaded || blockedSaveUserId === currentUser.id || saveError) return false;
+    try {
+      const key = getUserDataKey(currentUser.id);
+      if (window.localStorage.getItem(getUserErasureKey(currentUser.id)) || window.localStorage.getItem(key) !== storedValue.current) throw new Error('Scope changed');
+      const value = JSON.stringify(getCurrentBudgetSnapshot());
+      window.localStorage.setItem(key, value);
+      if (window.localStorage.getItem(key) !== value) throw new Error('Save failed');
+      storedValue.current = value;
+      cancelImport();
+      ui.closeDataAndManagementModals(); setIsDeleteMode(false); setSelectedDeleteIds([]); setCategoryFilterId('all'); setCostFilters(emptyCostFilters);
+      return true;
+    } catch { setSaveError('다른 탭의 변경 또는 저장 실패로 전환을 중단했습니다. 현재 내용을 백업하세요.'); return false; }
+  }
+
+  /** A never-before-cached ledger may initialize from its server snapshot.
+   * Existing caches (even empty/unsynced ones) ALWAYS require explicit pull.
+   * Refuse if the user or another tab edited during the request. */
+  function initializeFreshLedger(snapshot: LocalBudgetSnapshot): boolean {
+    const fresh = freshLedgerCache.current;
+    if (!fresh || fresh.id !== currentUser?.id || loadedUserId !== fresh.id || !isLoaded || saveError || JSON.stringify(getCurrentBudgetSnapshot()) !== fresh.initial) return false;
+    if (window.localStorage.getItem(getUserErasureKey(fresh.id)) || window.localStorage.getItem(getUserDataKey(fresh.id)) !== storedValue.current) return false;
+    freshLedgerCache.current = null;
+    applyBudgetSnapshot(snapshot);
+    return true;
+  }
+
   function applyBudgetSnapshot(snapshot: LocalBudgetSnapshot) {
     pendingMarketing.current = [];
     cancelImport();
@@ -568,6 +631,8 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
   }
 
   return {
+    saveBeforeSwitch,
+    initializeFreshLedger,
     monthlyIncome,
     fixedCosts,
     focusItemId,
@@ -583,7 +648,7 @@ export function useBudgetData({ users, ui, marketingPersonal = false }: UseBudge
     applyImport,
     cancelImport,
     retrySave: () => setSaveAttempt((attempt) => attempt + 1),
-    localScopeKey: loadedUserId === currentUser?.id && isLoaded ? loadedUserId : null,
+    localScopeKey: loadedUserId === currentUser?.id && isLoaded && erasedScope !== currentUser?.id ? loadedUserId : null,
     localRecoveryRequired: blockedSaveUserId === currentUser?.id,
     importFileRef,
     backupFileRef,

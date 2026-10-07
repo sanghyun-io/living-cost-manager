@@ -41,6 +41,9 @@ export function getUserDataKey(userId: string): string {
 }
 
 export function getUserErasureKey(userId: string): string {
+  if (userId.startsWith('ledger:')) {
+    try { return getUserDataKey('server:' + JSON.parse(userId.slice(7))[0]) + ':erased'; } catch { /* invalid scope remains isolated */ }
+  }
   return getUserDataKey(userId) + ":erased";
 }
 

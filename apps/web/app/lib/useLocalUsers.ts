@@ -27,9 +27,10 @@ interface UseLocalUsersOptions {
    * only invoked from event handlers (never during render).
    */
   getBudget: () => LocalBudgetSnapshot;
+  saveBeforeSwitch?: () => boolean;
 }
 
-export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
+export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLocalUsersOptions) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [knownUsers, setKnownUsers] = useState<AppUser[]>([]);
   const [isBootLoaded, setIsBootLoaded] = useState(false);
@@ -98,6 +99,7 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
       ? liveUsers.find((user) => user.serverUserId === identity.id) ?? createServerLocalUser(identity)
       : createUser(userName);
     if (window.localStorage.getItem(getUserErasureKey(nextUser.id))) throw new Error("삭제된 계정입니다. 다시 로그인하세요.");
+    if (currentUser?.id !== nextUser.id && isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) throw new Error('현재 공간 저장에 실패하여 계정을 전환하지 않았습니다.');
     const isNewUser = !liveUsers.some((user) => user.id === nextUser.id);
     const nextUsers = mergeUsers(liveUsers, nextUser);
     const userDataKey = getUserDataKey(nextUser.id);
@@ -120,6 +122,7 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
 
   // Demo lives in its own local profile; neither direction replaces real data.
   function handleChooseDataMode(mode: "sample" | "blank") {
+    if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return;
     auth.handleServerLogout();
     const liveUsers = readJson<AppUser[]>(USERS_KEY, knownUsers).filter((user) => !window.localStorage.getItem(getUserErasureKey(user.id)));
     if (mode === "sample" && currentUser && currentUser.id !== sampleUserId && !window.localStorage.getItem(getUserErasureKey(currentUser.id))) {
@@ -141,6 +144,7 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
   }
 
   function handleLogout() {
+    if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return;
     const localUser = createUser(LOCAL_USER_NAME);
     const liveUsers = readJson<AppUser[]>(USERS_KEY, knownUsers).filter((user) => !window.localStorage.getItem(getUserErasureKey(user.id)));
     const nextUsers = mergeUsers(liveUsers, localUser);
@@ -158,6 +162,7 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
 
   function applyTemplate(blueprint: TemplateBlueprint, snapshot: LocalBudgetSnapshot) {
     if (!isLoaded) throw new Error("현재 공간을 불러온 뒤 다시 시도하세요.");
+    if (saveBeforeSwitch && !saveBeforeSwitch()) throw new Error('기존 공간을 저장하지 못해 템플릿을 적용하지 않았습니다.');
     if (window.localStorage.getItem(ACTIVE_USER_KEY) !== currentUser?.id) throw new Error("활성 공간이 바뀌었습니다. 다시 확인하세요.");
     const result = persistTemplateProfile(window.localStorage, blueprint, snapshot, auth.serverSession ? auth.handleServerLogout : undefined);
     setKnownUsers(result.users);
@@ -175,6 +180,7 @@ export function useLocalUsers({ ui, auth, getBudget }: UseLocalUsersOptions) {
    * Returns null only when the switch actually happened.
    */
   function returnFromTemplate(): string | null {
+    if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return '현재 공간을 저장하지 못해 전환하지 않았습니다.';
     if (!templateReturnId) return "이전 공간 정보가 없습니다. 현재 공간을 유지합니다.";
     const user = knownUsers.find(entry => entry.id === templateReturnId);
     // A stale or erased target (e.g. deleted from another tab or a removed

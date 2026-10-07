@@ -1,5 +1,7 @@
 import type {
   AuthResponse,
+  CreateWorkspaceRequest,
+  AggregateWorkspacesResponse,
   CreateInvitationRequest,
   DeleteAccountResponse,
   InvitationRole,
@@ -47,6 +49,9 @@ export type ServerApiClient = {
   resendVerification(token: string): Promise<void>;
   me(token: string): Promise<{ user: UserDto }>;
   listWorkspaces(token: string): Promise<WorkspaceDto[]>;
+  createWorkspace(input: CreateWorkspaceRequest, token: string): Promise<{ workspace: WorkspaceDto; snapshot: WorkspaceSnapshot }>;
+  renameWorkspace(workspaceId: string, name: string, token: string): Promise<WorkspaceDto>;
+  aggregateWorkspaces(workspaceIds: string[], token: string): Promise<AggregateWorkspacesResponse>;
   getWorkspaceSnapshot(workspaceId: string, token: string): Promise<WorkspaceSnapshot>;
   putWorkspaceSnapshot(workspaceId: string, snapshot: WorkspaceSnapshot, token: string): Promise<WorkspaceSnapshot>;
   getSnapshotHistory(workspaceId: string, token: string, limit?: number): Promise<SnapshotHistoryEntry[]>;
@@ -102,6 +107,7 @@ type ClientOptions = {
 };
 
 type RequestOptions = {
+  signal?: AbortSignal;
   method?: string;
   token?: string;
   body?: unknown;
@@ -187,6 +193,14 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
     listWorkspaces(token) {
       return request<WorkspaceDto[]>("/workspaces", { token });
     },
+    async createWorkspace(input, token) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      try { return await request('/workspaces', { method: 'POST', token, body: input, signal: controller.signal }); }
+      finally { clearTimeout(timer); }
+    },
+    renameWorkspace(id, name, token) { return request('/workspaces/' + encodeURIComponent(id), { method: 'PATCH', token, body: { name } }); },
+    aggregateWorkspaces(workspaceIds, token) { return request('/workspaces/aggregate', { method: 'POST', token, body: { workspaceIds: [...new Set(workspaceIds)] } }); },
     getWorkspaceSnapshot(workspaceId, token) {
       return request<WorkspaceSnapshot>("/workspaces/" + encodeURIComponent(workspaceId) + "/snapshot", { token });
     },
@@ -303,7 +317,8 @@ async function requestJson<T>(
   const response = await fetchImpl(baseUrl + path, {
     method: options.method ?? "GET",
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    ...(options.signal ? { signal: options.signal } : {})
   });
 
   if (!response.ok) {

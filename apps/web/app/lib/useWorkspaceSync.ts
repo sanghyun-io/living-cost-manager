@@ -204,6 +204,14 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       checkedScope.current = safety.current;
       setServerSnapshot(remoteSnapshot);
       setIsServerSnapshotChecked(true);
+      const hydrated = hydrateWorkspaceSnapshot(remoteSnapshot);
+      if (latestBudget.current.initializeFreshLedger(hydrated)) {
+        establishSyncBaseline(startingTicket, buildSnapshotKey(hydrated), remoteSnapshot.syncVersion);
+        setLastServerSyncedAt(new Date());
+        auth.setServerStatus('새로 선택한 장부를 서버에서 불러왔습니다. 기존 장부와 편집 캐시는 변경하지 않았습니다.');
+        void coach.refreshMonthlyReport(session);
+        return true;
+      }
       // 추세 조각용 히스토리를 백그라운드로 갱신(대기하지 않음 — 동기화 흐름 안 막음).
       void coach.refreshMonthlyReport(session);
 
@@ -233,6 +241,8 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     }
 
     const workspace = serverWorkspaces.find((item) => item.id === workspaceId) ?? null;
+    if (!workspace || workspace.id === serverSession.workspace?.id) return;
+    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 장부를 저장하지 못해 전환하지 않았습니다. 백업을 먼저 내보내세요.'); return; }
     const nextSession = {
       ...serverSession,
       workspace
@@ -250,11 +260,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     // 활성 scope 를 새 워크스페이스로 맞춘다(workspace 가 있으면 곧 prepareServerSyncDecision
     // 이 같은 scope 로 다시 설정; 없는 경로는 null 로 남아 어떤 응답도 커밋 안 됨).
     coach.invalidateMonthlyReport(nextSession);
-    if (workspace) {
-      if (await prepareServerSyncDecision(nextSession)) await refreshSharing(nextSession);
-    } else {
-      auth.setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
-    }
+    // The page prepares sync only AFTER the target ledger's local cache loads.
   }
 
   async function handleSyncNow() {
@@ -463,6 +469,8 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       auth.setServerStatus("초대 토큰을 입력하세요.");
       return;
     }
+
+    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 장부 저장을 확인한 뒤 초대를 수락하세요.'); return; }
 
     const ticket = safety.current;
     auth.setIsServerBusy(true);

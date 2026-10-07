@@ -5,7 +5,8 @@ import {
   buildSavingsInsights,
   buildShareSummary,
   getUpcomingDues,
-  buildThirtyDayDueSummary,
+  summarizeWorkspaceBudget,
+  kstThirtyDayWindow,
   summarizeRenewalSavings,
   type SavingsInsight,
   type SnapshotHistoryEntry,
@@ -15,6 +16,7 @@ import type { FixedCost } from "../lib/budget";
 import { formatWon } from "../lib/formatting";
 
 interface InsightsPanelProps {
+  asOf?: Date;
   fixedCosts: FixedCost[];
   history?: SnapshotHistoryEntry[];
   // 공유 요약용. 대시보드 summary 에서 전달.
@@ -44,6 +46,7 @@ function formatTrendDate(iso: string): string {
 }
 
 export function InsightsPanel({
+  asOf,
   fixedCosts,
   history,
   monthlyIncome,
@@ -56,10 +59,11 @@ export function InsightsPanel({
   const [shareStatus, setShareStatus] = useState<string>("");
 
   useEffect(() => {
-    const now = new Date();
+    const [year, month, day] = kstThirtyDayWindow(asOf ?? new Date()).fromDate.split('-').map(Number);
+    const now = new Date(year, month - 1, day);
     setUpcoming(getUpcomingDues(fixedCosts, now, UPCOMING_WINDOW_DAYS).slice(0, UPCOMING_MAX));
     setInsights(buildSavingsInsights(fixedCosts));
-  }, [fixedCosts]);
+  }, [fixedCosts, asOf]);
 
   if (upcoming === null) {
     return null;
@@ -68,7 +72,9 @@ export function InsightsPanel({
   const trend = (history ?? []).slice(0, TREND_MAX);
   const monthlyReport = (history ?? []).length > 0 ? buildMonthlyReport(history ?? []) : null;
   const canShare = monthlyExpense > 0;
-  const dueSummary = buildThirtyDayDueSummary(fixedCosts, new Date());
+  const reference = asOf ?? new Date();
+  const dueSummary = summarizeWorkspaceBudget(monthlyIncome, fixedCosts, reference);
+  const window = kstThirtyDayWindow(reference);
   const savings = summarizeRenewalSavings(fixedCosts);
 
   async function handleShare() {
@@ -100,10 +106,10 @@ export function InsightsPanel({
   return (
     <section className="insights-panel" aria-label="예측 및 절감 인사이트">
       <div className="insights-block">
-        <Title order={2} size={14} fw={600}>앞으로 30일 실제 납부 예정</Title>
-        <Text fw={700} className="due-total tnum">{formatWon(dueSummary.total)} <Text span size="sm" fw={400} c="dimmed">· {dueSummary.dues.length}회</Text></Text>
-        <Text size="sm" c="dimmed">등록한 일정 기준 예상 청구액입니다. 월 환산 비용은 {formatWon(dueSummary.monthlyNormalized)}입니다.</Text>
-        {dueSummary.unknownCount > 0 ? <Text size="sm" c="dimmed">일정 미확인 {dueSummary.unknownCount}건은 합계와 알림에서 제외됩니다. 기준 납부일과 정수 개월 주기를 입력하세요.</Text> : null}
+        <Title order={2} size={14} fw={600}>다음 30일 예정 청구액 · 결제 완료액 아님</Title>
+        <Text fw={700} className="due-total tnum">{dueSummary.thirtyDayDue === null ? '일정 미확인' : formatWon(dueSummary.thirtyDayDue)} <Text span size="sm" fw={400} c="dimmed">· {dueSummary.dueOccurrenceCount}회</Text></Text>
+        <Text size="sm" c="dimmed">한국 시간 {window.fromDate}부터 {window.untilDateExclusive} 전까지. 월 환산 비용은 {formatWon(Math.round(dueSummary.monthlyNormalizedExpense))}입니다.</Text>
+        {dueSummary.unknownScheduleCount > 0 ? <Text size="sm" c="dimmed">일정 미확인 {dueSummary.unknownScheduleCount}건은 합계와 알림에서 제외됩니다. 기준 납부일과 정수 개월 주기를 입력하세요.</Text> : null}
         <a className="guide-link" href="#fixed-costs">납부일·갱신 계획 수정</a>
       </div>
       {upcoming.length > 0 ? (
@@ -124,7 +130,7 @@ export function InsightsPanel({
             })}
           </ul>
         </div>
-      ) : <Text size="sm" c="dimmed">{fixedCosts.length === 0 ? "항목과 기준 납부일을 등록하면 예정 결제를 볼 수 있습니다." : dueSummary.unknownCount === fixedCosts.length ? "기준 납부일을 입력하면 가까운 결제가 표시됩니다." : "확인된 일정 중 30일 이내 납부가 없습니다."}</Text>}
+       ) : <Text size="sm" c="dimmed">{fixedCosts.length === 0 ? "항목과 기준 납부일을 등록하면 예정 결제를 볼 수 있습니다." : dueSummary.thirtyDayDue === null ? "기준 납부일을 입력하면 가까운 결제가 표시됩니다." : "확인된 일정 중 30일 이내 납부가 없습니다."}</Text>}
 
       <details className="insights-details">
         <summary>절감 검토와 고정비 요약</summary>

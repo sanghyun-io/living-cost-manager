@@ -5,7 +5,6 @@ import { Button, Text } from "@mantine/core";
 import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
-import { getMonthlyEquivalentAmount } from "./lib/budget";
 import { AppHeader } from "./components/AppHeader";
 import { useMarketingConsent } from "./lib/useMarketingConsent";
 import { HeroPanel } from "./components/HeroPanel";
@@ -31,6 +30,9 @@ import { useWorkspaceSync } from "./lib/useWorkspaceSync";
 import type { BudgetDataApi } from "./lib/useBudgetData";
 import type { LocalUsersApi } from "./lib/useLocalUsers";
 import type { WorkspaceSyncApi } from "./lib/useWorkspaceSync";
+import { useLedgers } from './lib/useLedgers';
+import { LedgerControls } from './components/LedgerControls';
+import { LedgerSummary } from './components/LedgerSummary';
 
 export default function Home() {
   // Hook creation order respects render-time data flow:
@@ -53,15 +55,20 @@ export default function Home() {
   const users = useLocalUsers({
     ui,
     auth,
+    saveBeforeSwitch: () => budgetRef.current?.saveBeforeSwitch() ?? false,
     getBudget: () => (budgetRef.current as BudgetDataApi).getCurrentBudgetSnapshot()
   });
-  const budget = useBudgetData({ users, ui, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId });
+  const budget = useBudgetData({ users, ui, session: auth.serverSession, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId });
   const coach = useCoach({ budget, serverApi: auth.serverApi });
-  const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: users.currentUser?.id ?? null,
+  const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: budget.localScopeKey,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
+  const ledgers = useLedgers(auth, sync);
+  const viewer = sync.currentWorkspaceRole === 'viewer';
+  const canEdit = !viewer && !ledgers.aggregateMode && !!budget.localScopeKey;
   const [reviewDate, setReviewDate] = useState(() => new Date().toDateString());
+  const [referenceInstant, setReferenceInstant] = useState(() => new Date());
   useEffect(() => {
-    const refresh = () => setReviewDate(new Date().toDateString());
+    const refresh = () => { setReviewDate(new Date().toDateString()); setReferenceInstant(new Date()); };
     const timer = window.setInterval(refresh, 60_000);
     window.addEventListener("focus", refresh);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
@@ -127,13 +134,14 @@ export default function Home() {
     void sync.handleAcceptInvitation(invitationId);
   }
 
-  if (!users.isBootLoaded || !users.isLoaded) {
+  if (!users.isBootLoaded || !users.isLoaded || (!budget.localScopeKey && !budget.saveError)) {
     return (
       <main className="page-shell">
       {templateError ? <Text role="alert" c="rose" mt="md">{templateError}</Text> : null}
         <section className="login-card">
           <p className="section-label">생활비 관리자</p>
           <h1>불러오는 중입니다</h1>
+          {budget.saveError ? <><Text role="alert">{budget.saveError}</Text><Button onClick={budget.handleExportBackup}>현재 메모리 데이터 백업</Button></> : null}
         </section>
       </main>
     );
@@ -141,8 +149,9 @@ export default function Home() {
 
   return (
     <>
-      <a className="skip-link" href="#fixed-costs">고정비 편집으로 건너뛰기</a>
+      <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
       <AppHeader
+        ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={id => void sync.handleSelectServerWorkspace(id)} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError} /> : null}
         saveError={budget.saveError}
         onRetrySave={budget.retrySave}
         onExportUnsaved={budget.handleExportBackup}
@@ -155,6 +164,7 @@ export default function Home() {
         onOpenCoach={coach.openCoachModal}
         onOpenTemplates={() => { setTemplateError(""); setTemplatesOpen(true); }}
         onServerLogout={() => {
+          if (!budget.saveBeforeSwitch()) return;
           auth.handleServerLogout();
           users.handleLogout();
         }}
@@ -162,7 +172,11 @@ export default function Home() {
       <main className="page-shell">
       {templateError ? <Text role="alert" aria-live="assertive" c="rose" mb="md">{templateError}</Text> : null}
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
+      {ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 장부를 선택하고 조회하세요. 자동으로 전체 장부를 선택하지 않습니다.</Text>}</section> : <>
+      {viewer ? <Text role="status">보기 전용 장부입니다. 편집과 업로드는 할 수 없습니다.</Text> : null}
+      <fieldset disabled={!canEdit} className="ledger-edit-region">
       <HeroPanel
+        // Individual editing is never mounted as aggregate data.
         monthlyIncome={budget.monthlyIncome}
         expenseRate={budget.summary.expenseRate}
         hasServerWorkspace={Boolean(auth.serverSession?.workspace)}
@@ -174,13 +188,13 @@ export default function Home() {
         <Button variant="default" size="xs" onClick={() => users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample")}>
           {users.isSampleMode ? "내 데이터로 시작 / 돌아가기" : "분리된 샘플 체험"}
         </Button>
-        <Text size="xs" c="dimmed">공간 전환 시 서버 연결을 해제합니다. 기존 내 데이터는 보존됩니다.</Text>
+        <Text size="xs" c="dimmed">샘플 체험 전환은 서버 연결을 해제합니다. 위 장부 선택은 계정 연결을 유지합니다. 기존 내 데이터는 보존됩니다.</Text>
         <Button variant="subtle" color={budget.localRecoveryRequired ? "rose" : "gray"} size="xs" onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? "저장 원본 내보내기" : "최근 교체 전 복구본 내보내기"}</Button>
       </section>
 
       <div className="dashboard-overview">
         <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-        <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
+        <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
       </div>
 
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
@@ -196,6 +210,7 @@ export default function Home() {
         </section>
         {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
         <FixedCostTable
+          key={budget.localScopeKey}
           focusItemId={budget.focusItemId}
           focusRequest={budget.focusRequest}
           costFilters={budget.costFilters}
@@ -239,16 +254,18 @@ export default function Home() {
         /> : null}
       </section>
 
-      <TemplateModal opened={templatesOpen} onOpen={() => setTemplatesOpen(true)} onClose={() => setTemplatesOpen(false)} session={auth.serverSession}
+      </fieldset></>}
+      <TemplateModal key={auth.serverSession ? auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id : users.currentUser?.id} opened={templatesOpen} onOpen={() => setTemplatesOpen(true)} onClose={() => setTemplatesOpen(false)} session={auth.serverSession}
         onLogin={() => { setTemplatesOpen(false); ui.setIsAuthModalOpen(true); }} canApply={users.isLoaded && !budget.saveError && !budget.localRecoveryRequired}
         onShareError={setTemplateError}
-        onApply={(blueprint, snapshot) => { try { users.applyTemplate(blueprint, snapshot); setTemplateError(""); return true; } catch (error) { setTemplateError(error instanceof Error ? error.message : "새 공간을 만들지 못했습니다. 기존 데이터는 교체하지 않았습니다."); return false; } }} />
+        onApply={async (blueprint, snapshot) => { if (auth.serverSession) return ledgers.create(blueprint.title, snapshot); try { users.applyTemplate(blueprint, snapshot); setTemplateError(""); return true; } catch (error) { setTemplateError(error instanceof Error ? error.message : "새 공간을 만들지 못했습니다. 기존 데이터는 교체하지 않았습니다."); return false; } }} />
       <DataModal
+           key={'data:' + budget.localScopeKey}
            marketingConsent={marketingConsent}
           importMessage={ui.importMessage}
           importPreview={budget.pendingImport ? { currentCount: budget.fixedCosts.length, targetCount: budget.pendingImport.snapshot.fixedCosts.length,
-            currentAmount: budget.summary.monthlyExpense, targetAmount: budget.pendingImport.snapshot.fixedCosts.reduce((sum, item) => sum + getMonthlyEquivalentAmount(item), 0) } : null}
-          onApplyImport={budget.applyImport}
+             currentAmount: budget.summary.monthlyExpense, targetAmount: budget.pendingImport.snapshot.fixedCosts.reduce((sum, item) => sum + (item.periodMonths > 0 ? item.amount / item.periodMonths : 0), 0) } : null}
+          onApplyImport={() => { if (canEdit) budget.applyImport(); }}
           onCancelImport={budget.cancelImport}
           opened={ui.isDataModalOpen}
           hasServerApi={Boolean(auth.serverApi)}
@@ -256,9 +273,9 @@ export default function Home() {
           backupFileRef={budget.backupFileRef}
           onClose={() => { budget.cancelImport(); ui.setIsDataModalOpen(false); }}
           onExportTemplate={handleExportCsv}
-          onImportTemplate={(file) => void budget.handleImportTemplate(file)}
+          onImportTemplate={(file) => { if (canEdit) void budget.handleImportTemplate(file); }}
           onExportBackup={handleExportBackupWithTracking}
-          onImportBackup={(file) => void budget.handleImportBackup(file)}
+          onImportBackup={(file) => { if (canEdit) void budget.handleImportBackup(file); }}
           sync={{
             autoSyncEnabled: sync.autoSyncEnabled,
             canEnableAutoSync: sync.canEnableAutoSync,
@@ -400,7 +417,8 @@ export default function Home() {
         />
 
       <CategoryModal
-          opened={ui.isCategoryModalOpen}
+           key={'category:' + budget.localScopeKey}
+           opened={ui.isCategoryModalOpen && canEdit}
           categories={budget.categories}
           onAdd={budget.handleAddCategory}
           onRename={budget.handleRenameCategory}
@@ -409,7 +427,8 @@ export default function Home() {
         />
 
       <CardModal
-          opened={ui.isCardModalOpen}
+           key={'card:' + budget.localScopeKey}
+           opened={ui.isCardModalOpen && canEdit}
           cards={budget.cards}
           onAdd={budget.handleAddCard}
           onRename={budget.handleRenameCard}

@@ -2,8 +2,10 @@ import { ActionIcon, Button, Group, Text, useComputedColorScheme, useMantineColo
 import { LOCAL_USER_NAME } from "../lib/users";
 import { formatSaveTime } from "../lib/formatting";
 import type { ServerSession } from "../lib/serverApi";
+import type { ReactNode } from 'react';
 
 interface AppHeaderProps {
+  ledgerControls?: ReactNode;
   saveError: string;
   onRetrySave: () => void;
   onExportUnsaved: () => void;
@@ -20,6 +22,7 @@ interface AppHeaderProps {
 }
 
 export function AppHeader({
+  ledgerControls,
   saveError,
   onRetrySave,
   onExportUnsaved,
@@ -77,7 +80,7 @@ export function AppHeader({
             </Button>
           </>
         )}
-        <Text size="sm" c="dimmed">{currentUserName ?? LOCAL_USER_NAME}</Text>
+        <Text size="sm" c="dimmed">{serverSession?.workspace?.name ?? currentUserName ?? LOCAL_USER_NAME}</Text>
         <Button variant="subtle" color="gray" size="xs" onClick={onOpenCoach}>지출 코치</Button>
         {serverSession ? (
           <Button variant="default" onClick={onServerLogout}>
@@ -85,6 +88,7 @@ export function AppHeader({
           </Button>
         ) : null}
       </Group>
+      {ledgerControls}
     </header>
   );
 }

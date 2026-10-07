@@ -512,6 +512,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
   }
 
   return {
+    matchesServerScope: (accountId: string | undefined, workspaceId: string | undefined) => sessionRef.current?.user.id === accountId && sessionRef.current?.workspace?.id === workspaceId,
     serverApi,
     serverSession,
     setServerSession,

@@ -46,6 +46,7 @@ export function cleanupLocalAccountData(
   options: { clearServerSession?: boolean } = {}
 ): AccountDataCleanupResult {
   const users = readStoredUsers(storage);
+  const accountId = users.find(user => user.id === removedUserId)?.serverUserId ?? (removedUserId.startsWith('server:') ? removedUserId.slice(7) : null);
   const remainingUsers = removeLocalUser(users, removedUserId);
 
   storage.setItem(USERS_KEY, JSON.stringify(remainingUsers));
@@ -54,6 +55,13 @@ export function cleanupLocalAccountData(
   storage.setItem(getUserErasureKey(removedUserId), "1");
   // Enumerate before removing: Storage indices shift after each deletion.
   const keys = Array.from({ length: storage.length ?? 0 }, (_, index) => storage.key?.(index));
+  if (accountId) {
+    storage.setItem(getUserErasureKey('server:' + accountId), '1');
+    const ledgerPrefix = 'living-cost-manager:user:' + encodeURIComponent('ledger:' + JSON.stringify([accountId]).slice(0, -1) + ',');
+    for (const key of keys) if (key?.startsWith(ledgerPrefix)) storage.removeItem(key);
+    storage.removeItem('living-cost-manager:ledger-migration:' + encodeURIComponent(accountId));
+    storage.removeItem('living-cost-manager:ledger-migration:' + encodeURIComponent(accountId) + ':complete');
+  }
   const erasedPrefixes = [getUserDataKey(removedUserId), STORAGE_KEY, LEGACY_STORAGE_KEY];
   for (const key of keys) {
     if (key && erasedPrefixes.some((prefix) => key.startsWith(prefix + ":corrupt:") || key.startsWith(prefix + ":recovery:"))) {

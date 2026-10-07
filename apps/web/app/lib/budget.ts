@@ -1,4 +1,4 @@
-import { billingFieldsSchema, type BillingFields } from "@living-cost-manager/shared";
+import { billingFieldsSchema, summarizeWorkspaceBudget, type BillingFields } from "@living-cost-manager/shared";
 
 export type Category = {
   id: string;
@@ -162,7 +162,7 @@ export function updateFixedCost(item: FixedCost, patch: Partial<Omit<FixedCost, 
 }
 
 export function buildBudgetSummary(items: FixedCost[], monthlyIncome: number): BudgetSummary {
-  const monthlyExpense = items.reduce((sum, item) => sum + getMonthlyEquivalentAmount(item), 0);
+  const monthlyExpense = summarizeWorkspaceBudget(monthlyIncome, items, new Date()).monthlyNormalizedExpense;
   const highestCost = items.reduce<FixedCost | null>(
     (highest, item) => (!highest || getMonthlyEquivalentAmount(item) > getMonthlyEquivalentAmount(highest) ? item : highest),
     null
@@ -180,7 +180,7 @@ export function buildBudgetSummary(items: FixedCost[], monthlyIncome: number): B
 
 export function getCategoryBuckets(items: FixedCost[], categories: Category[]): CategoryBucket[] {
   const totals = items.reduce<Record<string, number>>((bucketMap, item) => {
-    bucketMap[item.categoryId] = (bucketMap[item.categoryId] ?? 0) + getMonthlyEquivalentAmount(item);
+    bucketMap[item.categoryId] = (bucketMap[item.categoryId] ?? 0) + (item.periodMonths > 0 ? item.amount / item.periodMonths : 0);
     return bucketMap;
   }, {});
 
