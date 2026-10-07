@@ -109,6 +109,14 @@ identity is unconfirmed and this work does not touch or close it.
 
 ## Independent-review follow-up (2026-10-07)
 
+Integration provenance: source follow-up
+`b83921404429b8da17d125c6f178d546587efece` was subsequently cherry-picked as
+`4af852f` onto `multiledger-integration` at `e885dc`. The source-author account
+below describes its original isolated frontend branch. Combined-tree execution
+and remaining independent verification are recorded separately in
+`multiledger-integration-verification.md`; expense-only aggregate totals remain
+bound to backend `6935972`.
+
 The parent independently reproduced three defects in `721f10a`. This follow-up
 changes only this frontend branch, not the active integration worktree:
 
