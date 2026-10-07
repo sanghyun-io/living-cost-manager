@@ -1,7 +1,7 @@
 import { Text } from '@mantine/core';
-import type { WorkspaceFinancialSummary } from '@living-cost-manager/shared';
+import type { WorkspaceAggregateTotals } from '@living-cost-manager/shared';
 const won = (value: number) => Math.round(value).toLocaleString('ko-KR') + '원';
-export function LedgerSummary({ summary, fromDate, untilDateExclusive, aggregate = false }: { summary: WorkspaceFinancialSummary; fromDate: string; untilDateExclusive: string; aggregate?: boolean }) {
+export function LedgerSummary({ summary, fromDate, untilDateExclusive, aggregate = false }: { summary: WorkspaceAggregateTotals; fromDate: string; untilDateExclusive: string; aggregate?: boolean }) {
   return <section className="ledger-summary" aria-label={aggregate ? '선택 장부 합산 결과' : '장부 비용 요약'}>
     <h2>{aggregate ? '선택 장부 합산 · 읽기 전용' : '장부 비용 요약'}</h2>
     <dl><dt>월 환산 고정비</dt><dd>{won(summary.monthlyNormalizedExpense)}</dd><dt>다음 30일 예정 청구액 · 결제 완료액 아님</dt><dd>{summary.thirtyDayDue === null ? '일정 미확인' : won(summary.thirtyDayDue)}</dd></dl>

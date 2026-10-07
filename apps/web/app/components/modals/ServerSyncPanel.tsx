@@ -126,7 +126,7 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
             <Text size="xs" c="dimmed">{serverSession.user.email}</Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">워크스페이스</Text>
+            <Text size="xs" c="dimmed">현재 장부 · 위 장부 선택과 동일</Text>
             <Text fw={700}>{serverSession.workspace?.name ?? "선택 안 됨"}</Text>
             <Text size="xs" c="dimmed">{currentWorkspaceRole ? workspaceRoleLabels[currentWorkspaceRole] : "초대 수락 후 선택"}</Text>
             {serverWorkspaces.length > 1 ? (
@@ -234,7 +234,7 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
       ) : null}
       {serverSession && serverWorkspaces.length === 0 ? (
         <Text size="xs" c="dimmed" mb="sm">
-          사용 가능한 서버 워크스페이스가 없습니다. 새 계정을 만들거나 초대를 수락한 뒤 동기화를 사용할 수 있습니다.
+          사용 가능한 장부가 없습니다. 이메일 확인 후 위 ‘새 장부’에서 만들거나 초대를 수락하세요. 장부 목록을 새로고침하면 다시 확인할 수 있습니다.
         </Text>
       ) : null}
 

@@ -61,6 +61,12 @@ API/shared source, production, DB, credential, or billing changes.
 
 ## Financial display
 
+Integrated contract: backend `6935972` exports `WorkspaceAggregateTotals`
+without `monthlyIncome`. `LedgerSummary` accepts these expense/schedule-only
+fields (individual summaries remain structurally compatible). The browser
+fixture now uses that latest shape; the SSR regression additionally verifies
+that a legacy response's extra income field is never displayed.
+
 Individual monthly summary/category buckets/filtered totals retain raw
 `amount/periodMonths` until display rounding. Individual scheduled totals use
 the same shared KST calculator as aggregate. `null` is shown as unknown, not

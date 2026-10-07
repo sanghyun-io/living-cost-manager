@@ -29,7 +29,7 @@ await context.route('https://api.gamja.top/**', async route => {
     const budget = { ...input.initialBudget, workspaceId: workspace.id, syncVersion: 0, categories: input.initialBudget.categories.map(row => ({ ...row, workspaceId: workspace.id })), cards: input.initialBudget.cards.map(row => ({ ...row, workspaceId: workspace.id })), fixedCosts: input.initialBudget.fixedCosts.map(row => ({ ...row, workspaceId: workspace.id })) };
     createdBudgets.set(workspace.id, budget); body = { workspace, snapshot: budget };
   }
-  else if (path === '/workspaces/aggregate') body = { currency: 'KRW', timeZone: 'Asia/Seoul', asOf: '2026-10-07T00:00:00Z', fromDate: '2026-10-07', untilDateExclusive: '2026-11-06', workspaces: [], totals: { monthlyIncome: 99999999, monthlyNormalizedExpense: 66.666, fixedCostCount: 2, knownScheduleCount: 0, unknownScheduleCount: 2, dueOccurrenceCount: 0, thirtyDayDue: null } };
+  else if (path === '/workspaces/aggregate') body = { currency: 'KRW', timeZone: 'Asia/Seoul', asOf: '2026-10-07T00:00:00Z', fromDate: '2026-10-07', untilDateExclusive: '2026-11-06', workspaces: [], totals: { monthlyNormalizedExpense: 66.666, fixedCostCount: 2, knownScheduleCount: 0, unknownScheduleCount: 2, dueOccurrenceCount: 0, thirtyDayDue: null } };
   else if (/\/snapshot\/history$/.test(path)) body = { entries: [] };
   else if (/\/snapshot$/.test(path)) {
     const id = path.split('/')[2];
