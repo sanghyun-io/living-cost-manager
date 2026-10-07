@@ -66,6 +66,11 @@ model ServiceBillingQuote {
   periodMonths Int
   billingVersion String
   autoRenewVersion String
+  featureScopeVersion String @default("feature-draft-v1")
+  policyVersion String @default("policy-draft-v1")
+  sellerVersion String @default("seller-draft-v1")
+  premiumScope String @default("provisional")
+  materialsSnapshot Json?
   expiresAt DateTime
   consumedAt DateTime?
   createdAt DateTime @default(now())
@@ -91,6 +96,9 @@ model ServiceBillingInstrument {
   keyVersion String?
   verifiedAt DateTime?
   revokedAt DateTime?
+  version Int @default(0)
+  leaseOwner String?
+  leaseUntil DateTime?
   attempts ServicePaymentAttempt[]
   @@index([contractId, status])
 }
@@ -123,6 +131,7 @@ model ServicePaymentAttempt {
   lookupCount Int @default(0)
   nextLookupAt DateTime?
   paidAt DateTime?
+  reviewRequired Boolean @default(false)
   createdAt DateTime @default(now())
   period ServicePaidPeriod?
   events ServiceBillingEventReceipt[]
@@ -186,6 +195,13 @@ model ServiceRefundRecord {
   verifiedAmount Int?
   verifiedAt DateTime?
   createdAt DateTime @default(now())
+  approvalOperationId String? @unique
+  approvalPolicyVersion String?
+  leaseOwner String?
+  leaseUntil DateTime?
+  fence Int @default(0)
+  lookupCount Int @default(0)
+  nextLookupAt DateTime?
   @@unique([attemptId, idempotencyKey])
   @@unique([provider, storeId, environment, providerCancelId])
   @@index([status, createdAt])

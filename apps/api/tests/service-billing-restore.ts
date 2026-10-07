@@ -15,15 +15,15 @@ const sourceUrl = resolveApiTestDatabaseUrl();
 const url = new URL(sourceUrl);
 const directory = process.env.BILLING_TEST_EVIDENCE_DIR;
 if (process.env.BILLING_TEST_RESTORE !== "true" || !directory || !isAbsolute(directory) ||
-  url.hostname !== "127.0.0.1" || url.port !== "55439" || url.pathname !== "/lcm_billing_test" ||
+  url.hostname !== "127.0.0.1" || !["55439", "55440"].includes(url.port) || url.pathname !== "/lcm_billing_test" ||
   url.searchParams.get("schema") !== "billing_test" || url.username !== "postgres" || url.password) {
   throw new Error("Refusing non-isolated billing restore target");
 }
-const container = "lcm-billing-backend-test";
+const container = url.port === "55440" ? "lcm-billing-provider-test" : "lcm-billing-backend-test";
 const inspect = JSON.parse(execFileSync("docker", ["inspect", container], { encoding: "utf8" }))[0];
 if (inspect.Config.Image !== "postgres:16-alpine" ||
   inspect.NetworkSettings.Ports["5432/tcp"]?.[0]?.HostIp !== "127.0.0.1" ||
-  inspect.NetworkSettings.Ports["5432/tcp"]?.[0]?.HostPort !== "55439") throw new Error("Refusing unexpected test container");
+  inspect.NetworkSettings.Ports["5432/tcp"]?.[0]?.HostPort !== url.port) throw new Error("Refusing unexpected test container");
 const key = randomBytes(32);
 const prisma = new PrismaClient({ datasources: { db: { url: sourceUrl } } });
 const restoreName = `lcm_billing_restore_test_${randomUUID().replaceAll("-", "")}`;

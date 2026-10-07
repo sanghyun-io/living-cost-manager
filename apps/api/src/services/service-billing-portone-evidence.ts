@@ -1,8 +1,8 @@
 import { Webhook, type Payment } from "@portone/server-sdk";
 import { ServiceBillingError } from "./service-billing.js";
 
-/** Phase-two evidence helpers, NOT a registered live adapter. No API secret,
- * merchant calls, invented environment response field, or checkout switch.
+/** Pure evidence helpers; the raw signature helper is used by the gated real
+ * adapter. No API secret, merchant call or invented environment response field.
  * SelectedChannel.id, issueId and customer.id are optional in official types:
  * missing binding is unsupported, never equivalent to token possession. */
 export type VerifiedPortOneScope = {
@@ -51,7 +51,7 @@ export async function verifyPortOneRawWebhook(
   }
   let webhook;
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
     // Exact raw UTF-8 bytes, not JSON.stringify(parsedBody).
     webhook = await Webhook.verify(secret, text, headers);
   } catch { throw new ServiceBillingError("INVALID_WEBHOOK_SIGNATURE", 400); }

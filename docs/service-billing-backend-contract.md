@@ -1,5 +1,10 @@
 # LCM service billing backend — phase-one contract
 
+**Historical phase-one handoff for frozen `42265e9`.** Phase two supersedes its
+mock-only provider limitation and DTO fields; use
+`service-billing-provider-contract.md` and current shared response schemas for
+integration. The frozen phase-one worktree was not modified.
+
 Internal implementation handoff, 2026-10-07. Base: `origin/main`
 `7031f74039be06484b0742328edc503e5fa8202b`. This is **not** a published paid
 product, commercial approval, deployment, or permission to migrate production.

@@ -11,6 +11,7 @@ import { authPlugin } from "./plugins/auth.js";
 import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
 import { accountRoutes } from "./routes/account.js";
 import { serviceBillingRoutes } from "./routes/service-billing.js";
+import type { ServiceBillingProvider } from "./services/service-billing-provider.js";
 import { authRoutes } from "./routes/auth.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { marketingRoutes } from "./routes/marketing.js";
@@ -35,6 +36,8 @@ declare module "fastify" {
 type BuildAppOptions = {
   env?: Env;
   prisma?: PrismaClient;
+  serviceBillingProvider?: ServiceBillingProvider;
+  serviceBillingClock?: () => Date;
   /**
    * 테스트/운영에서 커스텀 logger 를 주입할 때 쓴다(Fastify 는 인스턴스를
    * `loggerInstance` 로 받는다). `false` 는 완전 억제(게이트 테스트용). 미주입 시 기존 동작 유지.
@@ -44,6 +47,7 @@ type BuildAppOptions = {
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const env = options.env ?? loadEnv();
+  if ((options.serviceBillingProvider || options.serviceBillingClock) && env.NODE_ENV !== "test") throw new Error("Billing overrides restricted to tests");
   const prisma = options.prisma ?? getPrismaClient();
   const app = Fastify({
     // B1: narrow, env-gated proxy trust. "off" keeps request.ip at the socket
@@ -116,7 +120,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const registerApiRoutes = async (api: FastifyInstance) => {
     await api.register(authRoutes);
     await api.register(accountRoutes);
-    await api.register(serviceBillingRoutes);
+    await api.register(serviceBillingRoutes, { provider: options.serviceBillingProvider, clock: options.serviceBillingClock });
     await api.register(workspaceRoutes);
     await api.register(templateRoutes);
     await api.register(invitationRoutes);

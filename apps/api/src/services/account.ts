@@ -112,7 +112,7 @@ export async function deleteAccount(
         await tx.$queryRaw`SELECT "id" FROM "ServiceSubscriptionContract" WHERE "id" = ${billing.id} FOR UPDATE`;
         const current = await tx.serviceSubscriptionContract.findUniqueOrThrow({ where: { id: billing.id } });
         const unresolvedAttempt = await tx.servicePaymentAttempt.count({ where: { contractId: billing.id,
-          status: { in: ["created", "dispatch_unknown", "manual_review"] } } });
+          OR: [{ status: { in: ["created", "dispatch_unknown", "manual_review"] } }, { reviewRequired: true }] } });
         const unresolvedRefund = await tx.serviceRefundRecord.count({ where: { attempt: { contractId: billing.id },
           status: { notIn: ["verified", "rejected"] } } });
         const instruments = await tx.serviceBillingInstrument.count({ where: { contractId: billing.id, status: { not: "revoked" } } });

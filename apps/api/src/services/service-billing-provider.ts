@@ -5,6 +5,8 @@ export type BillingScope = { provider: string; storeId: string; environment: Ser
 export type PaymentObservation = BillingScope & {
   paymentId: string; subjectId: string; status: "PAID" | "FAILED" | "PENDING";
   totalAmount: number; currency: string; paidAt: Date | null;
+  cancelledAmount?: number;
+  cancellations?: { cancelId: string; amount: number; reason: string }[];
 };
 export interface ServiceBillingProvider {
   readonly scope: BillingScope;
@@ -16,6 +18,9 @@ export interface ServiceBillingProvider {
   getSchedule(subjectId: string): Promise<{ stopped: boolean }>;
   refund(input: { paymentId: string; amount: number; requestId: string }): Promise<void>;
   getCancellation(requestId: string): Promise<{ paymentId: string; amount: number; cancelId: string } | null>;
+  revokeInstrument?(input: { billingKey: string; issuanceId: string; subjectId: string }): Promise<boolean>;
+  recoverInstrument?(input: { issuanceId: string; subjectId: string }): Promise<string | null>;
+  lookupCancellation?(input: { paymentId: string; requestId: string; amount: number; subjectId: string; totalAmount: number; currency: string }): Promise<{ paymentId: string; amount: number; cancelId: string } | null>;
   // Real signed PortOne verification remains unsupported; no fake verifier.
   verifyWebhook(raw: Buffer, headers: Record<string, string>): Promise<{ eventId: string; paymentId: string }>;
 }

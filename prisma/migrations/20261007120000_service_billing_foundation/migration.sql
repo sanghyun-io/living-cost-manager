@@ -265,10 +265,10 @@ CREATE FUNCTION "lcm_service_billing_immutable"() RETURNS trigger LANGUAGE plpgs
 DECLARE mutable text[];
 BEGIN
   IF TG_TABLE_NAME = 'ServiceBillingQuote' THEN mutable := ARRAY['consumedAt'];
-  ELSIF TG_TABLE_NAME = 'ServicePaymentAttempt' THEN mutable := ARRAY['status','dispatchAt','leaseOwner','leaseUntil','fence','lookupCount','nextLookupAt','paidAt'];
+  ELSIF TG_TABLE_NAME = 'ServicePaymentAttempt' THEN mutable := ARRAY['status','dispatchAt','leaseOwner','leaseUntil','fence','lookupCount','nextLookupAt','paidAt','reviewRequired'];
   ELSIF TG_TABLE_NAME = 'ServicePaidPeriod' THEN mutable := ARRAY['accessEndsAt'];
-  ELSIF TG_TABLE_NAME = 'ServiceRefundRecord' THEN mutable := ARRAY['status','providerCancelId','verifiedAmount','verifiedAt'];
-  ELSIF TG_TABLE_NAME = 'ServiceBillingInstrument' THEN mutable := ARRAY['status','ciphertext','nonce','authTag','keyVersion','verifiedAt','revokedAt'];
+  ELSIF TG_TABLE_NAME = 'ServiceRefundRecord' THEN mutable := ARRAY['status','providerCancelId','verifiedAmount','verifiedAt','approvalOperationId','approvalPolicyVersion','leaseOwner','leaseUntil','fence','lookupCount','nextLookupAt'];
+  ELSIF TG_TABLE_NAME = 'ServiceBillingInstrument' THEN mutable := ARRAY['status','ciphertext','nonce','authTag','keyVersion','verifiedAt','revokedAt','version','leaseOwner','leaseUntil'];
   ELSE mutable := ARRAY['attemptId','processedAt','status','retryCount','nextRetryAt','leaseOwner','leaseUntil','fence'];
   END IF;
   IF (to_jsonb(OLD) - mutable) IS DISTINCT FROM (to_jsonb(NEW) - mutable) THEN
@@ -352,3 +352,31 @@ BEGIN
   RETURN NEW;
 END $$;
 CREATE TRIGGER "service_contract_identity" BEFORE UPDATE ON "ServiceSubscriptionContract" FOR EACH ROW EXECUTE FUNCTION "lcm_service_contract_identity"();
+
+-- Phase two amendment of an UNAPPLIED production draft; new tables only.
+ALTER TABLE "ServiceBillingQuote" ADD COLUMN "featureScopeVersion" TEXT NOT NULL DEFAULT 'feature-draft-v1',
+  ADD COLUMN "policyVersion" TEXT NOT NULL DEFAULT 'policy-draft-v1', ADD COLUMN "sellerVersion" TEXT NOT NULL DEFAULT 'seller-draft-v1',
+  ADD COLUMN "premiumScope" TEXT NOT NULL DEFAULT 'provisional', ADD COLUMN "materialsSnapshot" JSONB;
+ALTER TABLE "ServiceBillingInstrument" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "leaseOwner" TEXT, ADD COLUMN "leaseUntil" TIMESTAMP(3);
+ALTER TABLE "ServicePaymentAttempt" ADD COLUMN "reviewRequired" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "ServiceRefundRecord" ADD COLUMN "approvalOperationId" TEXT, ADD COLUMN "approvalPolicyVersion" TEXT,
+  ADD COLUMN "leaseOwner" TEXT, ADD COLUMN "leaseUntil" TIMESTAMP(3), ADD COLUMN "fence" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "lookupCount" INTEGER NOT NULL DEFAULT 0, ADD COLUMN "nextLookupAt" TIMESTAMP(3);
+CREATE UNIQUE INDEX "ServiceRefundRecord_approvalOperationId_key" ON "ServiceRefundRecord"("approvalOperationId");
+CREATE FUNCTION "lcm_service_refund_approval_immutable"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF (OLD."approvalOperationId" IS NOT NULL AND (OLD."approvalOperationId",OLD."approvalPolicyVersion") IS DISTINCT FROM (NEW."approvalOperationId",NEW."approvalPolicyVersion")) THEN
+    RAISE EXCEPTION 'Immutable refund approval' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER "service_refund_approval_immutable" BEFORE UPDATE ON "ServiceRefundRecord" FOR EACH ROW EXECUTE FUNCTION "lcm_service_refund_approval_immutable"();
+ALTER TABLE "ServiceRefundRecord" ADD CONSTRAINT "service_refund_approval_pair" CHECK (
+  ("approvalOperationId" IS NULL AND "approvalPolicyVersion" IS NULL) OR
+  ("approvalOperationId" IS NOT NULL AND "approvalPolicyVersion" IS NOT NULL AND length("approvalOperationId") BETWEEN 16 AND 128));
+ALTER TABLE "ServiceBillingInstrument" ADD CONSTRAINT "service_instrument_lease_bounds" CHECK (
+  "version" >= 0 AND (("leaseOwner" IS NULL AND "leaseUntil" IS NULL) OR ("leaseOwner" IS NOT NULL AND "leaseUntil" IS NOT NULL)));
+ALTER TABLE "ServiceRefundRecord" ADD CONSTRAINT "service_refund_lease_bounds" CHECK (
+  "fence" >= 0 AND "lookupCount" BETWEEN 0 AND 8 AND
+  (("leaseOwner" IS NULL AND "leaseUntil" IS NULL) OR ("leaseOwner" IS NOT NULL AND "leaseUntil" IS NOT NULL)));

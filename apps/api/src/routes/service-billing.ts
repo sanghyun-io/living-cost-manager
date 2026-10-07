@@ -3,9 +3,10 @@ import type { z } from "zod";
 import {
   serviceBillingQuoteRequestSchema, serviceBillingPrepareRequestSchema, serviceBillingConfirmRequestSchema,
   serviceBillingChargeRequestSchema, serviceBillingCancelRequestSchema, serviceBillingRefundRequestSchema,
-  serviceBillingMockExecutionRequestSchema
+  serviceBillingMockExecutionRequestSchema, serviceBillingIdempotencyKeySchema
 } from "@living-cost-manager/shared";
 import { ServiceBillingError, ServiceBillingService } from "../services/service-billing.js";
+import type { ServiceBillingProvider } from "../services/service-billing-provider.js";
 
 declare module "fastify" { interface FastifyInstance { serviceBilling: ServiceBillingService } }
 
@@ -28,8 +29,8 @@ function parameter(request: FastifyRequest, key: string) {
   if (!value || value.length > 128 || !/^[A-Za-z0-9_-]+$/.test(value)) throw new ServiceBillingError("INVALID_BILLING_REQUEST", 400);
   return value;
 }
-export async function serviceBillingRoutes(root: FastifyInstance) {
-  root.decorate("serviceBilling", new ServiceBillingService(root.prisma, root.appEnv));
+export async function serviceBillingRoutes(root: FastifyInstance, options: { provider?: ServiceBillingProvider; clock?: () => Date } = {}) {
+  root.decorate("serviceBilling", new ServiceBillingService(root.prisma, root.appEnv, options.clock, options.provider));
   await root.register(async app => {
     const service = root.serviceBilling;
     // No request/provider payload or original exception is logged. The route
@@ -64,6 +65,16 @@ export async function serviceBillingRoutes(root: FastifyInstance) {
     app.post("/instruments/:id/confirm", write, request => service.confirm(request.user.sub, parameter(request, "id"), parse(serviceBillingConfirmRequestSchema, request.body).billingKey));
     app.post("/charges", write, request => service.charge(request.user.sub, parse(serviceBillingChargeRequestSchema, request.body)));
     app.get("/attempts/:id", read, request => service.poll(request.user.sub, parameter(request, "id")));
+    app.get("/attempts/by-idempotency/:key", read, request => {
+      const key = serviceBillingIdempotencyKeySchema.safeParse(parameter(request, "key"));
+      if (!key.success) throw new ServiceBillingError("INVALID_BILLING_REQUEST", 400);
+      return service.byIdempotency(request.user.sub, key.data);
+    });
+    app.get("/instruments/:id", read, request => service.instrumentDto(request.user.sub, parameter(request, "id")));
+    app.post("/instruments/:id/revoke", write, request => {
+      parse(serviceBillingMockExecutionRequestSchema, request.body);
+      return service.revokeInstrument(request.user.sub, parameter(request, "id"));
+    });
     app.post("/subscription/cancel", write, request => {
       parse(serviceBillingCancelRequestSchema, request.body);
       return service.cancel(request.user.sub);
@@ -84,8 +95,22 @@ export async function serviceBillingRoutes(root: FastifyInstance) {
       await service.executeMockRefund(request.user.sub, id);
       return service.refundDto(request.user.sub, id);
     });
-    // Do NOT parse JSON and pretend to verify a signature. Unsupported provider
-    // stays 404 until official raw-body verifier and scope binding are reviewed.
-    app.post("/webhooks/portone", { bodyLimit: 16_384 }, async (_request, reply) => reply.code(404).send({ code: "WEBHOOK_NOT_CONFIGURED" }));
+    // Parser override is encapsulated in ONLY this webhook subtree. Normal
+    // billing/auth JSON routes retain Fastify's normal parser and body limit.
+    await app.register(async webhook => {
+      webhook.removeContentTypeParser("application/json");
+      webhook.addContentTypeParser("application/json", { parseAs: "buffer", bodyLimit: 16_384 }, (_request, raw, done) => done(null, raw));
+      webhook.post("/webhooks/portone", { bodyLimit: 16_384 }, async (request, reply) => {
+        if (service.mode === "mock" || !service.provider) throw new ServiceBillingError("WEBHOOK_NOT_CONFIGURED", 404);
+        if (!Buffer.isBuffer(request.body)) throw new ServiceBillingError("INVALID_WEBHOOK_CONTENT_TYPE", 415);
+        const headers: Record<string, string> = {};
+        for (const name of ["webhook-id", "webhook-timestamp", "webhook-signature"]) {
+          const value = request.headers[name];
+          if (typeof value !== "string" || !value || value.length > 2048) throw new ServiceBillingError("INVALID_WEBHOOK_SIGNATURE", 400);
+          headers[name] = value;
+        }
+        return reply.code(202).send(await service.acceptPortOneWebhook(request.body, headers));
+      });
+    });
   }, { prefix: "/service-billing" });
 }
