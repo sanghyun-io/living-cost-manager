@@ -1,92 +1,77 @@
-# Billing frontend integration — INTERNAL, provisional
+# Billing frontend integration — INTERNAL technical handoff
 
-Base: `origin/main` **7031f74**. Isolated branch/worktree: `lcm-billing-frontend` in the approved OpenCode temporary directory. Only `apps/web/**` was edited. No shared/API/Prisma/root lock changes, production requests, keys, account fixtures from production, migration, push, or deployment.
+## Immutable source and ownership
 
-## Delivered / not claimed
+Authoritative backend base verified as **1fecf301304f2165a4c6f01b8d2f5ea089c9e30f** (2026-10-07). New worktree `lcm-billing-ui-integrated`, branch `feat/lcm-billing-ui-integrated`, in the approved OpenCode temp directory. Web-only commits `496fdf3` and `dc39c6c` were cherry-picked as `3da1528` and `d63f471`. Original frontend worktree remains historical and unchanged; backend worktree/uncommitted corrections were not inspected.
 
-- Static `/subscription/`, noindex/nofollow; small data-settings and pricing-preview links. Existing read/export/member/workspace flows are unchanged, not paywalled.
-- Existing session storage format and `serverApi.me` bearer identity verification; existing root login entry, no second account flow. Storage/focus/visibility account changes dispose previous requests/controller and clear the private view.
-- Actual forms for quote selection, server amount/period/renewal display, separate initially unchecked versioned consents, hosted card registration, server-confirmed attempts, cancellation request, and refund **review request**.
-- OFF/unregistered/404/failed readiness renders **결제 준비 중**. No activation toggle, synthetic production entitlement, fake history, invented legal policy, or new marketing consent.
-- Synthetic tests exercise ready checkout. This does **not** mean current backend contracts exist, legal/seller/product approvals exist, commercial checkout is ON, or actual provider integration was tested.
+This document replaces the **provisional planner DTO** handoff only on the new integration branch. Sources of truth are this immutable base's `docs/service-billing-provider-contract.md` and `packages/shared/src/serviceBilling.ts`. No API/shared/Prisma/root-lock edits, merchant credentials, operational parameters, provider/customer calls, signup/mail, production DB migration, push or deployment. Generated Prisma/node_modules/build files are ignored local artifacts only.
 
-## Expected HTTP (must align with frozen backend contract)
+## Integrated contract
 
-Client base is the existing `getServerApiBaseUrl()` / `NEXT_PUBLIC_API_BASE_URL`, with `/service-billing` appended. Deployment's actual service API base remains an integration check; no stale domain default was added. Auth uses the existing access `token`, never the refresh token. Responses are expected directly, **not wrapped**.
+`billing/types.ts` aliases the authoritative shared DTOs; response parsing uses exported **strict shared Zod schemas** for readiness, quote, attempt, subscription, instrument snapshots and refund responses. Preparation and confirmation have no exported complete shared response schemas at this base, so the HTTP boundary adds minimal strict runtime checks for the documented shape; confirmation's status uses the shared enum. Unknown JSON/status/fields fail closed and errors are sanitized. Generic invalid responses also clear previous subscription evidence; 401/403 clear all private views.
 
-| Endpoint | Request / response |
+All HTTP routes are joined to existing `getServerApiBaseUrl()` with `/service-billing`. Existing bearer access token is used, never refresh token. No duplicate auth/signup flow. Requests are no-store, abort on account disposal and time out at 15s, without automatic POST retry. `/me` recovery from `dc39c6c` remains: successful identity cache, separate unavailable/refused state, single-flight focus/visibility retry with 5s/10s/20s backoff and three automatic failed attempts; manual retry remains throttled. Account/token changes invalidate late responses. Retry and checkout buttons retain focus while pending.
+
+| Route | Frontend behavior |
 | --- | --- |
-| GET `/readiness` | public `Readiness` |
-| GET `/subscription` | authenticated `Subscription` |
-| POST `/quotes` | `{planId}` → `Quote` |
-| POST `/instruments/prepare` | `{quoteId}` → `{instrumentId,sdkRequest}` |
-| POST `/instruments/:id/confirm` | `{billingKey}` → JSON acknowledgement |
-| POST `/charges` | quoteId, instrumentId, same idempotencyKey, versioned accepted consent → attempt with attemptId |
-| GET `/attempts/:id` | owned `Attempt`; sole attempt-state display evidence |
-| POST `/subscription/cancel` | `{atPeriodEnd:true}` → `Subscription` |
-| POST `/attempts/:id/refund-requests` | `{idempotencyKey,reasonCode:'CUSTOMER_REQUEST'}` → `{requestId,status:'requested'|'pending'}` |
+| GET readiness | Parse actual mode, capabilities, approvedVersions/material/status, catalog and public SDK configuration |
+| GET subscription | Actual `free|idle|active|cancel_at_period_end`, cancellation `none|pending|verified`, premiumScope `provisional|account-subscription-v1` |
+| POST quotes | Send only planId; exact server total/currency/period/TTL and all five version/material snapshots checked |
+| POST instruments/prepare | Send only quoteId; server-owned issue/customer/instrument binding |
+| POST instruments/:id/confirm | Ephemeral billingKey; returned same instrument and verified status required |
+| POST charges | Original quoteId/instrumentId/UUID and billing+autoRenew versions, accepted:true; no browser amount/policy/feature override |
+| GET attempts/:id | Owned attempt only; exact `created|dispatch_unknown|paid|failed|manual_review|canceled_before_dispatch|refunded`, reviewRequired and paidPeriod |
+| GET attempts/by-idempotency/:key | Owned original UUID lookup only; lost response can now reconcile without returned attemptId |
+| GET instruments/:id; POST instruments/:id/revoke `{}` | Registration ambiguity status/revocation, distinct from contract cancellation/refund |
+| POST subscription/cancel `{atPeriodEnd:true}` | Renewal stop vs provider cancellation pending/verified kept separate |
+| POST attempts/:id/refund-requests | Same refund UUID, reasonCode other; server requestAmount/KRW and exact shared status displayed, never execute a refund |
 
-Exact provisional DTOs: `app/subscription/billing/types.ts`. Attempt statuses are **lowercase `pending|paid|failed`**, mode `mock|sandbox|live`, currency KRW, tax currently supported only `inclusive`. These are assumptions, not assertions about the parallel backend. All non-2xx responses are sanitized; 401/403 clear private display state. HTTP requests time out after 15 seconds, stop on disposal, use no-store and no automatic retries.
+## Actual readiness, quote and consent gates
 
-### Additional readiness/quote proof REQUIRED (missing = blocked)
+Real sandbox/live requires checkoutEnabled, issueInstrument+charge+renew, no blocking codes, inclusive tax, approvalStatus **approved**, nonempty approvedMaterial plaintext for all five fields, public storeId/channelId/**channelKey**, and consentVersions equal approvedVersions billing/autoRenew. These are protected server manifest evidence, not frontend approval switches. No invented `approvals` booleans, material versions, subscription state normalization, or client premium scope switch remains.
 
-`checkoutEnabled`, empty blockingCodes, distinct issueInstrument/charge/renew capabilities, approved VAT treatment, consentVersions and catalogVersion must agree. Explicit `approvals.{merchant,commerce,legal,featureScope}` must all be true. Real SDK mode additionally needs public `sdkConfig.{storeId,channelId}`. Mock checkout additionally requires an injected `synthetic:true` SDK; production adapter never qualifies.
+Quote has **no mode, nextChargeAt, nextChargeAmount, or separate per-material version objects**. It must match readiness catalog, exact fixed server price/period/KRW, future expiry, consentVersions, all **featureScope/policy/seller/billing/autoRenew** approvedVersions, and every material plaintext value. Refreshed readiness before issuing detects changes and clears the quote and both consents. Expiry also requires explicit new quote and fresh consent. Approved material is rendered through React text nodes, never HTML; bounded by shared schemas. Declining consent leaves every existing free feature available. Marketing settings are untouched.
 
-Quote must bind quoteId, planId, catalogVersion, server price/currency/period, future expiresAt, mode, **featureScopeVersion**, **policyVersion**, nextChargeAt/nextChargeAmount, and approved display material:
+Server subscription nextChargeAt is displayed only when available. The frozen quote has no authoritative pre-purchase period start/end/next charge timestamp; the UI says server verification is needed rather than inventing dates or browser-calculated renewal guarantees. **Release/product review must decide whether further immutable pre-purchase dates/renewal disclosures are needed in the quote contract.** Do not solve this by copying internal drafts into commercial policy.
 
-- featureScope `{version,text}` matching featureScopeVersion;
-- billingConsent / autoRenewConsent `{version,text}` matching readiness consent versions;
-- sellerDisclosure `{version,text}`;
-- policyDisclosure `{version,text}` matching policyVersion.
+Paid access display requires the strict subscription schema, known active/cancel_at_period_end status, paired contract/plan IDs, approved account-subscription-v1 scope, and future paidThrough. It additionally requires LIVE readiness approved status. Mock/sandbox responses never display LIVE paid access, even if inconsistent. Owned attempt reviewRequired blocks fresh checkout and refund requests; after lookup, it also suppresses the displayed paid state. SDK success and charge POST responses do not grant access.
 
-Only server-approved material is rendered as checkout terms. Internal proposal documents are **not** embedded or published as enacted policy. No undefined Pro benefits are sold. A mismatched/expired quote or refreshed readiness change clears both consents; a new quote is an explicit action. Server must independently enforce immutable quote scope/amount/versions and ownership; client comparisons are UX protection, not a security boundary.
+### Explicit local mock, not commercial approval
 
-### Cancellation proof is deliberately stricter than an ACK
+`browserBillingSdk(hostname)` supports mock only on localhost/127.0.0.1/IPv6 loopback. Mock readiness must have mock_draft, null material/config and only the documented MOCK_ONLY/product/legal blocking codes. The mock adapter returns `mock_${serverIssueId}` to the **mock server** without loading a script or calling a provider. No frontend NODE_ENV override or production activation toggle exists; the server separately prohibits production mock activation.
 
-Request, renewalStopped, and providerCancellationStatus are separately displayed. Confirmed wording requires **renewalStopped=true**, **providerCancellationStatus='confirmed'**, plus optional server `cancellationProof.{allChargePathsStopped,inFlightResolved}=true`. The backend must define/prove dispatch suppression, retries, provider schedules, and in-flight treatment before mapping these fields. `not_applicable` is **not** mapped to canceled. No “다음 결제 없음” promise is used. Checkout OFF does not itself block legitimate cancellation/refund capabilities; production mock mode cannot dispatch these mutations through the real adapter.
+Visible wording is **모의 결제 · 실제 청구 없음**. Mock confirmation controls explicitly say flow checks, not real purchase/renewal consent. No legal/seller draft is represented as approved policy. Mock button explicitly says simulated registration/charge; no card field is collected or transmitted. Real-mode material is displayed only from approved immutable server quote snapshots.
 
-## Recovery and integration gaps — do not remove guards to “make it work”
+## Recovery and management semantics
 
-Account-scoped **sessionStorage** intent is persisted before any instrument/charge side effect: quoteId, one UUID idempotencyKey, phase, instrumentId/attemptId if known, and one refund request UUID if used. No provider key/token/card data is persisted in this new storage, URL, logs, or messages. Existing auth storage is reused unchanged. Storage failure blocks checkout.
+Account-scoped sessionStorage contains only original quoteId/instrumentId, idempotency UUID, progress phase, createdAt, same **nonsecret charge payload** and returned attemptId when known; refund UUID is similarly reused. No billing key, card information, token, amount or customer finance data is added to recovery storage, logs, URLs or messages. Existing auth storage remains unchanged. Storage failure/corrupt intent blocks checkout.
 
-- A lost charge response with unknown attemptId **cannot** be reconciled using the current assumed endpoints. New quote/instrument/charge requests stay blocked; never replay with a new key. **Needed:** owned lookup by original idempotencyKey, or an equivalent latest unresolved intent/attempt endpoint keyed by account+quote. Integration must expose secure reconciliation and an explicit server-safe terminal resolution.
-- SDK cancellation, issue/confirm ambiguity, and quote expiry after registration also keep the intent blocked. **Needed:** owned instrument status/reconciliation and safe cancellation/abandon flow before permitting reissuance. No blind duplicate instrument creation.
-- With known attemptId, initial owned GET plus at most three user-requested checks; no background interval or infinite polling. Charge response/SDK success do not grant entitlement. Mock/sandbox always hide live paid access, even with inconsistent DTOs.
-- A successful attempt is retained in the session for management/recovery. Failed terminal attempts currently do not offer a fresh checkout reset. This is intentionally conservative until server reconciliation/abandon contracts are frozen.
-- Session-only intent cannot guarantee recovery after sessionStorage deletion, browser closure, or another tab/device. Server uniqueness and an owned unresolved-operation lookup must prevent duplicates across those cases. No client storage workaround substitutes for that invariant.
-- No historical list API was assumed. Refund CTA refers only to the owned attempt read in this browser session, with the amount from owned GET. A review request never means refund approved/completed; repeated request uses its same UUID.
-- Backend needs response alignment/validators and authoritative shared DTO import replacement before integrated checkout can be called complete. This frontend does not inspect or edit the backend worktree.
+- Before prepare and charge, persist intent. On lost charge response, reload/check uses original UUID GET by-idempotency. **404 is not proof of no dispatch**: same intent and payload stay blocked. No blind re-POST, fresh key, new instrument, or automatic redispatch.
+- Initial owned lookup plus up to three explicit checks; no interval/background polling. Created/dispatch_unknown/manual_review never become success; known paid requires server paidAt and an ordered paidPeriod. No client timestamps grant entitlement.
+- Registration cancellation/confirmation ambiguity can inspect/revoke the owned instrument. Empty/unknown provider key lookup remains manual review server-side. Revoked status never clears an uncertain original charge. Confirmed paid/refunded sessions use contract management rather than the separate registration cleanup control.
+- A terminal attempt stays visible; this UI **does not clear/restart checkout**, even after failed/refunded/revoked evidence. Supporting a new purchase requires server lifecycle/initial-cycle eligibility decisions and explicit safe resolution. This conservative limitation avoids incorrect retry of an already-dispatched attempt.
+- SessionStorage cannot guarantee recovery across deletion/browser closure/another device. Server uniqueness and owned lookup remain mandatory; no local marker substitutes for server idempotency. A future owned unresolved-operation/history endpoint would improve cross-device recovery; none is fabricated here.
+- Verified cancellation means actual renewalStopped plus actual providerCancellationStatus verified. This follows the frozen backend's one internal renewal worker and verified provider key deletion semantics; no fabricated remote schedule mapping or `not_applicable` waiver. UI does not promise “다음 결제 없음”, automatically refund, or remove remaining paid/free access.
+- Refund responses use actual requested/dispatch_unknown/verified/rejected/manual_review enums. Requested is explicitly a review request, not refund completion. Verified status and amount appear only from owned server response. No amount input, fake prorating, operator execution API, or browser refund-worker activation.
+- Attempt DTO has no historical amount or quote binding display fields. No amount/history is invented from current catalog. Refund amount is displayed only after the server computes the request; a richer owned receipt/history/pre-request estimate is a future backend UX contract, not falsely claimed implemented.
 
-## Official SDK verification and remaining security/platform work
+## SDK provenance and remaining platform release gates
 
-Verified 2026-10-07 official docs:
+Official docs verified 2026-10-07:
+https://developers.portone.io/sdk/ko/v2-sdk/readme
+https://developers.portone.io/sdk/ko/v2-sdk/billing-key-request
 
-- https://developers.portone.io/sdk/ko/v2-sdk/readme — official `<script src="https://cdn.portone.io/v2/browser-sdk.js">`, global `window.PortOne`.
-- https://developers.portone.io/sdk/ko/v2-sdk/billing-key-request — `requestIssueBillingKey`, CARD, **channelKey** (not channelId), issueId, customer.customerId.
+Real adapter lazily loads only hardcoded `https://cdn.portone.io/v2/browser-sdk.js` and calls actual `window.PortOne.requestIssueBillingKey`. Whitelisted browser parameters are storeId/**channelKey**/issueId/CARD and `customer.customerId` mapped from server's opaque customer.id. Server-only channelId is checked against readiness but is **not** passed as channelKey. No arbitrary script/redirect URLs, PAN/CVC form, placeholder noop integration, or dependency/root lock change.
 
-`sdk.ts` lazily loads only this hardcoded official V2 CDN URL after an explicit pay click, approved readiness refresh, exact quote/consent checks, and server instrument preparation. Whitelisted server-bound public store/channel/issue/customer IDs are passed. No arbitrary script/redirect URL from readiness, PAN/CVC form, dependency addition, or noop “real SDK” shim.
+Official V2 CDN is rolling, not content-pinned. Actual merchant/test/live config, PG customer requirements, mobile redirect handling, popup/frame origins, deployed Cloudflare CSP and integrity strategy still require independent platform/security verification. Redirect callbacks exposing billing keys in URLs are unsupported. No real SDK or provider E2E was run, and readiness manifest/merchant/legal/seller/paid-benefit/tax approvals remain actual launch gates.
 
-The V2 CDN URL is official but rolling, not content-pinned. **CSP/Cloudflare deployed headers, integrity/version strategy, PG popup/frame origins, provider eligibility, hosted form customer requirements, mobile redirect behavior, and actual sandbox/live issuance/confirmation have not been validated.** Redirect callbacks carrying keys in URLs are unsupported here; provider/mobile integration must be designed and verified before readiness can honestly be enabled. Public config must never contain private provider API credentials. No runtime/provider settings were changed.
+## Implementer verification, not independent approval
 
-## Verification evidence
-
-- Frozen-lock install with ignore-scripts; root lock unchanged. Local shared build used existing 7031 source only.
-- Web Vitest: **29 files / 312 tests passed**, including **33 new subscription tests**. Web `tsc --noEmit` passed.
-- Web static production build passed, `/subscription` prerendered; no personal JSON-LD or sitemap entry added. Build without API env is safe/off.
-- `node apps/web/tests/subscription-browser.mjs` passed against local Next dev (port 3199), which was then stopped. All auth/billing/SDK routes are intercepted synthetic fixtures; all external network requests blocked. Covered 404/OFF/no SDK, 360px layout, keyboard/async focus retention, separate consent, duplicate charge protection, owned result vs sandbox entitlement, no card fields/key storage, refund request copy, and account logout privacy.
-- Initial browser runs exposed a **test setup** hostname/HMR mismatch and then used localhost + fixture CORS; no production config workaround was applied.
-- No independent reviewer was invoked by this subagent (no-subdelegate instruction). Main must arrange independent review and frozen backend integration; no self-review PASS, provider E2E, deployment, commercial activation, or real customer/business outcome is claimed.
-
-## Read-only review follow-up (parent 496fdf3)
-
-Two P2 findings addressed without changing API/shared/lock/provider configuration:
-
-1. `subscriptionValidation.ts` now admits only explicit provisional lowercase states `draft|pending|active|payment_failed|ending|expired|closed`, plus legacy `free` or null **only for a no-contract/no-plan/free-access response**. No unknown/uppercase normalization. Required field types, paired contract/plan IDs, boolean true existingFreeAccess, known provider status, canonical UTC ISO dates (including calendar rollover checks), optional currency/environment/scope/proof shapes are validated. PaidAccess requires an active/ending contracted subscription with paidThrough strictly in the future; a nonnull nextChargeAt must not precede now or paidThrough. Historical inactive periods remain valid with paidAccess=false. Unknown/incomplete data clears the subscription view, displays unavailable, and cannot enable checkout. Mock/sandbox valid responses still never display live paid access.
-
-   Optional `premiumScope` provisionally has `{version:string,features:string[]}`; optional `currency='KRW'` and `mode` must match readiness. These optional fields are NOT claims about the final backend. Current provider allowlist is `unconfirmed|requested|pending|confirmed|failed|not_applicable`; the main integration must explicitly map actual frozen enum values, not lowercase arbitrary strings. Final timestamp ordering/provider-local cancellation semantics likewise require backend alignment. No version/approval checkbox is fabricated, no benefits are applied, and existing free flows remain unchanged.
-
-2. `SessionVerification` caches only a successful `/me` identity. Network/timeout/5xx failures produce **unavailable**, not a permanent fabricated logout. Focus/visibility retry is single-flight with 5s/10s/20s exponential minimum intervals (60s cap), at most three automatic failed attempts per unchanged identity, and no timer-driven polling. An explicit retry action obeys the same backoff. 401/403 or an identity mismatch stays refused until token/account changes; logout/account/token change aborts and invalidates old requests. Successful validation suppresses further event-storm requests. Verification is bounded at 15 seconds even if the transport ignores abort. The retry button stays mounted during/loading/after success to retain keyboard focus; messages never include token/key/provider error details.
-
-Follow-up verification: **31 files / 348 Vitest tests passed** (36 additional tests above the initial 312), `tsc --noEmit` passed, and static build passed with explicit `NEXT_PUBLIC_API_BASE_URL=https://api.gamja.top/living-cost-manager/v1` and telemetry disabled. The build performs no billing/provider requests. The production-origin compiled static output is served **locally** for browser verification, with that exact API origin fully intercepted/fulfilled by synthetic fixtures BEFORE any external-network continuation; every other external request is aborted and the official SDK URL is fulfilled by a synthetic stub, never fetched. Real 15s held-timeout recovery, 503 recovery, single bounded same-token focus retry, verified-cache event storms, unknown live subscription rejection, and retained retry/checkout focus are exercised. Existing OFF/404/mobile/consent/uncertain-charge/refund/logout coverage remains. No production data, live activation, provider integration, push, or deployment is implied. The main independent reviewer must confirm these fixes and final DTO integration.
-
-Static browser command (after the explicit-origin build): serve `apps/web/out` locally on port 3199, then `LCM_BROWSER_URL=http://localhost:3199 LCM_FIXTURE_API_BASE=https://api.gamja.top/living-cost-manager/v1 node apps/web/tests/subscription-browser.mjs`. Production origins are fixture interception selectors only, not allowed outbound requests.
+- Frozen-lock install + existing shared build; root lock/shared source unchanged. Generated Prisma client uses this immutable base's schema.
+- **32 test files / 359 tests passed**, including opt-in actual frozen API integration; TypeScript and static production build passed with explicit `NEXT_PUBLIC_API_BASE_URL=https://api.gamja.top/living-cost-manager/v1`, telemetry disabled. No server-side billing request is made by static build.
+- New actual API test (`subscriptionLocalApi.test.ts`) uses Fastify **app.inject**, real shared schemas/API/auth/Prisma service and an explicitly injected in-memory mock provider. It signs only a newly created synthetic test user in its isolated DB; no signup/email/provider network. Real generated quote/prepare/confirm/charge + response loss + same UUID lookup + request-only refund + cancellation pass. Provider dispatchCount remains one and LIVE paidAccess stays false. The raw key/JWT never reaches intent storage.
+- Dedicated ephemeral postgres:16-alpine container `lcm-ui-frozen-test`, loopback **55443**, fresh `lcm_billing_test` synthetic data only. All nine already-frozen migrations applied there; no migration was edited or applied elsewhere. No backend's existing validation DB was touched. Container is stopped/removed after validation.
+- Opt-in command: `LCM_WEB_LOCAL_BILLING_TEST=true pnpm --filter @living-cost-manager/web test`. Default tests skip only this isolated-DB case. Its DB URL is hardcoded to the dedicated synthetic loopback target, never inherited from runtime DATABASE_URL; ephemeral fixture signing/encryption material is generated in process and not operational credentials.
+- Static browser tests serve only local output; exact API origin and official SDK URL are intercepted/fulfilled locally before any external continuation, all other external requests aborted. Passed frozen DTO alignment, OFF/404, unknown LIVE status, 503/real 15s timeout auth recovery, event storms, 360px layout, keyboard/async focus, separate consent, duplicate prevention, sandbox entitlement suppression, request-only refund, logout privacy, and explicit local mock checkout with **no SDK load** plus lost-response UUID lookup/no redispatch.
+- Material escaping, all five version/material mismatch gates, unknown/strict schemas, uncertainty/manual review, SDK cancellation/failure, storage denial, account disposal and refund/cancel capabilities covered by unit tests.
+- Independent reviewer/security and final backend runtime P2 corrections remain main-session responsibilities. This branch used immutable 1fecf30, not uncommitted backend fixes. No self-review PASS, production deployment, LIVE activation, actual provider approval, real charge/refund or business outcome is claimed.

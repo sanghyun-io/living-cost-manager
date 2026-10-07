@@ -1,5 +1,20 @@
 import { getServerApiBaseUrl } from "../../lib/serverApi";
-import type { BillingApi } from "./types";
+import type { BillingApi, Instrument } from "./types";
+import { serviceBillingReadinessResponseSchema, serviceBillingQuoteResponseSchema, serviceBillingAttemptResponseSchema,
+  serviceBillingSubscriptionResponseSchema, serviceBillingInstrumentResponseSchema, serviceBillingRefundResponseSchema,
+  serviceBillingInstrumentStatusSchema } from "@living-cost-manager/shared";
+
+function prepared(value: unknown): Instrument {
+  const p = value as Instrument;
+  const id = (v: unknown) => typeof v === "string" && v.length > 0 && v.length <= 128;
+  const keys = (v: unknown, allowed: string[]) => !!v && typeof v === "object" && Object.keys(v).every(k => allowed.includes(k));
+  if (!keys(p, ["instrumentId", "sdkRequest"]) || !id(p.instrumentId) ||
+    !keys(p.sdkRequest, ["storeId", "channelId", "channelKey", "issueId", "customer", "billingKeyMethod"]) ||
+    !id(p.sdkRequest.storeId) || !id(p.sdkRequest.channelId) || !id(p.sdkRequest.issueId) ||
+    (p.sdkRequest.channelKey !== undefined && !id(p.sdkRequest.channelKey)) ||
+    !keys(p.sdkRequest.customer, ["id"]) || !id(p.sdkRequest.customer.id) || p.sdkRequest.billingKeyMethod !== "CARD") throw new Error("Invalid preparation");
+  return p;
+}
 
 export class BillingError extends Error {
   constructor(readonly status: number) { super("결제 정보를 확인하지 못했습니다."); }
@@ -26,14 +41,21 @@ export function createBillingApi(token: string | null, fetchImpl: typeof fetch =
     } finally { clearTimeout(timeout); signal?.removeEventListener("abort", stop); }
   }
   return {
-    readiness: signal => request("/readiness", undefined, signal),
-    subscription: signal => request("/subscription", undefined, signal),
-    quote: (planId, signal) => request("/quotes", { planId }, signal),
-    prepare: (quoteId, signal) => request("/instruments/prepare", { quoteId }, signal),
-    confirm: async (id, billingKey, signal) => { await request(`/instruments/${encodeURIComponent(id)}/confirm`, { billingKey }, signal); },
-    charge: (input, signal) => request("/charges", input, signal),
-    attempt: (id, signal) => request(`/attempts/${encodeURIComponent(id)}`, undefined, signal),
-    cancel: signal => request("/subscription/cancel", { atPeriodEnd: true }, signal),
-    refund: (id, input, signal) => request(`/attempts/${encodeURIComponent(id)}/refund-requests`, input, signal)
+    readiness: signal => request("/readiness", undefined, signal).then(v => serviceBillingReadinessResponseSchema.parse(v)),
+    subscription: signal => request("/subscription", undefined, signal).then(v => serviceBillingSubscriptionResponseSchema.parse(v)),
+    quote: (planId, signal) => request("/quotes", { planId }, signal).then(v => serviceBillingQuoteResponseSchema.parse(v)),
+    prepare: (quoteId, signal) => request("/instruments/prepare", { quoteId }, signal).then(prepared),
+    confirm: async (id, billingKey, signal) => {
+      const v = await request<{ instrumentId: string; status: string }>(`/instruments/${encodeURIComponent(id)}/confirm`, { billingKey }, signal);
+      if (!v || Object.keys(v).some(k => !["instrumentId", "status"].includes(k)) || v.instrumentId !== id ||
+        serviceBillingInstrumentStatusSchema.parse(v.status) !== "verified") throw new Error("Confirmation unavailable");
+    },
+    charge: (input, signal) => request("/charges", input, signal).then(v => serviceBillingAttemptResponseSchema.parse(v)),
+    attempt: (id, signal) => request(`/attempts/${encodeURIComponent(id)}`, undefined, signal).then(v => serviceBillingAttemptResponseSchema.parse(v)),
+    byIdempotency: (key, signal) => request(`/attempts/by-idempotency/${encodeURIComponent(key)}`, undefined, signal).then(v => serviceBillingAttemptResponseSchema.parse(v)),
+    instrument: (id, signal) => request(`/instruments/${encodeURIComponent(id)}`, undefined, signal).then(v => serviceBillingInstrumentResponseSchema.parse(v)),
+    revoke: (id, signal) => request(`/instruments/${encodeURIComponent(id)}/revoke`, {}, signal).then(v => serviceBillingInstrumentResponseSchema.parse(v)),
+    cancel: signal => request("/subscription/cancel", { atPeriodEnd: true }, signal).then(v => serviceBillingSubscriptionResponseSchema.parse(v)),
+    refund: (id, input, signal) => request(`/attempts/${encodeURIComponent(id)}/refund-requests`, input, signal).then(v => serviceBillingRefundResponseSchema.parse(v))
   };
 }

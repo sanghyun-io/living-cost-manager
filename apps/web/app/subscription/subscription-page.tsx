@@ -2,7 +2,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createBillingApi } from "./billing/api";
 import { BillingController, renewalConfirmed } from "./billing/controller";
-import { portOneSdk } from "./billing/sdk";
+import { browserBillingSdk } from "./billing/sdk";
 import { useBillingSession } from "./billing/useBillingSession";
 import styles from "./subscription.module.css";
 
@@ -20,7 +20,7 @@ export function SubscriptionPage() {
     let storage: Pick<Storage, "getItem" | "setItem">;
     try { storage = window.sessionStorage; }
     catch { storage = { getItem: () => { throw new Error("storage unavailable"); }, setItem: () => { throw new Error("storage unavailable"); } }; }
-    const next = new BillingController(api, portOneSdk, session?.user.id ?? null, storage);
+    const next = new BillingController(api, browserBillingSdk(window.location.hostname), session?.user.id ?? null, storage);
     setController(next);
     void next.load(!!session);
     return () => next.dispose();
@@ -73,26 +73,28 @@ export function BillingPanel({ controller }: { controller: BillingController }) 
         <button type="button" {...button(!controller.canQuote())} onClick={() => { if (controller.canQuote()) void controller.quote("annual"); }}>연간 견적 확인</button>
       </div>
       {q && <>
-        <dl><dt>이번 결제 총액 (부가세 포함)</dt><dd>{money(q.totalAmount)}</dd><dt>이용 기간</dt><dd>{q.periodMonths}개월</dd>
-          <dt>다음 청구 예정일</dt><dd>{date(q.nextChargeAt)}</dd><dt>다음 청구액</dt><dd>{money(q.nextChargeAmount)}</dd><dt>견적 유효 시간</dt><dd>{date(q.expiresAt)}</dd></dl>
-        <h3>유료 제공 범위</h3><p className={styles.material}>{q.featureScope.text}</p>
-        <h3>판매자 안내</h3><p className={styles.material}>{q.sellerDisclosure.text}</p>
-        <h3>이용·철회·환불 조건</h3><p className={styles.material}>{q.policyDisclosure.text}</p>
-        <label className={styles.check}><input type="checkbox" checked={s.billingConsent} disabled={s.busy || !!s.intent} onChange={e => controller.consent("billing", e.target.checked)} /><span>{q.billingConsent.text} (버전 {q.billingConsent.version})</span></label>
-        <label className={styles.check}><input type="checkbox" checked={s.renewalConsent} disabled={s.busy || !!s.intent} onChange={e => controller.consent("renewal", e.target.checked)} /><span>{q.autoRenewConsent.text} (버전 {q.autoRenewConsent.version})</span></label>
-        <p>동의하지 않아도 기존 무료 기능은 이용할 수 있습니다. 마케팅 동의와 별개입니다. 카드 정보는 결제 제공자의 등록 창에서 입력합니다.</p>
+        <dl><dt>이번 {s.readiness?.mode === "mock" ? "모의 " : ""}결제 총액 {s.readiness?.taxTreatment === "inclusive" ? "(부가세 포함)" : "(과세 방식 미확정)"}</dt><dd>{money(q.totalAmount)}</dd><dt>이용 기간</dt><dd>{q.periodMonths}개월</dd>
+          <dt>다음 청구 예정일</dt><dd>{date(subscription?.nextChargeAt ?? null)} · 서버 검증 후 확인</dd><dt>견적 유효 시간</dt><dd>{date(q.expiresAt)}</dd></dl>
+        {q.approvedMaterial ? <><h3>유료 제공 범위</h3><p className={styles.material}>{q.approvedMaterial.features}</p>
+          <h3>판매자 안내</h3><p className={styles.material}>{q.approvedMaterial.seller}</p>
+          <h3>이용·철회·환불 조건</h3><p className={styles.material}>{q.approvedMaterial.policy}</p></> : <p>로컬 모의 흐름입니다. 미승인 초안 버전만 사용하며 실제 판매 조건·약관·자동 갱신 동의가 아닙니다.</p>}
+        <label className={styles.check}><input type="checkbox" checked={s.billingConsent} disabled={s.busy || !!s.intent} onChange={e => controller.consent("billing", e.target.checked)} /><span>{q.approvedMaterial?.billing ?? "모의 결제 흐름 확인 (실제 구매 동의 아님)"} (버전 {q.consentVersions.billing})</span></label>
+        <label className={styles.check}><input type="checkbox" checked={s.renewalConsent} disabled={s.busy || !!s.intent} onChange={e => controller.consent("renewal", e.target.checked)} /><span>{q.approvedMaterial?.autoRenew ?? "모의 자동 갱신 흐름 확인 (실제 갱신 동의 아님)"} (버전 {q.consentVersions.autoRenew})</span></label>
+        <p>동의하지 않아도 기존 무료 기능은 이용할 수 있습니다. 마케팅 동의와 별개입니다. {s.readiness?.mode === "mock" ? "로컬 모의 수단만 확인합니다. 카드 정보는 입력하거나 전송하지 않습니다." : "카드 정보는 결제 제공자의 등록 창에서 입력합니다."}</p>
       </>}
-      <p><button type="button" {...button(!controller.canPay())} onClick={() => void controller.pay()}>{s.busy ? "처리 중…" : q ? `${money(q.totalAmount)} · 카드 등록 후 청구 요청` : "카드 등록·청구 요청 (견적 확인 후 이용)"}</button></p>
+      <p><button type="button" {...button(!controller.canPay())} onClick={() => void controller.pay()}>{s.busy ? "처리 중…" : q ? `${money(q.totalAmount)} · ${s.readiness?.mode === "mock" ? "모의 등록·청구 흐름 실행 (실제 청구 없음)" : "카드 등록 후 청구 요청"}` : "카드 등록·청구 요청 (견적 확인 후 이용)"}</button></p>
     </section>
     {!controller.readinessApproved() && <PriceProposal />}
     {s.intent && <section className={styles.section} aria-labelledby="attempt-title">
       <h2 id="attempt-title">이 화면에서 시작한 결제</h2>
       <p>전체 결제 내역이 아닙니다. 브라우저 결제창 완료만으로 결제·이용 권한이 확정되지 않습니다.</p>
-      {s.attempt && <p>{s.attempt.status === "paid" ? "서버 결제 확인" : s.attempt.status === "failed" ? "서버 결제 실패 확인" : "결과 확인 대기"} · {money(s.attempt.totalAmount)}</p>}
-      <button type="button" {...button(s.busy || s.checks >= 3 || !s.intent.attemptId)} onClick={() => { if (!s.busy) void controller.check(); }}>기존 결제 결과 확인 ({s.checks}/3)</button>
-      {!s.intent.attemptId && <p>접수 결과가 불확실합니다. 새 청구는 차단됩니다. 서버의 기존 요청 조회 기능 연결이 필요합니다.</p>}
+      {s.attempt && <p>{s.attempt.status === "paid" ? "서버 결제 확인" : s.attempt.status === "failed" ? "서버 결제 실패 확인" : s.attempt.status === "refunded" ? "서버 환불 검증 상태" : s.attempt.status === "canceled_before_dispatch" ? "청구 전 취소 확인" : "결과 확인 대기"}{s.attempt.reviewRequired ? " · 운영자 확인 필요" : ""}</p>}
+      <button type="button" {...button(s.busy || s.checks >= 3)} onClick={() => { if (!s.busy) void controller.check(); }}>기존 결제 결과 확인 ({s.checks}/3)</button>
+      {!s.intent.attemptId && <p>원래 요청의 동일 확인 정보로만 조회합니다. 미조회·404여도 새 청구는 차단됩니다.</p>}
+      {s.intent.instrumentId && !["paid", "refunded"].includes(s.attempt?.status ?? "") && <><p>등록 수단: {s.instrument?.status === "revoked" && !s.instrument.requiresManualReview ? "해제 검증됨" : s.instrument?.requiresManualReview ? "운영자 확인 필요" : "확인 대기"} · 수단 해제는 기존 청구 취소나 환불 완료가 아닙니다.</p><button type="button" {...button(s.busy || !s.readiness?.capabilities.cancel || s.instrument?.status === "revoked")} onClick={() => { if (!s.busy) void controller.revoke(); }}>등록 수단 해제·상태 확인 요청</button></>}
       {s.checks >= 3 && <p>자동 반복 조회하지 않습니다. 서버 처리 상태를 다시 확인하려면 나중에 이 화면을 다시 열어 주세요.</p>}
-      {s.attempt?.status === "paid" && s.readiness?.capabilities?.refund && <>
+      {s.refund && <p>서버 환불 요청 금액: {money(s.refund.requestAmount)} · {s.refund.status === "verified" ? "검증됨" : s.refund.status === "rejected" ? "거절됨" : "처리 확인 대기"}</p>}
+      {s.attempt?.status === "paid" && !s.attempt.reviewRequired && s.readiness?.capabilities?.refund && <>
         <label className={styles.check}><input type="checkbox" checked={refundConfirm} disabled={s.busy} onChange={e => setRefundConfirm(e.target.checked)} /> 위 결제에 대한 환불 검토를 요청합니다. 환불 확정을 뜻하지 않습니다.</label>
         <button type="button" {...button(s.busy || !refundConfirm)} onClick={() => { if (!s.busy && refundConfirm) void controller.refund(); }}>환불 검토 요청</button>
       </>}

@@ -1,50 +1,22 @@
-// Provisional web-only contract. Replace with frozen shared DTOs at integration.
-export type Mode = "mock" | "sandbox" | "live";
-export type Plan = "monthly" | "annual";
-export type Capability = "issueInstrument" | "charge" | "renew" | "cancel" | "refund";
-export interface Readiness {
-  mode: Mode; checkoutEnabled: boolean; blockingCodes: string[]; catalogVersion: string;
-  currency: "KRW"; taxTreatment: "pending" | "inclusive";
-  catalog: Record<Plan, { totalAmount: number; periodMonths: number }>;
-  consentVersions: { billing: string; autoRenew: string };
-  capabilities: Record<Capability, boolean>;
-  sdkConfig: null | { storeId: string; channelId: string };
-  // Explicit readiness evidence required; missing fields fail closed.
-  approvals: { merchant: boolean; commerce: boolean; legal: boolean; featureScope: boolean };
-}
-export interface ApprovedMaterial {
-  version: string; text: string;
-}
-export interface Quote {
-  quoteId: string; planId: Plan; catalogVersion: string; totalAmount: number;
-  currency: "KRW"; periodMonths: number; expiresAt: string; mode: Mode;
-  featureScopeVersion: string; policyVersion: string;
-  featureScope: ApprovedMaterial; billingConsent: ApprovedMaterial; autoRenewConsent: ApprovedMaterial;
-  // Server-approved display data, not a browser-authored policy.
-  sellerDisclosure: ApprovedMaterial; policyDisclosure: ApprovedMaterial;
-  nextChargeAt: string; nextChargeAmount: number;
-}
-export interface Subscription {
-  contractId: string | null; planId: Plan | null;
-  status: "free" | "draft" | "pending" | "active" | "payment_failed" | "ending" | "expired" | "closed" | null; paidAccess: boolean;
-  paidThrough: string | null; nextChargeAt: string | null; cancelAtPeriodEnd: boolean;
-  renewalStopped: boolean; providerCancellationStatus: string; existingFreeAccess: true;
-  cancellationProof?: { allChargePathsStopped: boolean; inFlightResolved: boolean };
-  currency?: "KRW"; mode?: Mode;
-  premiumScope?: { version: string; features: string[] };
-}
-export interface Attempt {
-  attemptId: string; status: "pending" | "paid" | "failed"; mode: Mode;
-  paidAt: string | null; totalAmount: number; currency: "KRW";
-}
-export interface SdkRequest {
-  storeId: string; channelKey: string; billingKeyMethod: "CARD";
-  issueId: string; customer: { customerId: string };
-}
-export interface Instrument { instrumentId: string; sdkRequest: SdkRequest }
+import type { ServiceBillingReadinessDto, ServiceBillingQuoteDto, ServiceBillingSubscriptionDto,
+  ServiceBillingAttemptDto, ServiceBillingPrepareDto, ServiceBillingMode, ServiceBillingRefundDto } from "@living-cost-manager/shared";
+import type { serviceBillingInstrumentResponseSchema } from "@living-cost-manager/shared";
+export type Readiness = ServiceBillingReadinessDto;
+export type Quote = ServiceBillingQuoteDto;
+export type Subscription = ServiceBillingSubscriptionDto;
+export type Attempt = ServiceBillingAttemptDto;
+export type Instrument = ServiceBillingPrepareDto;
+export type InstrumentSnapshot = ReturnType<typeof serviceBillingInstrumentResponseSchema.parse>;
+export type Mode = ServiceBillingMode;
+export type Plan = Quote["planId"];
+export type Refund = ServiceBillingRefundDto;
+// Official browser shape differs from the server preparation's customer.id.
+export interface SdkRequest { storeId: string; channelKey?: string; issueId: string; customer: { customerId: string }; billingKeyMethod: "CARD" }
+export interface ChargeInput { quoteId: string; instrumentId: string; idempotencyKey: string;
+  consent: { billingVersion: string; autoRenewVersion: string; accepted: true } }
 export interface Intent {
   quoteId: string; idempotencyKey: string; phase: "issuing" | "confirming" | "charging" | "attempt";
-  instrumentId?: string; attemptId?: string; refundIdempotencyKey?: string;
+  createdAt?: string; instrumentId?: string; attemptId?: string; refundIdempotencyKey?: string; chargeInput?: ChargeInput;
 }
 export interface BillingApi {
   readiness(signal?: AbortSignal): Promise<Readiness>;
@@ -52,13 +24,15 @@ export interface BillingApi {
   quote(planId: Plan, signal?: AbortSignal): Promise<Quote>;
   prepare(quoteId: string, signal?: AbortSignal): Promise<Instrument>;
   confirm(instrumentId: string, billingKey: string, signal?: AbortSignal): Promise<void>;
-  charge(input: { quoteId: string; instrumentId: string; idempotencyKey: string;
-    consent: { billingVersion: string; autoRenewVersion: string; accepted: true } }, signal?: AbortSignal): Promise<Attempt>;
+  charge(input: ChargeInput, signal?: AbortSignal): Promise<Attempt>;
   attempt(id: string, signal?: AbortSignal): Promise<Attempt>;
+  byIdempotency(key: string, signal?: AbortSignal): Promise<Attempt>;
+  instrument(id: string, signal?: AbortSignal): Promise<InstrumentSnapshot>;
+  revoke(id: string, signal?: AbortSignal): Promise<InstrumentSnapshot>;
   cancel(signal?: AbortSignal): Promise<Subscription>;
-  refund(id: string, input: { idempotencyKey: string; reasonCode: "CUSTOMER_REQUEST" }, signal?: AbortSignal): Promise<{ requestId: string; status: string }>;
+  refund(id: string, input: { idempotencyKey: string; reasonCode: "changed_mind" | "service_issue" | "other" }, signal?: AbortSignal): Promise<Refund>;
 }
 export interface BillingSdk {
-  readonly synthetic?: boolean;
-  issue(request: SdkRequest): Promise<{ billingKey?: string; code?: string } | undefined>;
+  readonly supportsMock?: boolean;
+  issue(request: SdkRequest, mode: Mode): Promise<{ billingKey?: string; code?: string } | undefined>;
 }

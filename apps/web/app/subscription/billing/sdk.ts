@@ -26,3 +26,15 @@ export const portOneSdk: BillingSdk = {
     return sdk.requestIssueBillingKey(request);
   }
 };
+
+// Explicit local mock adapter. It never loads a script or calls a provider.
+export function browserBillingSdk(hostname: string): BillingSdk {
+  const local = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(hostname);
+  return { supportsMock: local, issue(request, mode) {
+    if (mode === "mock") {
+      if (!local) return Promise.reject(new Error("Mock unavailable"));
+      return Promise.resolve({ billingKey: `mock_${request.issueId}` });
+    }
+    return portOneSdk.issue(request, mode);
+  } };
+}

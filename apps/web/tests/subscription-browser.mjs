@@ -17,18 +17,21 @@ page.on("pageerror", error => failures.push(error.message));
 let enabled = false, missing = false, prepare = 0, charges = 0, sdkLoads = 0;
 let meRequests = 0, meMode = "ok";
 let environment = "sandbox", subscriptionOverride = null;
+let loseChargeResponse = false, lookupRequests = 0;
+const committed = new Map();
 const subscription = { contractId: null, planId: null, status: "free", paidAccess: false, paidThrough: null,
-  nextChargeAt: null, cancelAtPeriodEnd: false, renewalStopped: false, providerCancellationStatus: "unconfirmed", existingFreeAccess: true };
-const readiness = () => ({ mode: environment, checkoutEnabled: enabled, blockingCodes: enabled ? [] : ["COMMERCE_PENDING"], catalogVersion: "browser-fixture",
+  nextChargeAt: null, cancelAtPeriodEnd: false, renewalStopped: false, providerCancellationStatus: "none", premiumScope: "provisional", existingFreeAccess: true };
+const material = { billing: "테스트 결제 조건 확인", autoRenew: "테스트 자동 갱신 확인", features: "Synthetic test scope", seller: "Synthetic seller", policy: "Synthetic policy" };
+const readiness = () => ({ mode: environment, checkoutEnabled: enabled, blockingCodes: environment === "mock" ? ["MOCK_ONLY", "PAID_PRODUCT_APPROVAL_PENDING", "LEGAL_TAX_APPROVAL_PENDING"] : enabled ? [] : ["COMMERCE_PENDING"], catalogVersion: "browser-fixture",
   currency: "KRW", taxTreatment: "inclusive", catalog: { monthly: { totalAmount: 990, periodMonths: 1 }, annual: { totalAmount: 9900, periodMonths: 12 } },
   consentVersions: { billing: "fixture-billing", autoRenew: "fixture-renew" }, capabilities: { issueInstrument: true, charge: true, renew: true, cancel: true, refund: true },
-  sdkConfig: { storeId: "fixture-store", channelId: "fixture-channel" }, approvals: { merchant: true, commerce: true, legal: true, featureScope: true } });
-const quote = { quoteId: "browser-quote", planId: "monthly", catalogVersion: "browser-fixture", totalAmount: 990, currency: "KRW", periodMonths: 1,
-  expiresAt: new Date(Date.now() + 3600000).toISOString(), mode: "sandbox", featureScopeVersion: "fixture-scope", policyVersion: "fixture-policy",
-  featureScope: { version: "fixture-scope", text: "Synthetic test scope" }, billingConsent: { version: "fixture-billing", text: "테스트 결제 조건 확인" },
-  autoRenewConsent: { version: "fixture-renew", text: "테스트 자동 갱신 확인" }, sellerDisclosure: { version: "fixture-seller", text: "Synthetic seller" },
-  policyDisclosure: { version: "fixture-policy", text: "Synthetic policy" }, nextChargeAt: new Date(Date.now() + 2678400000).toISOString(), nextChargeAmount: 990 };
-const attempt = { attemptId: "browser-attempt", status: "paid", mode: "sandbox", paidAt: new Date().toISOString(), totalAmount: 990, currency: "KRW" };
+  sdkConfig: environment === "mock" ? null : { storeId: "fixture-store", channelId: "fixture-channel", channelKey: "fixture-channel-key" },
+  approvedVersions: { featureScope: "fixture-scope", policy: "fixture-policy", seller: "fixture-seller", billing: "fixture-billing", autoRenew: "fixture-renew" },
+  approvedMaterial: environment === "mock" ? null : material, approvalStatus: environment === "mock" ? "mock_draft" : "approved" });
+const quote = () => ({ quoteId: "browser-quote", planId: "monthly", catalogVersion: "browser-fixture", totalAmount: 990, currency: "KRW", periodMonths: 1,
+  expiresAt: new Date(Date.now() + 3600000).toISOString(), consentVersions: readiness().consentVersions, approvedVersions: readiness().approvedVersions, approvedMaterial: readiness().approvedMaterial });
+const attempt = () => ({ attemptId: "browser-attempt", status: "paid", mode: environment, paidAt: new Date().toISOString(), reviewRequired: false,
+  paidPeriod: { startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 2678400000).toISOString() } });
 await context.addInitScript(() => localStorage.setItem("living-cost-manager:server-session:v2", JSON.stringify({ token: "fixture-token", refreshToken: "fixture-refresh", user: { id: "fixture-account" }, workspace: null })));
 await context.route("**/*", async route => {
   const url = new URL(route.request().url());
@@ -57,12 +60,22 @@ await context.route("**/*", async route => {
   else if (missing) { await route.fulfill({ status: 404, headers: cors, body: "not registered" }); return; }
   else if (path.endsWith("/readiness")) body = readiness();
   else if (path.endsWith("/subscription")) body = subscriptionOverride ?? subscription;
-  else if (path.endsWith("/quotes")) { await new Promise(resolve => setTimeout(resolve, 120)); body = quote; }
-  else if (path.endsWith("/instruments/prepare")) { prepare++; body = { instrumentId: "fixture-instrument", sdkRequest: { storeId: "fixture-store", channelKey: "fixture-channel", issueId: "fixture-issue", customer: { customerId: "fixture-opaque" }, billingKeyMethod: "CARD" } }; }
-  else if (path.endsWith("/confirm")) body = { confirmed: true };
-  else if (path.endsWith("/charges")) { charges++; body = attempt; }
-  else if (path.endsWith("/attempts/browser-attempt")) body = attempt;
-  else if (path.endsWith("/refund-requests")) body = { requestId: "fixture-refund", status: "requested" };
+  else if (path.endsWith("/quotes")) { await new Promise(resolve => setTimeout(resolve, 120)); body = quote(); }
+  else if (path.endsWith("/instruments/prepare")) { prepare++; body = { instrumentId: "fixture-instrument", sdkRequest: { storeId: "fixture-store", channelId: "fixture-channel", ...(environment === "mock" ? {} : { channelKey: "fixture-channel-key" }), issueId: "fixture-issue", customer: { id: "fixture-opaque" }, billingKeyMethod: "CARD" } }; }
+  else if (path.endsWith("/confirm")) {
+    if (environment === "mock") assert.equal(route.request().postDataJSON().billingKey, "mock_fixture-issue");
+    body = { instrumentId: "fixture-instrument", status: "verified" };
+  }
+  else if (path.endsWith("/charges")) {
+    charges++; body = attempt(); committed.set(route.request().postDataJSON().idempotencyKey, body);
+    if (loseChargeResponse) { loseChargeResponse = false; await route.abort("failed"); return; }
+  }
+  else if (path.includes("/attempts/by-idempotency/")) {
+    lookupRequests++; body = committed.get(path.split("/").at(-1));
+    if (!body) { await route.fulfill({ status: 404, headers: cors, body: "not yet found" }); return; }
+  }
+  else if (path.endsWith("/attempts/browser-attempt")) body = attempt();
+  else if (path.endsWith("/refund-requests")) body = { requestId: "fixture-refund", status: "requested", requestAmount: 990, currency: "KRW" };
   else { await route.fulfill({ status: 404, body: "fixture route unavailable" }); return; }
   await route.fulfill({ contentType: "application/json", headers: cors, body: JSON.stringify(body) });
 });
@@ -129,8 +142,20 @@ try {
   await page.getByText("구독 조회는 로그인 후", { exact: false }).waitFor();
   assert.equal(await page.getByText("서버 결제 확인", { exact: false }).count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  // Explicit LOCAL mock adapter: no external SDK load; lost response reconciles by original UUID only.
+  await page.evaluate(() => sessionStorage.clear()); environment = "mock"; loseChargeResponse = true;
+  await page.reload(); await page.getByRole("status").filter({ hasText: "금액과 조건" }).waitFor();
+  await page.getByRole("button", { name: "월간 견적 확인" }).click();
+  await page.getByLabel("모의 결제 흐름 확인", { exact: false }).check();
+  await page.getByLabel("모의 자동 갱신 흐름 확인", { exact: false }).check();
+  await page.getByRole("button", { name: /모의 등록·청구 흐름 실행/ }).click();
+  await page.getByRole("status").filter({ hasText: "처리 결과를 확인해야" }).waitFor();
+  const chargeCount = charges;
+  await page.reload(); await page.getByRole("status").filter({ hasText: "모의 결제 결과" }).waitFor();
+  assert.equal(lookupRequests, 1); assert.equal(charges, chargeCount); assert.equal(sdkLoads, 1, "mock never loads external SDK");
+  assert.equal(await page.getByText("확인된 유료 권한 없음").count(), 1);
   assert.deepEqual(failures, []);
-  console.log("PASS: intercepted-only browser unknown-live-subscription rejection, 503/held-timeout recovery, focus retry throttle/cache, 404/OFF, mobile, keyboard/focus, separate consent, duplicate click, synthetic SDK, authoritative result, refund request, logout privacy.");
+  console.log("PASS: frozen DTO browser, local mock no SDK, lost-response same-ID lookup only, unknown-live-subscription rejection, auth recovery, 404/OFF, mobile/focus/consent, duplicate prevention, refund request, logout privacy.");
 } catch (error) {
   console.error("Synthetic page diagnostics:", await page.locator("body").innerText(), failures, requests);
   throw error;
