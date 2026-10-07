@@ -28,14 +28,14 @@ describe("non-test workspace quotas with TRUST_PROXY=off and a shared peer", () 
       const a = await user(); const b = await user();
       const token = app.signTokens(a).accessToken;
       for (let i = 0; i < 20; i++) {
-        expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${token}` }, payload: { name: `Ledger ${i}` } })).statusCode).toBe(201);
+        expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${token}` }, payload: { name: `Ledger ${i}` } })).statusCode).toBe(i === 0 ? 201 : 403);
       }
       const denied = await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${app.signTokens(a).accessToken}`, "x-forwarded-for": "203.0.113.21", "x-user-id": b.id }, payload: { name: "Over quota" } });
       expect(denied.statusCode).toBe(429);
       expect(denied.body).not.toContain(a.id);
       expect(denied.body).not.toContain("workspaces:account:");
       expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${app.signTokens(b).accessToken}` }, payload: { name: "Independent" } })).statusCode).toBe(201);
-      expect(await prisma.workspaceMember.count({ where: { userId: a.id } })).toBe(20);
+      expect(await prisma.workspaceMember.count({ where: { userId: a.id } })).toBe(1);
     } finally { await app.close(); }
   });
   test("aggregate quota is account-local across tokens, despite a shared peer", async () => {
@@ -43,9 +43,9 @@ describe("non-test workspace quotas with TRUST_PROXY=off and a shared peer", () 
     try {
       const a = await user(); const b = await user();
       const first = await ledger(a.id); const second = await ledger(b.id);
-      for (let i = 0; i < 60; i++) expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${app.signTokens(a).accessToken}` }, payload: { workspaceIds: [first.id] } })).statusCode).toBe(200);
+      for (let i = 0; i < 60; i++) expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${app.signTokens(a).accessToken}` }, payload: { workspaceIds: [first.id] } })).statusCode).toBe(403);
       expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${app.signTokens(a).accessToken}`, "x-forwarded-for": "203.0.113.22" }, payload: { workspaceIds: [first.id] } })).statusCode).toBe(429);
-      expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${app.signTokens(b).accessToken}` }, payload: { workspaceIds: [second.id] } })).statusCode).toBe(200);
+      expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${app.signTokens(b).accessToken}` }, payload: { workspaceIds: [second.id] } })).statusCode).toBe(403);
     } finally { await app.close(); }
   });
   test("unverified email and invalid signatures do not poison the verified creation quota", async () => {
@@ -57,7 +57,7 @@ describe("non-test workspace quotas with TRUST_PROXY=off and a shared peer", () 
         expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${token.slice(0, -5)}WRONG` }, payload: { name: "Bad JWT" } })).statusCode).toBe(401);
       }
       await prisma.user.update({ where: { id: a.id }, data: { emailVerifiedAt: new Date() } });
-      for (let i = 0; i < 20; i++) expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${token}` }, payload: { name: "Verified" } })).statusCode).toBe(201);
+      for (let i = 0; i < 20; i++) expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${token}` }, payload: { name: "Verified" } })).statusCode).toBe(i === 0 ? 201 : 403);
       expect((await app.inject({ method: "POST", url: "/workspaces", headers: { authorization: `Bearer ${token}` }, payload: { name: "Limited" } })).statusCode).toBe(429);
     } finally { await app.close(); }
   });
@@ -68,7 +68,7 @@ describe("non-test workspace quotas with TRUST_PROXY=off and a shared peer", () 
       await prisma.user.update({ where: { id: a.id }, data: { tokenVersion: 1 } });
       for (let i = 0; i < 80; i++) expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${i % 2 ? old : "garbage.token.here"}` }, payload: { workspaceIds: [row.id] } })).statusCode).toBe(401);
       const current = app.signTokens({ id: a.id, tokenVersion: 1 }).accessToken;
-      for (let i = 0; i < 60; i++) expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${current}` }, payload: { workspaceIds: [row.id] } })).statusCode).toBe(200);
+      for (let i = 0; i < 60; i++) expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${current}` }, payload: { workspaceIds: [row.id] } })).statusCode).toBe(403);
       expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: { authorization: `Bearer ${current}` }, payload: { workspaceIds: [row.id] } })).statusCode).toBe(429);
     } finally { await app.close(); }
   });

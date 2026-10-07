@@ -37,13 +37,18 @@ export function parseBillingConfiguration(env: Env) {
     if (manifest && (!manifest.workers.reconcile || !manifest.capabilities.cancel)) blockers.push("RECONCILIATION_OR_CANCELLATION_NOT_READY");
   }
   const enabled = blockers.length === 0;
+  // Keep verified, explicitly registered private reconciliation possible for
+  // outstanding attempts. Dark publication disables ALL money/instrument
+  // dispatch capabilities, including CLI renew/refund/cancel paths.
+  const published = env.SERVICE_PAID_FEATURES_PUBLISHED === "true";
+  const dispatchEnabled = enabled && published;
   const approvedVersions = manifest ? { featureScope: manifest.featureScopeVersion, policy: manifest.policyVersion,
     seller: manifest.sellerVersion, billing: manifest.billingVersion, autoRenew: manifest.autoRenewVersion } :
     { featureScope: "feature-draft-v1", policy: "policy-draft-v1", seller: "seller-draft-v1", ...serviceBillingConsentVersions };
   return { manifest, webhookSecrets, enabled, blockers, approvedVersions,
-    capabilities: { issueInstrument: enabled && (mock || !!manifest?.capabilities.issueInstrument),
-      charge: enabled && (mock || !!manifest?.capabilities.charge),
-      renew: enabled && (mock || !!manifest?.capabilities.renew && !!manifest?.workers.renew),
-      cancel: enabled && (mock || !!manifest?.capabilities.cancel),
-      refund: enabled && (mock || !!manifest?.capabilities.refund && !!manifest?.workers.refunds && manifest?.refundPolicy === "full_remaining_manual_v1") } };
+    capabilities: { issueInstrument: dispatchEnabled && (mock || !!manifest?.capabilities.issueInstrument),
+      charge: dispatchEnabled && (mock || !!manifest?.capabilities.charge),
+      renew: dispatchEnabled && (mock || !!manifest?.capabilities.renew && !!manifest?.workers.renew),
+      cancel: dispatchEnabled && (mock || !!manifest?.capabilities.cancel),
+      refund: dispatchEnabled && (mock || !!manifest?.capabilities.refund && !!manifest?.workers.refunds && manifest?.refundPolicy === "full_remaining_manual_v1") } };
 }

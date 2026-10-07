@@ -9,7 +9,9 @@ import { cleanupAuthTestRecords, resolveApiTestDatabaseUrl } from "./test-databa
 const databaseUrl = resolveApiTestDatabaseUrl();
 const prefix = `multiledger-test-${crypto.randomUUID()}-`;
 const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
-const app = await buildApp({ prisma, env: loadEnv({ NODE_ENV: "test", DATABASE_URL: databaseUrl, JWT_SECRET: "multiledger-test-secret-at-least-32-characters" }) });
+// Exercise preserved multi-ledger code with an explicit in-process synthetic
+// entitlement, not the default free-public release or a request/env bypass.
+const app = await buildApp({ prisma, testPaidFeatureAccess: true, env: loadEnv({ NODE_ENV: "test", DATABASE_URL: databaseUrl, JWT_SECRET: "multiledger-test-secret-at-least-32-characters" }) });
 const budget = { monthlyIncome: 3000000, categories: [{ id: "housing", label: "Housing" }], cards: [], fixedCosts: [{
   id: "rent", name: "Rent", categoryId: "housing", paymentMethodId: "cash", paymentOptionId: "",
   amount: 900000, periodMonths: 3, billingDay: 31, isEndOfMonth: false, billingAnchorDate: "2026-01-31",
@@ -96,7 +98,7 @@ describe("multi-ledger workspace API", () => {
       workspaceMember: { findMany: async () => [{ workspaceId: "allowed", role: "owner" }] },
       workspace: { findMany },
     }));
-    await expect(aggregateUserWorkspaces({ $transaction: transaction } as unknown as PrismaClient, "account", { workspaceIds: ["allowed", "revoked"] })).rejects.toThrow("Forbidden");
+    await expect(aggregateUserWorkspaces({ $transaction: transaction } as unknown as PrismaClient, "account", { workspaceIds: ["allowed", "revoked"] }, new Date(), app.paidFeaturePolicy)).rejects.toThrow("Forbidden");
     expect(findMany).not.toHaveBeenCalled();
     expect(transaction.mock.calls[0][1]).toEqual({ isolationLevel: "RepeatableRead" });
   });
@@ -116,11 +118,11 @@ describe("multi-ledger workspace API", () => {
       }
       return rows;
     } } } });
-    const snapshot = await aggregateUserWorkspaces(racing as unknown as PrismaClient, viewer.row.id, { workspaceIds: [id] }, new Date("2026-10-07T00:00:00Z"));
+    const snapshot = await aggregateUserWorkspaces(racing as unknown as PrismaClient, viewer.row.id, { workspaceIds: [id] }, new Date("2026-10-07T00:00:00Z"), app.paidFeaturePolicy);
     expect(mutated).toBe(true);
     expect(snapshot.workspaces[0]).toMatchObject({ role: "viewer", syncVersion: 0, monthlyIncome: 3000000 });
     expect((await prisma.workspace.findUniqueOrThrow({ where: { id } })).syncVersion).toBe(1);
-    await expect(aggregateUserWorkspaces(prisma, viewer.row.id, { workspaceIds: [id] })).rejects.toThrow("Forbidden");
+    await expect(aggregateUserWorkspaces(prisma, viewer.row.id, { workspaceIds: [id] }, new Date(), app.paidFeaturePolicy)).rejects.toThrow("Forbidden");
   });
   test("rename maps an injected Prisma serialization conflict to 409 without changing name", async () => {
     const owner = await user();

@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import argon2 from "argon2";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
+import { serviceBillingRoutes } from "../src/routes/service-billing.js";
 import { loadEnv } from "../src/env.js";
 import { BillingAccountDeleteBlocked, deleteAccount } from "../src/services/account.js";
 import { ServiceBillingService, serviceBillingPeriodBoundary } from "../src/services/service-billing.js";
@@ -21,7 +22,7 @@ let userId: string;
 let otherId: string;
 const clock = () => new Date(now);
 const env = () => loadEnv({ NODE_ENV: "test", DATABASE_URL: databaseUrl, JWT_SECRET: randomBytes(40).toString("base64"),
-  SERVICE_BILLING_MODE: "mock", SERVICE_BILLING_MOCK_ENABLED: "true",
+  SERVICE_PAID_FEATURES_PUBLISHED: "true", SERVICE_BILLING_MODE: "mock", SERVICE_BILLING_MOCK_ENABLED: "true",
   SERVICE_BILLING_ENCRYPTION_KEY: randomBytes(32).toString("base64"), SERVICE_BILLING_KEY_VERSION: "test-v1" });
 beforeEach(async () => {
   // Explicit synthetic dedicated test database only. Never reads runtime .env.
@@ -359,7 +360,13 @@ describe("durable isolated service billing", () => {
     } finally { await app.close(); }
   });
   it("non-test user quota is account-independent and invalid JWTs do not consume it", async () => {
-    const app = await buildApp({ env: { ...env(), NODE_ENV: "development" }, prisma, logger: false });
+    // Install real limiters under development (test allowList would disable
+    // them), then explicitly mount the private mock route fixture in-process.
+    // Normal non-test startup never mounts mock billing. No env/request bypass
+    // is introduced in application code, and no LIVE/network fixture is used.
+    const app = await buildApp({ env: { ...env(), NODE_ENV: "development", SERVICE_PAID_FEATURES_PUBLISHED: "false" }, prisma, logger: false });
+    app.appEnv = env();
+    await app.register(serviceBillingRoutes);
     try {
       const headers = { authorization: `Bearer ${app.signTokens({ id: userId, tokenVersion: 0 }).accessToken}` };
       for (let n = 0; n < 75; n++) {

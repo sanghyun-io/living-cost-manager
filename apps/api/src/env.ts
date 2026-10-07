@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  // Non-secret release switch. Delivery/changes use opskv, not an independent
+  // runtime .env edit. Publication alone never proves a paid entitlement.
+  SERVICE_PAID_FEATURES_PUBLISHED: z.enum(["true", "false"]).default("false"),
   // Declared parameters only; provisioning/delivery must use opskv. No real
   // provider is enabled by these parameters in the phase-one implementation.
   SERVICE_BILLING_MODE: z.enum(["mock", "sandbox", "live"]).optional(),

@@ -26,7 +26,7 @@ beforeEach(async () => {
   now = new Date("2027-01-31T03:00:00.000Z"); // Jan 31 noon KST
   settings = loadEnv({ NODE_ENV: "test", DATABASE_URL: databaseUrl,
     JWT_SECRET: randomBytes(40).toString("base64"), SERVICE_BILLING_MODE: "mock",
-    SERVICE_BILLING_MOCK_ENABLED: "true", SERVICE_BILLING_KEY_VERSION: "independent-test-v1",
+    SERVICE_PAID_FEATURES_PUBLISHED: "true", SERVICE_BILLING_MOCK_ENABLED: "true", SERVICE_BILLING_KEY_VERSION: "independent-test-v1",
     SERVICE_BILLING_ENCRYPTION_KEY: randomBytes(32).toString("base64") });
   provider = new MockServiceBillingProvider(clock);
   service = new ServiceBillingService(prisma, settings, clock, provider);

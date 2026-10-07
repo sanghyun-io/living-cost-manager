@@ -32,7 +32,7 @@ const restored = new PrismaClient({ datasources: { db: { url: restoreUrl.toStrin
 let created = false;
 try {
   const settings = loadEnv({ NODE_ENV: "test", DATABASE_URL: sourceUrl, JWT_SECRET: randomBytes(40).toString("base64"),
-    SERVICE_BILLING_MODE: "mock", SERVICE_BILLING_MOCK_ENABLED: "true", SERVICE_BILLING_ENCRYPTION_KEY: key.toString("base64"), SERVICE_BILLING_KEY_VERSION: "restore-test-v1" });
+    SERVICE_PAID_FEATURES_PUBLISHED: "true", SERVICE_BILLING_MODE: "mock", SERVICE_BILLING_MOCK_ENABLED: "true", SERVICE_BILLING_ENCRYPTION_KEY: key.toString("base64"), SERVICE_BILLING_KEY_VERSION: "restore-test-v1" });
   const service = new ServiceBillingService(prisma, settings);
   const user = await prisma.user.create({ data: { email: `billing-test-${randomUUID()}@example.invalid`, name: "Synthetic restore", passwordHash: "not-login-capable", emailVerifiedAt: new Date() } });
   const q = await service.createQuote(user.id, "monthly");

@@ -24,12 +24,14 @@ import { createEmailProvider, type EmailProvider } from "./services/email.js";
 import { shouldDisableRequestLogging } from "./services/marketing-metrics.js";
 import { isTemplateRequest } from "./services/template-logging.js";
 import { configureWebPush } from "./services/push.js";
+import { PaidFeaturePolicy } from "./services/paid-feature-policy.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     prisma: PrismaClient;
     appEnv: Env;
     email: EmailProvider;
+    paidFeaturePolicy: PaidFeaturePolicy;
   }
 }
 
@@ -38,6 +40,8 @@ type BuildAppOptions = {
   prisma?: PrismaClient;
   serviceBillingProvider?: ServiceBillingProvider;
   serviceBillingClock?: () => Date;
+  /** Explicit synthetic legacy-feature test fixture; never an environment flag or request option. */
+  testPaidFeatureAccess?: boolean;
   /**
    * 테스트/운영에서 커스텀 logger 를 주입할 때 쓴다(Fastify 는 인스턴스를
    * `loggerInstance` 로 받는다). `false` 는 완전 억제(게이트 테스트용). 미주입 시 기존 동작 유지.
@@ -47,6 +51,7 @@ type BuildAppOptions = {
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const env = options.env ?? loadEnv();
+  if (options.testPaidFeatureAccess && env.NODE_ENV !== "test") throw new Error("Paid feature override restricted to tests");
   if ((options.serviceBillingProvider || options.serviceBillingClock) && env.NODE_ENV !== "test") throw new Error("Billing overrides restricted to tests");
   const prisma = options.prisma ?? getPrismaClient();
   const app = Fastify({
@@ -64,6 +69,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   app.decorate("prisma", prisma);
   app.decorate("appEnv", env);
+  app.decorate("paidFeaturePolicy", new PaidFeaturePolicy(env, options.testPaidFeatureAccess));
   app.decorate("email", createEmailProvider(env, app.log));
   // VAPID 설정(설정돼 있을 때만). 미설정이면 푸시는 비활성으로 동작한다.
   configureWebPush(env);

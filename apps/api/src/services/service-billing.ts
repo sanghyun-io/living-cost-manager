@@ -451,8 +451,12 @@ export class ServiceBillingService {
       startsAt: { lte: this.clock() }, accessEndsAt: { gt: this.clock() }, attempt: { status: "paid", reviewRequired: false } },
       include: { attempt: { include: { quote: true } } } }) : null;
     return serviceBillingSubscriptionResponseSchema.parse({ contractId: c?.id ?? null, planId: c?.planId ?? null, status: c?.status ?? "free",
-      paidAccess: this.mode === "live" && this.enabled && this.config.manifest?.featureScope === "account-subscription-v1" &&
-        !!coverage && coverage.attempt.quote.premiumScope === this.config.manifest.featureScope && c?.provider === "portone" && c.storeId === this.config.manifest.storeId,
+      paidAccess: this.env.SERVICE_PAID_FEATURES_PUBLISHED === "true" && this.mode === "live" && this.enabled && this.readiness().checkoutEnabled && this.config.manifest?.featureScope === "account-subscription-v1" &&
+        !!coverage && coverage.attempt.quote.premiumScope === this.config.manifest.featureScope &&
+        coverage.attempt.quote.featureScopeVersion === this.config.manifest.featureScopeVersion &&
+        coverage.attempt.quote.channelId === this.config.manifest.channelId && coverage.attempt.quote.catalogVersion === this.config.manifest.catalogVersion &&
+        coverage.attempt.provider === "portone" && coverage.attempt.storeId === this.config.manifest.storeId && coverage.attempt.environment === "live" &&
+        c?.provider === "portone" && c.storeId === this.config.manifest.storeId && c.environment === "live",
       paidThrough: period?.accessEndsAt.toISOString() ?? null,
       nextChargeAt: c && !c.cancelRequested && !c.renewalStopped ? period?.endsAt.toISOString() ?? null : null,
       cancelAtPeriodEnd: c?.cancelRequested ?? false, renewalStopped: c?.renewalStopped ?? false,

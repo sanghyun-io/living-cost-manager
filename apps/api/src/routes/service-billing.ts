@@ -7,6 +7,7 @@ import {
 } from "@living-cost-manager/shared";
 import { ServiceBillingError, ServiceBillingService } from "../services/service-billing.js";
 import type { ServiceBillingProvider } from "../services/service-billing-provider.js";
+import { parseBillingConfiguration } from "../services/service-billing-config.js";
 
 declare module "fastify" { interface FastifyInstance { serviceBilling: ServiceBillingService } }
 
@@ -30,6 +31,13 @@ function parameter(request: FastifyRequest, key: string) {
   return value;
 }
 export async function serviceBillingRoutes(root: FastifyInstance, options: { provider?: ServiceBillingProvider; clock?: () => Date } = {}) {
+  // Unregistered means 404 for every path/method (including readiness,
+  // callbacks and unknown paths), without constructing a service/provider.
+  if (root.appEnv.SERVICE_PAID_FEATURES_PUBLISHED !== "true") return;
+  const config = parseBillingConfiguration(root.appEnv);
+  const testFixture = root.appEnv.NODE_ENV === "test";
+  if (!testFixture && (root.appEnv.SERVICE_BILLING_MODE !== "live" || !config.enabled ||
+    !config.capabilities.issueInstrument || !config.capabilities.charge || !config.capabilities.renew)) return;
   root.decorate("serviceBilling", new ServiceBillingService(root.prisma, root.appEnv, options.clock, options.provider));
   await root.register(async app => {
     const service = root.serviceBilling;

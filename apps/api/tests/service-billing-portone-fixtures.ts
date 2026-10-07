@@ -15,7 +15,7 @@ export function syntheticApprovedConfiguration(databaseUrl: string, mode: "sandb
     capabilities: { issueInstrument: true, charge: true, renew: true, cancel: true, refund: true }, refundPolicy: "full_remaining_manual_v1",
     workers: { reconcile: true, renew: true, refunds: true }
   };
-  const env = loadEnv({ NODE_ENV: "test", DATABASE_URL: databaseUrl, JWT_SECRET: randomBytes(40).toString("base64"), SERVICE_BILLING_MODE: mode,
+  const env = loadEnv({ NODE_ENV: "test", SERVICE_PAID_FEATURES_PUBLISHED: "true", DATABASE_URL: databaseUrl, JWT_SECRET: randomBytes(40).toString("base64"), SERVICE_BILLING_MODE: mode,
     SERVICE_BILLING_ENCRYPTION_KEY: randomBytes(32).toString("base64"), SERVICE_BILLING_KEY_VERSION: "test-v2",
     SERVICE_BILLING_APPROVAL_MANIFEST: JSON.stringify(manifest), PORTONE_LCM_API_SECRET: randomBytes(32).toString("base64"),
     PORTONE_LCM_WEBHOOK_SECRETS: JSON.stringify([secret.toString("base64")]) });

@@ -115,6 +115,7 @@ export async function authRoutes(app: FastifyInstance) {
               passwordHash
             }
           });
+          await app.paidFeaturePolicy.assertCanCreateWorkspace(tx, user.id);
           const workspace = await tx.workspace.create({
             data: { name: `${body.name}의 생활비` }
           });

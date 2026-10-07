@@ -7,10 +7,12 @@ import {
 } from "@living-cost-manager/shared";
 import { AccountWorkspaceAuthorizationError } from "./account.js";
 import { getWorkspaceSnapshot } from "./snapshot.js";
+import { freePublicFeaturePolicy, type PaidFeaturePolicy } from "./paid-feature-policy.js";
 
-export async function createUserWorkspace(prisma: PrismaClient, userId: string, input: CreateWorkspaceRequest) {
+export async function createUserWorkspace(prisma: PrismaClient, userId: string, input: CreateWorkspaceRequest, policy: PaidFeaturePolicy = freePublicFeaturePolicy) {
   const { name, initialBudget: budget } = createWorkspaceRequestSchema.parse(input);
   return prisma.$transaction(async tx => {
+    await policy.assertCanCreateWorkspace(tx, userId);
     const workspace = await tx.workspace.create({ data: {
       name, monthlyIncome: budget.monthlyIncome,
       members: { create: { userId, role: "owner" } },
@@ -31,7 +33,7 @@ export async function createUserWorkspace(prisma: PrismaClient, userId: string, 
     const snapshot = await getWorkspaceSnapshot(tx, workspaceId);
     await tx.backupSnapshot.create({ data: { workspaceId, payload: snapshot as Prisma.InputJsonValue } });
     return { workspace: { id: workspaceId, name, role: "owner" } satisfies WorkspaceDto, snapshot };
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export async function renameUserWorkspace(prisma: PrismaClient, userId: string, workspaceId: string, input: RenameWorkspaceRequest): Promise<WorkspaceDto> {
@@ -44,10 +46,11 @@ export async function renameUserWorkspace(prisma: PrismaClient, userId: string, 
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function aggregateUserWorkspaces(prisma: PrismaClient, userId: string, input: AggregateWorkspacesRequest, asOf = new Date()): Promise<AggregateWorkspacesResponse> {
+export async function aggregateUserWorkspaces(prisma: PrismaClient, userId: string, input: AggregateWorkspacesRequest, asOf = new Date(), policy: PaidFeaturePolicy = freePublicFeaturePolicy): Promise<AggregateWorkspacesResponse> {
   const { workspaceIds } = aggregateWorkspacesRequestSchema.parse(input);
   const { fromDate, untilDateExclusive } = kstThirtyDayWindow(asOf);
   return prisma.$transaction(async tx => {
+    await policy.assertCanAggregate(tx, userId);
     // Check ALL memberships before any financial reads. RepeatableRead gives
     // one consistent membership + finance snapshot; revocations committed
     // before this snapshot are denied. In-flight requests may finish against

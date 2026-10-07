@@ -9,6 +9,7 @@ import {
 import { listUserWorkspaces } from "../services/membership.js";
 import { createWorkspaceRequestSchema, renameWorkspaceRequestSchema, aggregateWorkspacesRequestSchema } from "@living-cost-manager/shared";
 import { createUserWorkspace, renameUserWorkspace, aggregateUserWorkspaces } from "../services/workspaces.js";
+import { PaidFeatureUnavailableError } from "../services/paid-feature-policy.js";
 
 const workspaceParamsSchema = z.object({
   workspaceId: z.string().min(1)
@@ -37,14 +38,17 @@ export async function workspaceRoutes(app: FastifyInstance) {
     return result.data;
   };
   const mapError = (error: unknown): never => {
+    if (error instanceof PaidFeatureUnavailableError) throw Object.assign(app.httpErrors.forbidden(error.code), { code: error.code });
     if (error instanceof AccountWorkspaceAuthorizationError) throw app.httpErrors.forbidden("Forbidden");
     if (isAccountTransactionConflictError(error)) throw app.httpErrors.conflict("Concurrent membership change, please retry");
     throw error;
   };
   app.post("/workspaces", { onRequest: surfaceGuard, preHandler: app.requireVerifiedEmail, config: { rateLimit: accountLimit(20) } }, async (request, reply) => {
     const input = parse(createWorkspaceRequestSchema, request.body);
-    const result = await createUserWorkspace(app.prisma, request.user.sub, input);
-    return reply.code(201).send(result);
+    try {
+      const result = await createUserWorkspace(app.prisma, request.user.sub, input, app.paidFeaturePolicy);
+      return reply.code(201).send(result);
+    } catch (error) { return mapError(error); }
   });
   app.patch("/workspaces/:workspaceId", { preHandler: app.requireVerifiedEmail }, async request => {
     const { workspaceId } = parse(workspaceParamsSchema, request.params);
@@ -54,7 +58,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
   });
   app.post("/workspaces/aggregate", { onRequest: surfaceGuard, preHandler: app.authenticate, config: { rateLimit: accountLimit(60) } }, async request => {
     const input = parse(aggregateWorkspacesRequestSchema, request.body);
-    try { return await aggregateUserWorkspaces(app.prisma, request.user.sub, input); }
+    try { return await aggregateUserWorkspaces(app.prisma, request.user.sub, input, new Date(), app.paidFeaturePolicy); }
     catch (error) { return mapError(error); }
   });
   app.get("/workspaces", { preHandler: app.authenticate }, async (request) => {
