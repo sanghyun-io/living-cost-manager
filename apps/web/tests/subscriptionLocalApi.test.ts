@@ -5,8 +5,9 @@ import { createBillingApi } from "../app/features/service-subscription/billing/a
 import { browserBillingSdk } from "../app/features/service-subscription/billing/sdk";
 
 // Opt-in ONLY to the dedicated synthetic loopback test DB. Never use DATABASE_URL.
-const database = "postgresql://billing_test:synthetic_test_only@127.0.0.1:55443/lcm_billing_test?schema=public";
 test.skipIf(process.env.LCM_WEB_LOCAL_BILLING_TEST !== "true")("frozen real API + synthetic DB/mock provider + frontend adapter, lost-response lookup without redispatch", async () => {
+  const { resolveApiTestDatabaseUrl } = await import("../../api/tests/test-database");
+  const database = resolveApiTestDatabaseUrl();
   const { PrismaClient } = await import("@prisma/client");
   const { envSchema } = await import("../../api/src/env");
   const { buildApp } = await import("../../api/src/app");
@@ -14,6 +15,7 @@ test.skipIf(process.env.LCM_WEB_LOCAL_BILLING_TEST !== "true")("frozen real API 
   const prisma = new PrismaClient({ datasources: { db: { url: database } } });
   const env = envSchema.parse({ NODE_ENV: "test", DATABASE_URL: database, JWT_SECRET: randomBytes(32).toString("hex"),
     API_BASE_PATH: "/living-cost-manager/v1", SERVICE_BILLING_MODE: "mock", SERVICE_BILLING_MOCK_ENABLED: "true",
+    SERVICE_PAID_FEATURES_PUBLISHED: "true", // Private in-process paid fixture only; public defaults stay dark.
     SERVICE_BILLING_ENCRYPTION_KEY: randomBytes(32).toString("base64"), SERVICE_BILLING_KEY_VERSION: "synthetic_ui_test" });
   const provider = new MockServiceBillingProvider();
   const app = await buildApp({ env, prisma, logger: false, serviceBillingProvider: provider });
