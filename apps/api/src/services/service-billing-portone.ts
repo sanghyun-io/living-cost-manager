@@ -108,6 +108,14 @@ export class PortOneServiceBillingProvider implements ServiceBillingProvider {
       p.channel.id !== this.manifest.channelId || p.channel.type !== (this.manifest.mode === "live" ? "LIVE" : "TEST") || p.amount.cancelled > p.amount.total) {
       throw new PortOneTransportError("PORTONE_INVALID_EVIDENCE");
     }
+    // Official payment status and aggregate must describe the same state, before
+    // any legacy PAID normalization. A matching cancellation sum alone is not
+    // sufficient to prove full/partial/non-cancelled status.
+    if ((p.status === "CANCELLED" && p.amount.cancelled !== p.amount.total) ||
+      (p.status === "PARTIAL_CANCELLED" && (p.amount.cancelled <= 0 || p.amount.cancelled >= p.amount.total)) ||
+      (!["CANCELLED", "PARTIAL_CANCELLED"].includes(p.status) && p.amount.cancelled !== 0)) {
+      throw new PortOneTransportError("PORTONE_INVALID_EVIDENCE");
+    }
     const paid = ["PAID", "PARTIAL_CANCELLED", "CANCELLED"].includes(p.status);
     const paidAt = paid && p.paidAt ? new Date(p.paidAt) : null;
     if (paid && (!paidAt || !Number.isFinite(paidAt.getTime()))) throw new PortOneTransportError("PORTONE_INVALID_EVIDENCE");

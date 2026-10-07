@@ -362,3 +362,64 @@ runtime `.env`, production data/change, paid resource, push or deployment.
 Frozen provider ec08809 and integration worktrees remain untouched. Independent
 tester/security/reviewer must validate this follow-up source; synthetic results
 do not imply actual commercial approval or live checkout activation.
+
+## Follow-up: dispatch-claim boundary and contradictory cancellation evidence
+
+On the same owned branch, test-only `815e2ab` was cherry-picked as `b5b5309`
+after `dc5bca6`. Its two unique independent test files are unchanged: no fixture
+or assertion adaptation, no skipped cases. On this source before runtime fixes,
+the 31 cases reproduced **15 FAIL / 16 PASS** (7 dispatch and 8 cancellation
+failures). This retains, rather than rewrites, historical tester evidence.
+
+Dispatch now distinguishes reservation from authority to charge. Under the
+dispatch claim's contract lock, before any dispatch intent/provider I/O, a
+created renewal attempt must still have renewal enabled and no review flag. The
+claim then reads the current clock immediately before writing dispatch intent
+and rechecks that attempt's immutable quote duration, original KST anchor,
+cycle/nextCycle and anchored start/end. End <= now or any non-exact-due start
+under the existing conservative policy commits canceled-before-dispatch plus
+durable renewal stop/review before returning `OVERDUE_RENEWAL_REVIEW`. A stop or
+review flag committed after reservation likewise blocks dispatch; a review-only
+flag also durably stops renewal. Cancellation intent remains independently
+blocking. First-purchase paidAt semantics are unchanged (boundary check applies
+only to cycle > 0). Attempts with prior dispatch intent exit before these guards:
+they remain same-ID lookup-only and can never become another provider charge.
+
+The real-PG regression hook advances the clock or sets flags **after reservation
+COMMIT**, without patching a service method/transaction return. Late Apr1,
+end-boundary equality, end+1ms, due+1ms, and stopped/review/both flag cases now
+all have zero new charges, null dispatchAt and no renewal paid period. Existing
+anchor/nextCycle/paid coverage are not shifted or skipped. Exact due and initial
+checkout controls still charge once; ambiguous response/restart controls GET
+only the same persisted payment ID. No arrears/grace or catch-up policy was added;
+actual worker launch still requires an approved late-cycle policy decision if
+the conservative exact-due behavior is insufficient.
+
+Provider evidence now checks official status against the aggregate **before**
+normalizing any recognized paid/canceled response to the legacy PAID observation:
+`CANCELLED` requires canceled == total; `PARTIAL_CANCELLED` requires
+0 < canceled < total; PAID/READY/FAILED/PAY_PENDING/VIRTUAL_ACCOUNT_ISSUED require
+canceled == 0. Existing integer/positive/bounds, succeeded-entry sum and unique
+cancellation ID validation remain mandatory; the official cancellation entry
+amount field is `totalAmount`. FAILED/REQUESTED entries cannot prove succeeded
+cancellation. Contradictions throw sanitized `PORTONE_INVALID_EVIDENCE`, which
+initial settlement persists as manual review without creating a period/anchor or
+advancing nextCycle. Recognized consistent full/partial observations still work,
+with no invented approved refund or proration decision. Party/payment/currency/
+TEST-LIVE bindings and the fresh fenced webhook consumption fix remain intact.
+
+Validation: imported **31/31 PASS**, existing freshness cases **14/14 PASS**
+(targeted combined **45/45**), shared **166/166**, API full **388/388**, both
+builds pass. Nine exact-draft migrations applied fresh on the owned isolated
+PG16 loopback 55442/lcm_billing_test/billing_test; schema-bound diff empty.
+No Prisma, shared DTO, web, runtime configuration or business policy changes.
+New logs were exclusively created mode 0600 with unique UUID names, not reused:
+
+- `lcm-dispatch-before.C36A8FAB-75FD-4EE5-9210-56D63BA35250.log`
+- `lcm-dispatch-targeted.D8D992E7-C46B-45D9-8131-EA0A08A4C27B.log`
+- `lcm-dispatch-final.D3BC5FF6-CBCA-4241-81A8-CCFDC431B1D9.log`
+
+All are in approved temp. Actual provider traffic, credentials/customer access,
+production changes, push/deploy and live activation remain unperformed. Latest
+source needs the main session's independent tester/security/reviewer validation;
+actual merchant/product/material/VAT/worker launch approvals remain gated.

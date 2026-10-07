@@ -238,23 +238,42 @@ export class ServiceBillingService {
       const a = await tx.servicePaymentAttempt.findUniqueOrThrow({ where: { id: attemptId } });
       if (a.dispatchAt || a.status !== "created") return null;
       const quote = await tx.serviceBillingQuote.findUniqueOrThrow({ where: { id: a.quoteId } });
-      this.validateCurrentQuote(quote);
       if (c.cancelRequested) {
         await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { status: "canceled_before_dispatch" } });
         return null;
       }
+      if (a.cycle > 0 && (c.renewalStopped || c.renewalReviewRequired)) {
+        await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { status: "canceled_before_dispatch" } });
+        if (!c.renewalStopped) await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: { renewalStopped: true, version: { increment: 1 } } });
+        return { blocked: c.renewalReviewRequired ? "OVERDUE_RENEWAL_REVIEW" : "RENEWAL_STOPPED" };
+      }
+      this.validateCurrentQuote(quote);
       const i = await tx.serviceBillingInstrument.findUniqueOrThrow({ where: { id: a.instrumentId } });
       if (i.status !== "verified" || !i.ciphertext || !i.nonce || !i.authTag || i.keyVersion !== this.keyVersion) fail("INSTRUMENT_UNAVAILABLE");
       let billingKey;
       try { billingKey = decryptBillingKey({ ciphertext: i.ciphertext!, nonce: i.nonce!, authTag: i.authTag!, keyVersion: i.keyVersion! }, this.key!, instrumentAAD(i)); }
       catch { fail("INSTRUMENT_DECRYPTION_FAILED"); }
+      // Reservation eligibility is not authority to send later. Re-read the
+      // clock under this claim's contract lock immediately before writing intent.
+      const now = this.clock();
+      if (a.cycle > 0) {
+        const startsAt = c.originalAnchor ? serviceBillingPeriodBoundary(c.originalAnchor, quote.periodMonths * a.cycle) : null;
+        const endsAt = c.originalAnchor ? serviceBillingPeriodBoundary(c.originalAnchor, quote.periodMonths * (a.cycle + 1)) : null;
+        if (!startsAt || !endsAt || endsAt <= now || startsAt < now || startsAt > now || a.cycle !== c.nextCycle) {
+          await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { status: "canceled_before_dispatch" } });
+          await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: {
+            renewalStopped: true, renewalReviewRequired: true, version: { increment: 1 } } });
+          return { blocked: "OVERDUE_RENEWAL_REVIEW" };
+        }
+      }
       await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: {
-        dispatchAt: this.clock(), status: "dispatch_unknown", nextLookupAt: new Date(this.clock().getTime() + leaseMs),
-        leaseOwner: "dispatch", leaseUntil: new Date(this.clock().getTime() + leaseMs), fence: { increment: 1 }
+        dispatchAt: now, status: "dispatch_unknown", nextLookupAt: new Date(now.getTime() + leaseMs),
+        leaseOwner: "dispatch", leaseUntil: new Date(now.getTime() + leaseMs), fence: { increment: 1 }
       } });
       return { a, billingKey: billingKey!, subjectId: c.subjectId };
     });
     if (!claim) return;
+    if ("blocked" in claim) fail(claim.blocked!);
     // Persisted dispatch marker precedes I/O. Even a process crash before send
     // must never create another payment ID or retry the charge.
     try { await this.provider!.charge({ paymentId: claim.a.paymentId, subjectId: claim.subjectId,
