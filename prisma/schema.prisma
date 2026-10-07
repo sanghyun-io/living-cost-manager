@@ -20,8 +20,175 @@ model User {
   pushSubscriptions       PushSubscription[]
   pushDeliveries          PushDelivery[]
   templates               BudgetTemplate[]
+  serviceSubscription     ServiceSubscriptionContract?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+}
+
+// Application service revenue, deliberately separate from customer FixedCost.
+model ServiceSubscriptionContract {
+  id String @id @default(cuid())
+  userId String? @unique
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  subjectId String @unique
+  provider String
+  storeId String
+  environment String
+  planId String?
+  status String @default("idle")
+  originalAnchor DateTime?
+  nextCycle Int @default(0)
+  cancelRequested Boolean @default(false)
+  renewalStopped Boolean @default(false)
+  providerCancellationStatus String @default("none")
+  version Int @default(0)
+  createdAt DateTime @default(now())
+  quotes ServiceBillingQuote[]
+  instruments ServiceBillingInstrument[]
+  attempts ServicePaymentAttempt[]
+  periods ServicePaidPeriod[]
+  @@unique([id, provider, storeId, environment])
+  @@index([status, renewalStopped])
+}
+
+model ServiceBillingQuote {
+  id String @id @default(cuid())
+  contractId String
+  provider String
+  storeId String
+  environment String
+  channelId String
+  contract ServiceSubscriptionContract @relation(fields: [contractId, provider, storeId, environment], references: [id, provider, storeId, environment], onDelete: Restrict)
+  catalogVersion String
+  planId String
+  totalAmount Int
+  currency String
+  periodMonths Int
+  billingVersion String
+  autoRenewVersion String
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  attempts ServicePaymentAttempt[]
+  instruments ServiceBillingInstrument[]
+  @@index([contractId, expiresAt])
+}
+
+model ServiceBillingInstrument {
+  id String @id @default(cuid())
+  contractId String
+  provider String
+  storeId String
+  environment String
+  contract ServiceSubscriptionContract @relation(fields: [contractId, provider, storeId, environment], references: [id, provider, storeId, environment], onDelete: Restrict)
+  quoteId String @unique
+  quote ServiceBillingQuote @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  issuanceId String @unique
+  status String @default("prepared")
+  ciphertext Bytes?
+  nonce Bytes?
+  authTag Bytes?
+  keyVersion String?
+  verifiedAt DateTime?
+  revokedAt DateTime?
+  attempts ServicePaymentAttempt[]
+  @@index([contractId, status])
+}
+
+model ServicePaymentAttempt {
+  id String @id @default(cuid())
+  contractId String
+  provider String
+  storeId String
+  environment String
+  contract ServiceSubscriptionContract @relation(fields: [contractId, provider, storeId, environment], references: [id, provider, storeId, environment], onDelete: Restrict)
+  quoteId String @unique
+  quote ServiceBillingQuote @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  instrumentId String
+  instrument ServiceBillingInstrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  cycle Int
+  paymentId String
+  idempotencyKey String
+  requestBinding String
+  totalAmount Int
+  currency String
+  billingVersion String
+  autoRenewVersion String
+  acceptedAt DateTime
+  status String @default("created")
+  dispatchAt DateTime?
+  leaseOwner String?
+  leaseUntil DateTime?
+  fence Int @default(0)
+  lookupCount Int @default(0)
+  nextLookupAt DateTime?
+  paidAt DateTime?
+  createdAt DateTime @default(now())
+  period ServicePaidPeriod?
+  events ServiceBillingEventReceipt[]
+  refunds ServiceRefundRecord[]
+  @@unique([provider, storeId, environment, paymentId])
+  @@unique([contractId, cycle])
+  @@unique([contractId, idempotencyKey])
+  @@index([status, nextLookupAt, leaseUntil])
+}
+
+model ServicePaidPeriod {
+  id String @id @default(cuid())
+  attemptId String @unique
+  attempt ServicePaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  contractId String
+  contract ServiceSubscriptionContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  cycle Int
+  environment String
+  startsAt DateTime
+  endsAt DateTime
+  accessEndsAt DateTime
+  verifiedAt DateTime
+  @@unique([contractId, cycle])
+  @@index([contractId, startsAt, endsAt])
+}
+
+model ServiceBillingEventReceipt {
+  id String @id @default(cuid())
+  provider String
+  storeId String
+  environment String
+  eventId String
+  paymentId String
+  attemptId String?
+  attempt ServicePaymentAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  receivedAt DateTime @default(now())
+  processedAt DateTime?
+  status String @default("pending")
+  retryCount Int @default(0)
+  nextRetryAt DateTime?
+  leaseOwner String?
+  leaseUntil DateTime?
+  fence Int @default(0)
+  @@unique([provider, storeId, environment, eventId])
+  @@index([attemptId, status])
+  @@index([status, nextRetryAt, leaseUntil])
+}
+
+model ServiceRefundRecord {
+  id String @id @default(cuid())
+  attemptId String
+  attempt ServicePaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  provider String
+  storeId String
+  environment String
+  idempotencyKey String
+  requestAmount Int
+  reasonCode String
+  status String @default("requested")
+  providerCancelId String?
+  verifiedAmount Int?
+  verifiedAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([attemptId, idempotencyKey])
+  @@unique([provider, storeId, environment, providerCancelId])
+  @@index([status, createdAt])
 }
 
 model PushSubscription {

@@ -10,6 +10,7 @@ export * from "./predictions.js";
 export * from "./pushReminder.js";
 export * from "./shareSummary.js";
 export * from "./servicePricing.js";
+export * from "./serviceBilling.js";
 export * from "./snapshot.js";
 export * from "./workspace.js";
 export * from "./workspaceAggregation.js";
