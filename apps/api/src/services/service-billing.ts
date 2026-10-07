@@ -429,14 +429,24 @@ export class ServiceBillingService {
   }
   async cancel(userId: string) {
     this.requireReady("cancel");
-    const c = await this.prisma.$transaction(async tx => {
+    const claim = await this.prisma.$transaction(async tx => {
       const c = await this.ownedContract(tx, userId);
+      if (c.cancelRequested && c.renewalStopped && c.status === "cancel_at_period_end" && c.providerCancellationStatus === "verified" &&
+        c.cancellationVerifiedVersion === c.version) {
+        const instruments = await tx.serviceBillingInstrument.count({ where: { contractId: c.id,
+          OR: [{ status: { not: "revoked" } }, { ciphertext: { not: null } }, { nonce: { not: null } }, { authTag: { not: null } }, { keyVersion: { not: null } }] } });
+        const created = await tx.servicePaymentAttempt.count({ where: { contractId: c.id, status: "created" } });
+        if (!instruments && !created) return { c, replay: true };
+      }
       await tx.servicePaymentAttempt.updateMany({ where: { contractId: c.id, status: "created", dispatchAt: null },
         data: { status: "canceled_before_dispatch" } });
-      return tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: {
+      const next = await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: {
         cancelRequested: true, renewalStopped: true, providerCancellationStatus: "pending", status: "cancel_at_period_end", version: { increment: 1 }
       } });
+      return { c: next, replay: false };
     });
+    if (claim.replay) return this.subscription(userId);
+    const c = claim.c;
     // Local renewal stop is durable even when remote cancellation is uncertain.
     let stopped = false;
     try { await this.provider!.cancelSchedule(c.subjectId); stopped = (await this.provider!.getSchedule(c.subjectId)).stopped; } catch { /* retain pending */ }
@@ -446,8 +456,10 @@ export class ServiceBillingService {
       stopped = (await this.prisma.serviceBillingInstrument.count({ where: { contractId: c.id, status: { not: "revoked" } } })) === 0;
     }
     if (stopped) await this.prisma.$transaction(async tx => {
-      await this.lockContract(tx, c.id);
-      await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: { providerCancellationStatus: "verified" } });
+      const current = await this.lockContract(tx, c.id);
+      if (current.version !== c.version || !current.cancelRequested || !current.renewalStopped) return;
+      if (this.mode !== "mock" && await tx.serviceBillingInstrument.count({ where: { contractId: c.id, status: { not: "revoked" } } })) return;
+      await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: { providerCancellationStatus: "verified", cancellationVerifiedVersion: current.version } });
       await tx.serviceBillingInstrument.updateMany({ where: { contractId: c.id }, data: { status: "revoked", revokedAt: this.clock(),
         ciphertext: null, nonce: null, authTag: null, keyVersion: null } });
     });
@@ -462,11 +474,12 @@ export class ServiceBillingService {
     this.requireReady("renew");
     const attempt = await this.prisma.$transaction(async tx => {
       const c = await this.ownedContract(tx, userId);
+      if (c.renewalReviewRequired) return { overdue: true as const };
       if (c.cancelRequested || c.renewalStopped || !c.originalAnchor || !c.planId) fail("RENEWAL_STOPPED");
       const previous = await tx.servicePaymentAttempt.findFirst({ where: { contractId: c.id, status: "paid" }, orderBy: { cycle: "desc" }, include: { period: true, quote: true, instrument: true } });
       if (!previous?.period || previous.period.endsAt > this.clock()) fail("RENEWAL_NOT_DUE");
       const existing = await tx.servicePaymentAttempt.findUnique({ where: { contractId_cycle: { contractId: c.id, cycle: c.nextCycle } } });
-      if (existing) return existing;
+      if (existing && (existing.dispatchAt || existing.status !== "created")) return existing;
       const planId = c.planId as "monthly" | "annual";
       if (!(planId in serviceBillingCatalog) || previous.totalAmount !== serviceBillingCatalog[planId].totalAmount ||
         previous.billingVersion !== this.config.approvedVersions.billing || previous.autoRenewVersion !== this.config.approvedVersions.autoRenew ||
@@ -474,11 +487,19 @@ export class ServiceBillingService {
       this.validateCurrentQuote(previous.quote);
       // Never "catch up" missed expired cycles by charging for coverage that
       // would already have ended. No grace/arrears policy has been invented.
-      if (serviceBillingPeriodBoundary(c.originalAnchor!, serviceBillingCatalog[planId].periodMonths * (c.nextCycle + 1)) <= this.clock()) fail("RENEWAL_LATE_RECONSENT_REQUIRED");
+      const startsAt = serviceBillingPeriodBoundary(c.originalAnchor, serviceBillingCatalog[planId].periodMonths * c.nextCycle);
+      const endsAt = serviceBillingPeriodBoundary(c.originalAnchor, serviceBillingCatalog[planId].periodMonths * (c.nextCycle + 1));
+      if (endsAt <= this.clock() || startsAt < this.clock()) {
+        if (existing) await tx.servicePaymentAttempt.update({ where: { id: existing.id }, data: { status: "canceled_before_dispatch" } });
+        await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: { renewalReviewRequired: true, renewalStopped: true, version: { increment: 1 } } });
+        return { overdue: true as const };
+      }
+      if (existing) return existing;
       const q = await tx.serviceBillingQuote.create({ data: { ...this.quoteData(c, planId), consumedAt: this.clock() } });
       return tx.servicePaymentAttempt.create({ data: this.attemptData(c, q, previous.instrumentId,
         `renewal_${c.nextCycle}_${c.id}`, `renewal:${previous.id}`, previous.acceptedAt) });
     });
+    if ("overdue" in attempt) fail("OVERDUE_RENEWAL_REVIEW");
     await this.dispatch(attempt.id);
     return this.attemptDto(attempt.id, userId);
   }
@@ -527,6 +548,7 @@ export class ServiceBillingService {
     if (!r) fail("BILLING_NOT_FOUND", 404);
     if (r.provider !== this.provider!.scope.provider || r.storeId !== this.provider!.scope.storeId || r.environment !== this.mode) fail("BILLING_SCOPE_MISMATCH");
     if (this.mode !== "mock" && (!r.approvalOperationId || r.approvalPolicyVersion !== this.config.manifest?.policyVersion)) fail("REFUND_APPROVAL_REQUIRED");
+    if (r.status === "verified") return this.refundDto(userId, requestId);
     const owner = randomUUID();
     const claim = await this.prisma.$transaction(async tx => {
       await this.lockContract(tx, r.attempt.contractId);

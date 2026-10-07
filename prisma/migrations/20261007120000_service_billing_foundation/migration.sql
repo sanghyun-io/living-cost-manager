@@ -354,6 +354,10 @@ END $$;
 CREATE TRIGGER "service_contract_identity" BEFORE UPDATE ON "ServiceSubscriptionContract" FOR EACH ROW EXECUTE FUNCTION "lcm_service_contract_identity"();
 
 -- Phase two amendment of an UNAPPLIED production draft; new tables only.
+ALTER TABLE "ServiceSubscriptionContract" ADD COLUMN "cancellationVerifiedVersion" INTEGER,
+  ADD COLUMN "renewalReviewRequired" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "ServiceSubscriptionContract" ADD CONSTRAINT "service_cancellation_verified_version" CHECK (
+  "cancellationVerifiedVersion" IS NULL OR ("cancellationVerifiedVersion" >= 0 AND "cancellationVerifiedVersion" <= "version"));
 ALTER TABLE "ServiceBillingQuote" ADD COLUMN "featureScopeVersion" TEXT NOT NULL DEFAULT 'feature-draft-v1',
   ADD COLUMN "policyVersion" TEXT NOT NULL DEFAULT 'policy-draft-v1', ADD COLUMN "sellerVersion" TEXT NOT NULL DEFAULT 'seller-draft-v1',
   ADD COLUMN "premiumScope" TEXT NOT NULL DEFAULT 'provisional', ADD COLUMN "materialsSnapshot" JSONB;

@@ -42,6 +42,8 @@ model ServiceSubscriptionContract {
   renewalStopped Boolean @default(false)
   providerCancellationStatus String @default("none")
   version Int @default(0)
+  cancellationVerifiedVersion Int?
+  renewalReviewRequired Boolean @default(false)
   createdAt DateTime @default(now())
   quotes ServiceBillingQuote[]
   instruments ServiceBillingInstrument[]

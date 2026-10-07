@@ -132,8 +132,79 @@ describe("real PortOne adapter with exclusively fake HTTP", () => {
   it("missed expired cycles require reconsent rather than back-billing multiple expired periods", async () => {
     const p = await prepare(); await service.charge(userId, p.input);
     now = new Date("2027-05-01T03:00:00.000Z");
-    await expect(service.renew(userId)).rejects.toMatchObject({ code: "RENEWAL_LATE_RECONSENT_REQUIRED" });
+    await expect(service.renew(userId)).rejects.toMatchObject({ code: "OVERDUE_RENEWAL_REVIEW" });
     await service.renewOnce(); expect(http.chargeCount).toBe(1); expect(await prisma.servicePaymentAttempt.count()).toBe(1);
+  });
+  it.each(["2027-03-30T14:59:59.999Z", "2027-03-30T15:00:00.000Z", "2027-03-30T15:00:00.001Z", "2027-07-01T00:00:00.000Z"])("late KST cycle at %s persists review before attempt and never silently bills arrears", async value => {
+    const p = await prepare(); const a = await service.charge(userId, p.input);
+    const before = await prisma.serviceSubscriptionContract.findUniqueOrThrow({ where: { userId } });
+    now = new Date(value);
+    await expect(service.renew(userId)).rejects.toMatchObject({ code: "OVERDUE_RENEWAL_REVIEW" });
+    await expect(service.renew(userId)).rejects.toMatchObject({ code: "OVERDUE_RENEWAL_REVIEW" });
+    expect(await service.renewOnce()).toBe(0);
+    const after = await prisma.serviceSubscriptionContract.findUniqueOrThrow({ where: { userId } });
+    expect(after).toMatchObject({ renewalReviewRequired: true, renewalStopped: true, nextCycle: before.nextCycle, originalAnchor: before.originalAnchor, status: "active" });
+    expect(await prisma.servicePaymentAttempt.count({ where: { contractId: after.id } })).toBe(1);
+    expect(await prisma.serviceBillingQuote.count({ where: { contractId: after.id } })).toBe(1);
+    expect((await service.attemptDto(a.attemptId, userId)).paidPeriod).toEqual(a.paidPeriod);
+    expect((await service.subscription(userId))).toMatchObject({ nextChargeAt: null, existingFreeAccess: true });
+    expect(http.chargeCount).toBe(1);
+  });
+  it("verified real cancellation replay is provider-I/O-free during outage and still allows deletion", async () => {
+    const p = await prepare(); await service.charge(userId, p.input);
+    await service.cancel(userId);
+    const calls = http.calls.length;
+    http.unavailableDeletion = true; http.unavailableLookups = true;
+    expect((await service.cancel(userId)).providerCancellationStatus).toBe("verified");
+    expect(http.calls.length).toBe(calls);
+    await deleteAccount(prisma, userId, password);
+    expect(http.calls.length).toBe(calls);
+  });
+  it("verified real refund replay returns same record and makes zero provider calls or reservations", async () => {
+    const p = await prepare(); const a = await service.charge(userId, p.input);
+    const r = await service.requestRefund(userId, a.attemptId, randomUUID(), "other");
+    const op = randomUUID(); const original = await service.approveAndExecuteRefund(r.requestId, op, "policy-v1");
+    const calls = http.calls.length;
+    http.unavailableDeletion = true; http.unavailableLookups = true;
+    expect(await service.approveAndExecuteRefund(r.requestId, op, "policy-v1")).toEqual(original);
+    expect((await service.cancel(userId)).providerCancellationStatus).toBe("verified");
+    expect(http.calls.length).toBe(calls); expect(http.cancelCount).toBe(1);
+    expect(await prisma.serviceRefundRecord.count()).toBe(1);
+    await deleteAccount(prisma, userId, password);
+  });
+  it("changed local cancellation revision cannot reuse a stale provider verification", async () => {
+    const p = await prepare(); await service.charge(userId, p.input); await service.cancel(userId);
+    const c = await prisma.serviceSubscriptionContract.findUniqueOrThrow({ where: { userId } });
+    await prisma.serviceSubscriptionContract.update({ where: { id: c.id }, data: { version: { increment: 1 } } });
+    await expect(deleteAccount(prisma, userId, password)).rejects.toBeInstanceOf(BillingAccountDeleteBlocked);
+    const provider = http.provider([setup.secret]);
+    let calls = 0; provider.cancelSchedule = async () => { calls++; throw new Error("Synthetic outage after changed revision"); };
+    const restarted = new ServiceBillingService(prisma, setup.env, clock, provider);
+    expect((await restarted.cancel(userId)).providerCancellationStatus).toBe("pending");
+    expect(calls).toBe(1);
+    await expect(deleteAccount(prisma, userId, password)).rejects.toBeInstanceOf(BillingAccountDeleteBlocked);
+  });
+  it("new relevant instrument state invalidates cancellation even without a contract version change", async () => {
+    const p = await prepare(); await service.charge(userId, p.input); await service.cancel(userId);
+    await prisma.serviceBillingInstrument.update({ where: { id: p.i.instrumentId }, data: { status: "manual_review" } });
+    const provider = http.provider([setup.secret]);
+    let calls = 0; provider.cancelSchedule = async () => { calls++; throw new Error("Synthetic changed-instrument outage"); };
+    const restarted = new ServiceBillingService(prisma, setup.env, clock, provider);
+    expect((await restarted.cancel(userId)).providerCancellationStatus).toBe("pending");
+    expect(calls).toBe(1);
+  });
+  it("reserved but never dispatched renewal cannot be sent after its anchored cycle expires", async () => {
+    const p = await prepare(); const a = await service.charge(userId, p.input);
+    now = new Date(a.paidPeriod!.endsAt);
+    const wrongKeyService = new ServiceBillingService(prisma, { ...setup.env, SERVICE_BILLING_KEY_VERSION: "other-version" }, clock, http.provider([setup.secret]));
+    await expect(wrongKeyService.renew(userId)).rejects.toMatchObject({ code: "INSTRUMENT_UNAVAILABLE" });
+    const c = await prisma.serviceSubscriptionContract.findUniqueOrThrow({ where: { userId } });
+    const reserved = await prisma.servicePaymentAttempt.findUniqueOrThrow({ where: { contractId_cycle: { contractId: c.id, cycle: 1 } } });
+    expect(reserved).toMatchObject({ status: "created", dispatchAt: null });
+    now = new Date("2027-04-14T15:00:00.000Z");
+    await expect(service.renew(userId)).rejects.toMatchObject({ code: "OVERDUE_RENEWAL_REVIEW" });
+    expect(await prisma.servicePaymentAttempt.findUniqueOrThrow({ where: { id: reserved.id } })).toMatchObject({ status: "canceled_before_dispatch", dispatchAt: null });
+    expect(http.chargeCount).toBe(1);
   });
   it("refund is request-only until explicit policy/operation approval, then POST once plus authoritative cancellation", async () => {
     const p = await prepare(); const a = await service.charge(userId, p.input);

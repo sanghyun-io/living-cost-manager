@@ -218,3 +218,72 @@ configuration supplies environment, reinforced by official TEST/LIVE type.
 - Independent tester/security/reviewer, real merchant contracts, worker deployment,
   production locking/rollback rehearsal and actual live checkout are **not**
   validated by these synthetic results. Main session must perform independent review.
+
+## Follow-up: known frozen-phase-one financial regressions
+
+Based directly on `1fecf30`; implementation remains backend-only. Imported only
+`apps/api/tests/service-billing-independent-phase1.test.ts` from `167b833`.
+Historical tester worktree/results and frozen `42265e9` were not edited.
+
+**Before correction on Phase 2:** imported suite had 8 passes/2 failures. Expired
+Apr15 renewal was already blocked by Phase 2's end-boundary guard, and verified
+refund replay already made zero provider calls. Cancellation replay still called
+the provider and demoted verified to pending during a simulated outage. The other
+failure was a tester ordering defect: refund ownership was checked after account
+deletion; a deleted owner correctly gets 404. In the imported copy, that same
+verified-refund assertion now runs immediately before deletion, without changing
+any financial/replay assertion. This is not a claim that the historical 3 failures
+were all runtime defects remaining in Phase 2.
+
+**Corrections:**
+
+- Late renewal returns controlled `OVERDUE_RENEWAL_REVIEW` (409). A durable
+  internal `renewalReviewRequired` flag and renewal stop commit under the contract
+  lock **before** returning the error. No new quote/attempt, no old-cycle charge,
+  no anchor shift/cycle skipping, no paid-period mutation or contract expiry.
+  The worker excludes stopped contracts instead of repeatedly processing arrears.
+  End-boundary comparison includes equality (`end <= now`); absent an approved
+  late-cycle/grace policy, a cycle whose start is already past also requires fresh
+  consent/operator decision rather than silently charging a shortened interval.
+  Exact due-time renewal retains the existing behavior. Resuming/skipping/repricing
+  overdue cycles is deliberately not implemented as an unapproved business policy.
+- An existing reserved **undispatched** cycle is checked before reuse and marked
+  canceled-before-dispatch on overdue review. A dispatched/ambiguous cycle remains
+  the same-ID lookup path, never redispatched.
+- Completed cancellation replay returns the current subscription without provider
+  I/O only when intent/renewal stop/status, persisted verified contract version,
+  all revoked instruments with cleared envelopes, and absence of created attempts
+  still agree under the contract lock. Changed revision or relevant instrument
+  state invalidates that shortcut. Late cancellation completion cannot mark a
+  different contract revision verified. No remote scheduling path was introduced.
+  Account deletion also rechecks the verified revision and cleared envelopes;
+  a stale verified label cannot bypass that guard before a cancellation replay.
+- Verified refunds explicitly return the original owned refund record before
+  any claim/provider lookup/cancellation. Same operation/key does not reserve
+  another refund amount; financial audit and deletion guards are unchanged.
+
+**Contract:** no shared/frontend DTO shape or status enum change from `1fecf30`.
+Only the overdue error code changes from `RENEWAL_LATE_RECONSENT_REQUIRED` to
+`OVERDUE_RENEWAL_REVIEW`. The new review/version fields are internal DB fields,
+added solely to the unapplied local revenue draft migration; require the updated
+migration before this binary. `nextChargeAt` becomes null when renewal is stopped,
+while existing paid-period bounds and `existingFreeAccess:true` remain unchanged.
+
+**Implementer verification:** shared/API builds passed; full shared **166/166**,
+full API **343/343** including all ten imported independent cases and nine new
+regressions. A separate targeted run of the three former failing cases passed
+**3/3**: Apr15 dispatch count remained 1; cancellation and refund replays made
+zero provider calls, remained verified, and synthetic account deletion succeeded.
+The targeted selection omits the other seven; all ten passed in the full run.
+Both mock and fake-HTTP real orchestration are covered, including KST boundary
+equality, multi-month lag, stale revision/instrument state and abandoned dispatch.
+
+All nine migrations applied fresh to the owned isolated PG16 target at 55440.
+2026-10-07T06:18:25Z synthetic dump/restore preserved row counts and all nine
+migration rows, and restored AEAD decrypted with its in-memory fixture key.
+Schema-bound Prisma diff remained empty. Before/after logs are mode 0600 in
+approved temp: `lcm-provider-known-regressions-before.log` and
+`lcm-provider-known-regressions-final.log`; new synthetic dump:
+`lcm-billing-synthetic-restore-33dfb97d-180a-462f-9c47-19c42b09afb8.dump`.
+Independent review of this updated source is still required. No production,
+merchant calls, operational values, frontend changes, push or live activation.

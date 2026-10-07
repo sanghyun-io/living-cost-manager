@@ -115,10 +115,12 @@ export async function deleteAccount(
           OR: [{ status: { in: ["created", "dispatch_unknown", "manual_review"] } }, { reviewRequired: true }] } });
         const unresolvedRefund = await tx.serviceRefundRecord.count({ where: { attempt: { contractId: billing.id },
           status: { notIn: ["verified", "rejected"] } } });
-        const instruments = await tx.serviceBillingInstrument.count({ where: { contractId: billing.id, status: { not: "revoked" } } });
+        const instruments = await tx.serviceBillingInstrument.count({ where: { contractId: billing.id,
+          OR: [{ status: { not: "revoked" } }, { ciphertext: { not: null } }, { nonce: { not: null } }, { authTag: { not: null } }, { keyVersion: { not: null } }] } });
         const events = await tx.serviceBillingEventReceipt.count({ where: { attempt: { contractId: billing.id }, processedAt: null } });
         if (unresolvedAttempt || unresolvedRefund || instruments || events ||
-          (current.status !== "idle" && (!current.renewalStopped || current.providerCancellationStatus !== "verified"))) {
+          (current.status !== "idle" && (!current.cancelRequested || !current.renewalStopped || current.providerCancellationStatus !== "verified" ||
+            current.cancellationVerifiedVersion !== current.version))) {
           throw new BillingAccountDeleteBlocked();
         }
         // Financial records remain; User FK is SET NULL, no email/name copied.
