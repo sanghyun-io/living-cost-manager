@@ -14,7 +14,7 @@ function setup() {
   const auth: any = { serverSession: { token: 'synthetic', user: { id: 'a', emailVerified: true }, workspace: { id: 'one', role: 'owner' } },
     serverApi: { createWorkspace: vi.fn(() => new Promise((_resolve, reject) => { fail = reject; })) },
     matchesServerScope: (account: string, workspace: string) => auth.serverSession?.user.id === account && auth.serverSession?.workspace?.id === workspace };
-  const sync: any = { loadServerWorkspaces: vi.fn(async () => [{ id: 'one', name: 'Existing', role: 'owner' }]) };
+  const sync: any = { loadServerWorkspaces: vi.fn(async () => ({ status: 'applied', workspaces: [{ id: 'one', name: 'Existing', role: 'owner' }], isCurrent: () => true })) };
   function render() { let result!: ReturnType<typeof useLedgers>; let count = 0; do { if (++count > 30) throw Error('did not settle'); hooks.dirty = false; hooks.cursor = 0; result = useLedgers(auth, sync); for (const effect of hooks.effects.splice(0)) effect(); } while (hooks.dirty); return result; }
   return { auth, sync, render, fail: () => fail(new Error('synthetic network failure')) };
 }

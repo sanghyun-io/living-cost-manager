@@ -38,6 +38,10 @@ interface UseWorkspaceSyncOptions {
   isLocalDataReady?: boolean;
 }
 
+export type WorkspaceListLoadResult =
+  | { status: "discarded" }
+  | { status: "applied"; workspaces: WorkspaceDto[]; isCurrent: () => boolean };
+
 /**
  * Everything scoped to a server workspace: snapshot sync decisions, upload /
  * download, workspace switching, sharing (members & invitations), plus the
@@ -65,12 +69,18 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
   latestSession.current = serverSession;
   const latestLocal = useRef({ localUserId, isLocalDataReady });
   latestLocal.current = { localUserId, isLocalDataReady };
+  // Unlike snapshot syncScope, list reads also work without a selected ledger
+  // or ready local data. Still invalidate them on every identity/mode change.
+  const listScope = JSON.stringify([serverSession?.user.id, serverSession?.workspace?.id, localUserId, isLocalDataReady]);
+  const listEpoch = useRef({ scope: listScope });
+  if (listEpoch.current.scope !== listScope) listEpoch.current = { scope: listScope };
   const [, renderSafety] = useState(0);
   const notifySafety = () => renderSafety((value) => value + 1);
   if (safety.current.scope !== scope) safety.current = createSyncSafety(scope);
   const checkedScope = useRef<ReturnType<typeof createSyncSafety> | null>(null);
   const sharingScope = useRef<ReturnType<typeof createSyncSafety> | null>(null);
   const decisionRequest = useRef(0);
+  const workspaceListRequest = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -156,17 +166,23 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
   }, [scope, currentSnapshotKey, canUploadServerSnapshot, auth.isServerBusy, safety.current.enabled, safety.current.busy]);
 
   // ── workspaces & sync decision ───────────────────────────────────────
-  async function loadServerWorkspaces(session = serverSession) {
+  async function loadServerWorkspaces(session = serverSession): Promise<WorkspaceListLoadResult> {
+    const request = ++workspaceListRequest.current;
     if (!serverApi || !session) {
       setServerWorkspaces([]);
-      return [];
+      return { status: "discarded" };
     }
 
     const ticket = safety.current;
+    const epoch = listEpoch.current;
+    const accountId = session.user.id, workspaceId = session.workspace?.id;
+    const isCurrent = () => isActive(ticket) && epoch === listEpoch.current &&
+      latestSession.current?.user.id === accountId && latestSession.current?.workspace?.id === workspaceId &&
+      request === workspaceListRequest.current;
     const workspaces = await serverApi.listWorkspaces(session.token);
-    if (!isActive(ticket) || !isCurrentSession(session)) return [];
+    if (!isCurrent()) return { status: "discarded" };
     setServerWorkspaces(workspaces);
-    return workspaces;
+    return { status: "applied", workspaces, isCurrent };
   }
 
   async function prepareServerSyncDecision(session: ServerSession) {

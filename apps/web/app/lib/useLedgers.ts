@@ -7,7 +7,7 @@ import type { LocalBudgetSnapshot } from './snapshot';
 import { buildWorkspaceSnapshot } from './snapshot';
 import { ServerApiError } from './serverApi';
 
-type Mutation = { pending: boolean; uncertain: boolean; name: string; status: string; listReviewed: boolean };
+type Mutation = { pending: boolean; uncertain: boolean; name: string; status: string; listReviewed: boolean; reviewCurrent?: () => boolean };
 export const ledgerCreationKey = (accountId: string) => 'living-cost-manager:ledger-creation:' + encodeURIComponent(accountId);
 export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
   const accountId = auth.serverSession?.user.id, workspaceId = auth.serverSession?.workspace?.id;
@@ -36,23 +36,35 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
   const [selected, setSelected] = useState<string[]>([]);
   const [aggregate, setAggregate] = useState<AggregateWorkspacesResponse | null>(null);
   const requestId = useRef(0);
+  const listRequestId = useRef(0);
   useEffect(() => { setReading(false); setStatus(''); setAggregateMode(false); setSelected([]); setAggregate(null); requestId.current++; }, [scope]);
   const current = (ticket: typeof epoch.current) => mounted.current && ticket === epoch.current && auth.matchesServerScope(ticket.accountId, ticket.workspaceId);
 
   async function refresh() {
     const ticket = epoch.current;
+    const request = ++listRequestId.current;
+    if (!accountId) return;
+    const state = mutation(accountId);
+    state.listReviewed = false; state.reviewCurrent = undefined;
+    state.status = '가계부 목록을 확인 중입니다. 이전 목록은 아직 검토되지 않았습니다.';
+    setStatus(''); notify();
     try {
-      const values = await sync.loadServerWorkspaces();
-      if (!current(ticket) || !accountId) return;
-      const state = mutation(accountId); state.listReviewed = true;
+      const result = await sync.loadServerWorkspaces();
+      if (!current(ticket) || request !== listRequestId.current) return;
+      if (result.status !== 'applied' || !result.isCurrent()) {
+        state.status = '목록 응답이 무효화되어 이전 목록을 유지합니다. 새로 확인하기 전에는 생성 결과를 확인할 수 없습니다.';
+        notify(); return;
+      }
+      state.listReviewed = true;
+      state.reviewCurrent = () => current(ticket) && request === listRequestId.current && result.isCurrent();
       state.status = state.uncertain ? '최신 가계부 목록을 표시했습니다. 같은 이름의 가계부가 있는지 직접 확인하세요. 목록에 없어도 지연 완료될 수 있어 생성 실패를 확정할 수 없습니다.' : '가계부 목록을 확인했습니다.';
-      notify(); return values;
-    } catch { if (current(ticket)) setStatus('목록을 확인하지 못했습니다. 생성은 재시도하지 않습니다.'); }
+      notify(); return result.workspaces;
+    } catch { if (current(ticket) && request === listRequestId.current) { state.status = '목록을 확인하지 못했습니다. 이전 목록은 검토되지 않았으며 생성은 재시도하지 않습니다.'; setStatus(state.status); notify(); } }
   }
   function acknowledgeReconciliation() {
     if (!accountId) return;
     const state = mutation(accountId);
-    if (state.pending || !state.uncertain || !state.listReviewed) return;
+    if (state.pending || !state.uncertain || !state.listReviewed || !state.reviewCurrent?.()) return;
     try { window.localStorage.removeItem(ledgerCreationKey(accountId)); }
     catch { state.status = '확인 상태를 저장하지 못했습니다. 생성 재시도는 중단합니다.'; notify(); return; }
     state.uncertain = false; state.status = '목록을 직접 확인한 뒤 재시도를 허용했습니다. 서버의 지연 완료로 중복이 생길 수 있으며 자동 재시도하지 않습니다.'; notify();
@@ -83,7 +95,10 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
       state.uncertain = false;
       window.localStorage.removeItem(ledgerCreationKey(session.user.id));
       state.status = '새 가계부를 만들었습니다. 기존 가계부는 변경하지 않았습니다. 위 가계부 선택에서 새 가계부를 고르세요.';
-      if (current(ticket)) await sync.loadServerWorkspaces().catch(() => { state.status += ' 목록 새로고침이 필요합니다.'; });
+      if (current(ticket)) {
+        const result = await sync.loadServerWorkspaces().catch(() => null);
+        if (!result || result.status !== 'applied' || !result.isCurrent()) state.status += ' 목록 새로고침이 필요합니다.';
+      }
       return current(ticket);
     } catch (error) {
       // Account-owned outcome is recorded EVEN IF the selected-ledger epoch or
@@ -119,8 +134,11 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
     catch { if (current(ticket) && id === requestId.current) setStatus('합산 결과를 읽지 못했습니다. 권한과 연결을 확인하세요.'); }
     finally { if (current(ticket) && id === requestId.current) setReading(false); }
   }
+  const reconciliationReady = !!activeMutation?.listReviewed && !!activeMutation.reviewCurrent?.();
+  const mutationStatus = activeMutation?.uncertain && activeMutation.listReviewed && !reconciliationReady
+    ? '목록 확인 이후 상태가 변경되었습니다. 이전 목록으로 생성 결과를 확인하지 말고 다시 새로고침하세요.' : activeMutation?.status ?? '';
   return { busy: reading || !!activeMutation?.pending, mutationPending: !!activeMutation?.pending,
-    uncertain: !!activeMutation?.uncertain, uncertainName: activeMutation?.name ?? '', reconciliationReady: !!activeMutation?.listReviewed,
-    status: activeMutation?.pending || activeMutation?.uncertain ? activeMutation.status : status || activeMutation?.status || '', create, rename, refresh, acknowledgeReconciliation,
+    uncertain: !!activeMutation?.uncertain, uncertainName: activeMutation?.name ?? '', reconciliationReady,
+    status: activeMutation?.pending || activeMutation?.uncertain ? mutationStatus : status || mutationStatus, create, rename, refresh, acknowledgeReconciliation,
     aggregateMode, setAggregateMode: (value: boolean) => { requestId.current++; setReading(false); setAggregateMode(value); setAggregate(null); }, selected, select, aggregate, loadAggregate };
 }
