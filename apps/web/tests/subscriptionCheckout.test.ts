@@ -131,8 +131,19 @@ describe("owned payment state and recovery", () => {
     expect(f.controller.state.message).toContain("확인 중");
   });
   test("sandbox/mock inconsistent entitlement cannot show live paid access", async () => {
-    const f = fixture(); f.api.subscription.mockResolvedValue({ ...subscription(), paidAccess: true, contractId: "fixture", paidThrough: "2026-11-07T00:00:00Z" });
+    const f = fixture(); f.api.subscription.mockResolvedValue({ ...subscription(), status: "active", planId: "monthly", paidAccess: true, contractId: "fixture", paidThrough: "2026-11-07T00:00:00Z" });
     await f.controller.load(true); expect(f.controller.state.subscription?.paidAccess).toBe(false);
+  });
+  test("unknown subscription status with paidAccess true fails closed in the live controller", async () => {
+    const f = fixture(); f.api.readiness.mockResolvedValue({ ...readiness(), mode: "live", sdkConfig: { storeId: "store", channelId: "channel" } });
+    f.api.subscription.mockResolvedValue({ ...subscription(), status: "UNKNOWN_FUTURE_STATUS", paidAccess: true, contractId: "fixture", planId: "monthly", paidThrough: "2026-11-07T00:00:00Z" } as unknown as Subscription);
+    await f.controller.load(true); expect(f.controller.state.subscription).toBeNull(); expect(f.controller.state.message).toContain("확인하지 못했습니다");
+    expect(f.controller.canQuote()).toBe(false);
+  });
+  test("invalid replacement subscription clears previously verified access", async () => {
+    const f = fixture(); f.api.subscription.mockResolvedValue({ ...subscription(), status: "active", planId: "monthly", contractId: "fixture", paidAccess: true, paidThrough: "2026-11-07T00:00:00Z" });
+    await f.controller.load(true); f.api.subscription.mockResolvedValue({ ...subscription(), status: "ending", contractId: "fixture", planId: "monthly", paidAccess: true, paidThrough: "InvalidDate" });
+    await f.controller.load(true); expect(f.controller.state.subscription).toBeNull();
   });
   test("live entitlement comes only from owned server subscription after attempt GET, never SDK or charge callback", async () => {
     const f = fixture(); const r = { ...readiness(), mode: "live" as const, sdkConfig: { storeId: "store-fixture", channelId: "channel-fixture" } };
@@ -143,7 +154,7 @@ describe("owned payment state and recovery", () => {
     await c.load(true); await c.quote("monthly"); c.consent("billing", true); c.consent("renewal", true); await c.pay();
     expect(c.state.attempt?.status).toBe("pending"); expect(c.state.subscription?.paidAccess).toBe(false);
     f.api.attempt.mockResolvedValue({ ...attempt(), mode: "live" });
-    f.api.subscription.mockResolvedValue({ ...subscription(), paidAccess: true, contractId: "fixture", paidThrough: "2026-11-07T00:00:00Z" });
+    f.api.subscription.mockResolvedValue({ ...subscription(), status: "active", planId: "monthly", paidAccess: true, contractId: "fixture", paidThrough: "2026-11-07T00:00:00Z" });
     await c.check(); expect(c.state.subscription?.paidAccess).toBe(true);
   });
   test("attempt price mismatch is not a successful payment display", async () => {
@@ -151,8 +162,8 @@ describe("owned payment state and recovery", () => {
     expect(f.controller.state.attempt).toBeNull(); expect(f.controller.state.subscription?.paidAccess).toBe(false);
   });
   test("cancel pending is not cancellation proof", async () => {
-    const f = fixture(); f.api.subscription.mockResolvedValue({ ...subscription(), contractId: "fixture" });
-    await f.controller.load(true); f.api.cancel.mockResolvedValue({ ...subscription(), contractId: "fixture", cancelAtPeriodEnd: true, renewalStopped: true });
+    const f = fixture(); f.api.subscription.mockResolvedValue({ ...subscription(), status: "active", planId: "monthly", contractId: "fixture" });
+    await f.controller.load(true); f.api.cancel.mockResolvedValue({ ...subscription(), status: "ending", planId: "monthly", contractId: "fixture", cancelAtPeriodEnd: true, renewalStopped: true });
     await f.controller.cancel(); expect(f.controller.state.message).toContain("아직 확인되지");
     expect(renewalConfirmed(f.controller.state.subscription)).toBe(false);
     expect(renewalConfirmed({ ...subscription(), renewalStopped: true, providerCancellationStatus: "not_applicable" })).toBe(false);

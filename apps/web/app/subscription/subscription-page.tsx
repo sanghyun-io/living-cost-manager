@@ -10,7 +10,7 @@ const money = (amount: number) => new Intl.NumberFormat("ko-KR", { style: "curre
 const date = (value: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString("ko-KR") : "미정";
 
 export function SubscriptionPage() {
-  const { session, checked } = useBillingSession();
+  const { session, checked, status, retry } = useBillingSession();
   const [controller, setController] = useState<BillingController | null>(null);
   useEffect(() => {
     if (!checked) { setController(null); return; }
@@ -29,8 +29,9 @@ export function SubscriptionPage() {
     <nav aria-label="생활비관리"><a href="/">생활비 화면으로 돌아가기</a> <a href="/guide/#pricing">가격 준비 안내</a></nav>
     <h1>구독 관리</h1>
     <p>기존 무료 기능은 계속 사용할 수 있습니다. 읽기·내보내기·공유 가계부 이용은 이 화면의 결제 여부로 제한하지 않습니다.</p>
+    <p><button type="button" aria-disabled={status !== "unavailable"} onClick={() => { if (status === "unavailable") retry?.(); }}>{status === "loading" ? "로그인 상태 확인 중…" : status === "verified" ? "로그인 상태 확인됨" : "로그인 상태 다시 확인"}</button></p>
     {!checked ? <p role="status">로그인 상태를 확인하고 있습니다.</p> : <>
-      {!session && <p>구독 조회는 로그인 후 이용할 수 있습니다. <a href="/">생활비 화면에서 기존 로그인 이용</a></p>}
+      {status === "unavailable" ? <p role="status">로그인 상태를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요. 새 로그인이 필요한지 아직 확인되지 않았습니다.</p> : !session && <p>구독 조회는 로그인 후 이용할 수 있습니다. <a href="/">생활비 화면에서 기존 로그인 이용</a></p>}
       {controller ? <BillingPanel key={session?.user.id ?? "guest"} controller={controller} /> : <><p role="status">결제 준비 중 · 현재 결제 신청을 받지 않습니다.</p><PriceProposal /></>}
     </>}
   </main>;

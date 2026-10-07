@@ -1,5 +1,6 @@
 import type { Attempt, BillingApi, BillingSdk, Intent, Plan, Quote, Readiness, Subscription } from "./types";
 import { BillingError } from "./api";
+import { validSubscription } from "./subscriptionValidation";
 
 export interface BillingState {
   readiness: Readiness | null; subscription: Subscription | null; quote: Quote | null;
@@ -36,10 +37,6 @@ export function validQuote(q: Quote, r: Readiness, plan: Plan, now: number): boo
 export function renewalConfirmed(s: Subscription | null): boolean {
   return s?.renewalStopped === true && s.providerCancellationStatus === "confirmed" &&
     s.cancellationProof?.allChargePathsStopped === true && s.cancellationProof.inFlightResolved === true;
-}
-function validSubscription(s: Subscription): boolean {
-  return !!s && typeof s.paidAccess === "boolean" && s.existingFreeAccess === true && text(s.status) &&
-    (!s.paidAccess || (text(s.contractId) && date(s.paidThrough)));
 }
 const unresolved = "처리 결과를 확인해야 합니다. 새 결제를 시작하지 마세요. 결제 확인 정보는 유지됩니다.";
 
@@ -99,7 +96,9 @@ export class BillingController {
       if (!authenticated) return;
       const subscription = await this.api.subscription(this.abort.signal);
       if (!this.alive) return;
-      if (!validSubscription(subscription)) throw new Error("invalid subscription");
+      if (readiness.currency !== "KRW" || !validSubscription(subscription, readiness.mode, this.now())) {
+        this.update({ subscription: null }); throw new Error("invalid subscription");
+      }
       this.update({ subscription: { ...subscription, paidAccess: readiness.mode === "live" && subscription.paidAccess } });
       if (this.state.intent?.attemptId) await this.readAttempt();
       else if (this.state.intent) this.update({ message: unresolved });
@@ -189,7 +188,9 @@ export class BillingController {
       a.mode === "sandbox" ? "테스트 결제 결과입니다. 실제 유료 이용 권한은 별도 서버 확인을 따릅니다." : "서버에서 결제 결과를 확인했습니다." });
     const subscription = await this.api.subscription(this.abort.signal);
     if (!this.alive) return;
-    if (!validSubscription(subscription)) throw new Error("invalid subscription");
+    if (this.state.readiness?.currency !== "KRW" || !validSubscription(subscription, this.state.readiness.mode, this.now())) {
+      this.update({ subscription: null }); throw new Error("invalid subscription");
+    }
     // Mock/sandbox must never present live paid access, even with inconsistent data.
     this.update({ subscription: { ...subscription, paidAccess: a.mode === "live" && subscription.paidAccess } });
   }
@@ -203,7 +204,9 @@ export class BillingController {
     await this.run(async () => {
       const subscription = await this.api.cancel(this.abort.signal);
       if (!this.alive) return;
-      if (!validSubscription(subscription)) throw new Error("invalid subscription");
+      if (this.state.readiness?.currency !== "KRW" || !validSubscription(subscription, this.state.readiness.mode, this.now())) {
+        this.update({ subscription: null }); throw new Error("invalid subscription");
+      }
       this.update({ subscription: { ...subscription, paidAccess: this.state.readiness?.mode === "live" && subscription.paidAccess }, message: renewalConfirmed(subscription) ? "자동 갱신 중단이 확인되었습니다." : "갱신 중단 요청 상태입니다. 제공자 처리 완료는 아직 확인되지 않았습니다." });
     });
   }

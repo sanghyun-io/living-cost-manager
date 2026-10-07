@@ -25,10 +25,13 @@ export interface Quote {
   nextChargeAt: string; nextChargeAmount: number;
 }
 export interface Subscription {
-  contractId: string | null; planId: Plan | null; status: string; paidAccess: boolean;
+  contractId: string | null; planId: Plan | null;
+  status: "free" | "draft" | "pending" | "active" | "payment_failed" | "ending" | "expired" | "closed" | null; paidAccess: boolean;
   paidThrough: string | null; nextChargeAt: string | null; cancelAtPeriodEnd: boolean;
   renewalStopped: boolean; providerCancellationStatus: string; existingFreeAccess: true;
   cancellationProof?: { allChargePathsStopped: boolean; inFlightResolved: boolean };
+  currency?: "KRW"; mode?: Mode;
+  premiumScope?: { version: string; features: string[] };
 }
 export interface Attempt {
   attemptId: string; status: "pending" | "paid" | "failed"; mode: Mode;

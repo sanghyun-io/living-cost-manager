@@ -5,6 +5,8 @@ import { chromium } from "playwright";
 import assert from "node:assert/strict";
 
 const browser = await chromium.launch({ headless: true });
+const browserUrl = process.env.LCM_BROWSER_URL ?? "http://localhost:3199";
+const fixtureApi = new URL(process.env.LCM_FIXTURE_API_BASE ?? "http://127.0.0.1:3199/fixture-api");
 const context = await browser.newContext();
 const page = await context.newPage();
 const failures = [];
@@ -13,9 +15,11 @@ page.on("requestfailed", request => requests.push(`${request.url()} ${request.fa
 page.on("console", msg => { if (msg.type() === "error") requests.push(msg.text()); });
 page.on("pageerror", error => failures.push(error.message));
 let enabled = false, missing = false, prepare = 0, charges = 0, sdkLoads = 0;
+let meRequests = 0, meMode = "ok";
+let environment = "sandbox", subscriptionOverride = null;
 const subscription = { contractId: null, planId: null, status: "free", paidAccess: false, paidThrough: null,
   nextChargeAt: null, cancelAtPeriodEnd: false, renewalStopped: false, providerCancellationStatus: "unconfirmed", existingFreeAccess: true };
-const readiness = () => ({ mode: "sandbox", checkoutEnabled: enabled, blockingCodes: enabled ? [] : ["COMMERCE_PENDING"], catalogVersion: "browser-fixture",
+const readiness = () => ({ mode: environment, checkoutEnabled: enabled, blockingCodes: enabled ? [] : ["COMMERCE_PENDING"], catalogVersion: "browser-fixture",
   currency: "KRW", taxTreatment: "inclusive", catalog: { monthly: { totalAmount: 990, periodMonths: 1 }, annual: { totalAmount: 9900, periodMonths: 12 } },
   consentVersions: { billing: "fixture-billing", autoRenew: "fixture-renew" }, capabilities: { issueInstrument: true, charge: true, renew: true, cancel: true, refund: true },
   sdkConfig: { storeId: "fixture-store", channelId: "fixture-channel" }, approvals: { merchant: true, commerce: true, legal: true, featureScope: true } });
@@ -32,17 +36,27 @@ await context.route("**/*", async route => {
     sdkLoads++;
     await route.fulfill({ contentType: "application/javascript", body: "window.PortOne={requestIssueBillingKey:async()=>({billingKey:'synthetic-browser-secret'})};" }); return;
   }
-  // Disallow ANY external request, including real provider/production traffic.
-  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") { await route.abort(); return; }
-  if (!url.pathname.startsWith("/fixture-api/")) { await route.continue(); return; }
-  const cors = { "access-control-allow-origin": "http://localhost:3199", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "Authorization, Content-Type" };
+  const fixture = url.origin === fixtureApi.origin && url.pathname.startsWith(`${fixtureApi.pathname}/`);
+  // Exact configured API is fulfilled locally, even when testing the production build URL.
+  // NEVER continue a production/API/provider request onto the network.
+  if (!fixture) {
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") await route.abort();
+    else await route.continue();
+    return;
+  }
+  const cors = { "access-control-allow-origin": new URL(browserUrl).origin, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "Authorization, Content-Type" };
   if (route.request().method() === "OPTIONS") { await route.fulfill({ status: 204, headers: cors }); return; }
-  const path = url.pathname.slice("/fixture-api".length);
+  const path = url.pathname.slice(fixtureApi.pathname.length);
   let body;
-  if (path === "/me") body = { user: { id: "fixture-account" } };
+  if (path === "/me") {
+    meRequests++;
+    if (meMode === "503") { await route.fulfill({ status: 503, headers: cors, body: "synthetic unavailable" }); return; }
+    if (meMode === "timeout") { await new Promise(resolve => setTimeout(resolve, 16000)); }
+    body = { user: { id: "fixture-account" } };
+  }
   else if (missing) { await route.fulfill({ status: 404, headers: cors, body: "not registered" }); return; }
   else if (path.endsWith("/readiness")) body = readiness();
-  else if (path.endsWith("/subscription")) body = subscription;
+  else if (path.endsWith("/subscription")) body = subscriptionOverride ?? subscription;
   else if (path.endsWith("/quotes")) { await new Promise(resolve => setTimeout(resolve, 120)); body = quote; }
   else if (path.endsWith("/instruments/prepare")) { prepare++; body = { instrumentId: "fixture-instrument", sdkRequest: { storeId: "fixture-store", channelKey: "fixture-channel", issueId: "fixture-issue", customer: { customerId: "fixture-opaque" }, billingKeyMethod: "CARD" } }; }
   else if (path.endsWith("/confirm")) body = { confirmed: true };
@@ -53,8 +67,34 @@ await context.route("**/*", async route => {
   await route.fulfill({ contentType: "application/json", headers: cors, body: JSON.stringify(body) });
 });
 try {
-  await page.goto("http://localhost:3199/subscription/");
+  meMode = "503";
+  await page.goto(`${browserUrl}/subscription/`);
+  await page.getByRole("status").filter({ hasText: "로그인 상태를 확인하지 못했습니다" }).waitFor();
+  const firstFailure = meRequests;
+  await page.evaluate(() => { for (let i = 0; i < 20; i++) window.dispatchEvent(new Event("focus")); });
+  assert.equal(meRequests, firstFailure, "focus storm is throttled after transient failure");
+  await page.waitForTimeout(5100); meMode = "ok";
+  await page.evaluate(() => { for (let i = 0; i < 20; i++) window.dispatchEvent(new Event("focus")); });
   await page.getByRole("status").filter({ hasText: "현재 결제 신청" }).waitFor();
+  await page.getByRole("button", { name: "로그인 상태 확인됨" }).waitFor();
+  assert.equal(meRequests, firstFailure + 1, "same valid token recovers once");
+  await page.evaluate(() => { for (let i = 0; i < 20; i++) window.dispatchEvent(new Event("focus")); });
+  assert.equal(meRequests, firstFailure + 1, "verified identity cached");
+  environment = "live";
+  subscriptionOverride = { ...subscription, status: "UNKNOWN_FUTURE_STATUS", paidAccess: true, contractId: "synthetic-unknown", planId: "monthly", paidThrough: new Date(Date.now() + 2678400000).toISOString() };
+  await page.reload();
+  await page.getByRole("status").filter({ hasText: "정보를 확인하지 못했습니다" }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "현재 이용 상태" }).count(), 0, "unknown live status cannot display verified entitlement");
+  assert.equal(await page.getByRole("button", { name: "월간 견적 확인" }).getAttribute("aria-disabled"), "true");
+  environment = "sandbox"; subscriptionOverride = null;
+  meMode = "timeout"; await page.reload();
+  await page.getByRole("status").filter({ hasText: "로그인 상태를 확인하지 못했습니다" }).waitFor({ timeout: 20000 });
+  assert.equal(await page.getByText("구독 조회는 로그인 후", { exact: false }).count(), 0, "timeout is unavailable, not logged out");
+  await page.waitForTimeout(5100); meMode = "ok";
+  const retryButton = page.getByRole("button", { name: "로그인 상태 다시 확인" });
+  await retryButton.focus(); await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "로그인 상태 확인됨" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "로그인 상태 확인됨" }).evaluate(el => document.activeElement === el), true, "retry button stays mounted and focused");
   assert.equal(sdkLoads, 0); assert.equal(prepare, 0); assert.equal(charges, 0);
   assert.equal(await page.getByRole("button", { name: "월간 견적 확인" }).getAttribute("aria-disabled"), "true");
   missing = true; await page.reload();
@@ -90,7 +130,7 @@ try {
   assert.equal(await page.getByText("서버 결제 확인", { exact: false }).count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(failures, []);
-  console.log("PASS: local-only browser 404/OFF, mobile, keyboard/focus, separate consent, duplicate click, synthetic SDK, authoritative result, refund request, logout privacy.");
+  console.log("PASS: intercepted-only browser unknown-live-subscription rejection, 503/held-timeout recovery, focus retry throttle/cache, 404/OFF, mobile, keyboard/focus, separate consent, duplicate click, synthetic SDK, authoritative result, refund request, logout privacy.");
 } catch (error) {
   console.error("Synthetic page diagnostics:", await page.locator("body").innerText(), failures, requests);
   throw error;
