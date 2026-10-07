@@ -24,6 +24,7 @@ export function DataModal({
   return (
     <ModalShell opened={opened} sectionLabel="관리" title="데이터 관리" size="lg" onClose={onClose}>
       <MarketingConsentControl {...marketingConsent} />
+      <Text size="sm"><a href="/subscription/">구독 관리 · 결제 준비 상태</a></Text>
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Card withBorder padding="md" radius="sm">
           <Text className="section-label" size="xs">엑셀 템플릿</Text>

@@ -13,6 +13,7 @@ export function PricingPreview() {
     </div>
     <p>{copy.comparison}</p>
     <p>{copy.tax}</p>
+    <p><a href="/subscription/">구독 관리 · 결제 준비 상태 확인</a> (기존 무료 기능은 계속 이용 가능)</p>
     <h3>결제 전에 확인할 수 있도록 준비하는 내용</h3>
     <p>현재 구매·카드 등록·해지 신청을 받지 않습니다. 아래는 향후 안내 방침이며 계약 조건이 아닙니다.</p>
     <ul>
