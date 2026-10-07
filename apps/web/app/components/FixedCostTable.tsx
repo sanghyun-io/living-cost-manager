@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
+import { useEffect, useId, useRef, useState } from "react";
+import { Alert, Button, Checkbox, Group, Input, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
 import { suggestCategoryId, billingDateSchema } from "@living-cost-manager/shared";
-import { scheduleHelp } from "../lib/scheduleHelp";
+import { getScheduleStatus } from "./FixedCostSchedule";
+import { FixedCostRowActions } from "./FixedCostRowActions";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
 import type { CostFilters } from "../lib/costViews";
@@ -73,6 +74,11 @@ export function FixedCostTable({
   const filterData = [{ value: "all", label: "전체" }, ...categoryData];
   const methodData = PAYMENT_METHODS.map((m) => ({ value: m.id, label: m.label }));
   const [quickAddText, setQuickAddText] = useState("");
+  const scheduleHelpId = useId();
+  const [menuItemId, setMenuItemId] = useState<string | null>(null);
+  useEffect(() => {
+    if (isDeleteMode || !visibleFixedCosts.some((item) => item.id === menuItemId)) setMenuItemId(null);
+  }, [isDeleteMode, visibleFixedCosts, menuItemId]);
   const focusInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusItemId) { focusInput.current?.focus(); focusInput.current?.select(); }
@@ -171,6 +177,9 @@ export function FixedCostTable({
         <Text size="sm">{visibleFixedCosts.length}개 항목</Text>
         <Text size="sm" fw={700} className="tnum">월 환산 {formatWon(visibleFixedCostTotal)}</Text>
       </div>
+      <Text id={scheduleHelpId} size="xs" c="dimmed" mb="sm">
+        납부일은 실제 청구 기준이며 카드 결제일과 별개입니다. 날짜가 없는 달에는 말일을 적용합니다.
+      </Text>
       <div className="table" role="group" aria-label="고정비 목록">
         <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} aria-hidden="true">
           <span>항목</span>
@@ -181,7 +190,7 @@ export function FixedCostTable({
           <span>금액</span>
           <span>주기</span>
           <span>월 환산</span>
-          {isDeleteMode ? <span>선택</span> : null}
+          <span>{isDeleteMode ? "선택" : ""}</span>
         </div>
         {visibleFixedCosts.length === 0 ? (
           <div className="table-empty" role="note">
@@ -218,7 +227,6 @@ export function FixedCostTable({
                   value={item.name}
                   onChange={(event) => onItemChange(item.id, { name: event.currentTarget.value })}
                 />
-                {!isDeleteMode ? <Button variant="subtle" size="compact-xs" aria-label={`${item.name} 복제`} onClick={() => onDuplicateItem(item.id)}>복제</Button> : null}
               </span>
               <span>
                 <Group gap={6} wrap="nowrap" align="center">
@@ -269,18 +277,23 @@ export function FixedCostTable({
                 />
               </span>
               <span>
-                <TextInput
-                  type="date"
-                  label="기준 납부일"
-                  aria-label={`${item.name} 기준 납부일`}
-                  size="xs"
-                  value={item.billingAnchorDate ?? ""}
-                  onChange={(event) => {
-                    const date = event.currentTarget.value;
-                    if (!date || billingDateSchema.safeParse(date).success) onItemChange(item.id, { billingAnchorDate: date || null });
-                  }}
-                />
-                <Text size="xs" c="dimmed">{scheduleHelp(item)}</Text>
+                <Input.Wrapper label="기준 납부일" id={`${scheduleHelpId}-${item.id}`} size="xs">
+                  <Input
+                    type="date"
+                    id={`${scheduleHelpId}-${item.id}`}
+                    // Input's automatic ARIA would overwrite the shared help reference.
+                    withAria={false}
+                    aria-label={`${item.name} 기준 납부일`}
+                    aria-describedby={scheduleHelpId}
+                    size="xs"
+                    value={item.billingAnchorDate ?? ""}
+                    onChange={(event) => {
+                      const date = event.currentTarget.value;
+                      if (!date || billingDateSchema.safeParse(date).success) onItemChange(item.id, { billingAnchorDate: date || null });
+                    }}
+                  />
+                </Input.Wrapper>
+                <Text size="xs" c="dimmed">{getScheduleStatus(item)}</Text>
                 <Checkbox
                   aria-label="말일"
                   label="말일"
@@ -358,7 +371,13 @@ export function FixedCostTable({
                     onChange={() => onToggleDeleteSelection(item.id)}
                   />
                 </span>
-              ) : null}
+              ) : (
+                <span className="row-secondary-actions">
+                  <FixedCostRowActions name={item.name} opened={menuItemId === item.id}
+                    onChange={(opened) => setMenuItemId(opened ? item.id : null)}
+                    onDuplicate={() => onDuplicateItem(item.id)} />
+                </span>
+              )}
             </div>
           );
         })}

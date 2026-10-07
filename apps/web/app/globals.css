@@ -259,7 +259,7 @@ body {
 /* Keep date entry readable; narrower screens use stacked editing fields. */
 .table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 148px 104px 92px 112px;
+  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 148px 104px 92px 112px 32px;
   gap: 12px;
   align-items: center;
   min-height: 68px;
@@ -298,6 +298,8 @@ body {
   display: flex;
   justify-content: center;
 }
+
+.row-secondary-actions { display: flex; justify-content: flex-end; }
 
 .monthly-equivalent-cell {
   white-space: normal;
@@ -540,7 +542,7 @@ body {
   .table-row, .table-row.delete-mode { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
   .table-row > span:nth-child(1), .table-row > span:nth-child(4),
   .table-row > span:nth-child(5), .table-row > span:nth-child(8),
-  .table-row > .delete-select-cell { grid-column: 1 / -1; }
+  .table-row > .delete-select-cell, .table-row > .row-secondary-actions { grid-column: 1 / -1; }
   .monthly-equivalent-cell { border-top: 1px solid var(--line); padding-top: 12px; }
   .monthly-equivalent-cell .mantine-InputWrapper-root { margin-top: 8px; }
 
