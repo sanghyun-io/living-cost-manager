@@ -52,6 +52,12 @@ describe("KST ledger aggregation", () => {
     const summary = summarizeWorkspaceBudget(0, [cost(null, 3, 1)], new Date());
     expect(sumWorkspaceBudgets([summary, summary, summary]).monthlyNormalizedExpense).toBe(1);
   });
+  test("income stays ledger-local: totals omit it rather than double-counting a repeated salary", () => {
+    const summary = summarizeWorkspaceBudget(3000000, [cost(null)], new Date());
+    expect(summary.monthlyIncome).toBe(3000000);
+    expect(sumWorkspaceBudgets([summary, summary])).not.toHaveProperty("monthlyIncome");
+    expect(sumWorkspaceBudgets([])).not.toHaveProperty("monthlyIncome");
+  });
   test("invalid rollover dates are unknown and future anchors never back-project payments", () => {
     const from = new Date("2026-02-01T00:00:00Z");
     expect(summarizeWorkspaceBudget(0, [cost("2026-02-30")], from)).toMatchObject({ unknownScheduleCount: 1, thirtyDayDue: null });

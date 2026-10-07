@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { createWorkspaceRequestSchema } from "@living-cost-manager/shared";
 import { buildApp } from "../src/app.js";
@@ -41,7 +41,8 @@ describe("multi-ledger workspace API", () => {
     expect(aggregate.statusCode).toBe(200);
     expect(aggregate.json().workspaces.map((w: { id: string }) => w.id)).toEqual([other.workspace.id, body.workspace.id]);
     expect(aggregate.json().totals.monthlyNormalizedExpense).toBe(600000);
-    expect(aggregate.json().totals.monthlyIncome).toBe(6000000);
+    expect(aggregate.json().workspaces.map((w: { monthlyIncome: number }) => w.monthlyIncome)).toEqual([3000000, 3000000]);
+    expect(aggregate.json().totals).not.toHaveProperty("monthlyIncome");
     expect(JSON.stringify(aggregate.json())).not.toMatch(/email|passwordHash|categoryId|Rent/);
   });
   test("authentication, verification and strict payload validation prevent identity overrides", async () => {
@@ -83,7 +84,7 @@ describe("multi-ledger workspace API", () => {
   test("empty ledgers produce zero; all unknown schedules produce null; selection is bounded", async () => {
     const owner = await user();
     const empty = (await app.inject({ method: "POST", url: "/workspaces", headers: owner.headers, payload: { name: "Empty" } })).json().workspace.id;
-    expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: owner.headers, payload: { workspaceIds: [empty] } })).json().totals).toMatchObject({ thirtyDayDue: 0, fixedCostCount: 0, monthlyIncome: 0 });
+    expect((await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: owner.headers, payload: { workspaceIds: [empty] } })).json().totals).toMatchObject({ thirtyDayDue: 0, fixedCostCount: 0 });
     const unknown = (await app.inject({ method: "POST", url: "/workspaces", headers: owner.headers, payload: { name: "Unknown", initialBudget: { ...budget, fixedCosts: [{ ...budget.fixedCosts[0], billingAnchorDate: null, periodMonths: 0.5 }] } } })).json().workspace.id;
     const response = await app.inject({ method: "POST", url: "/workspaces/aggregate", headers: owner.headers, payload: { workspaceIds: [unknown] } });
     expect(response.json().totals).toMatchObject({ thirtyDayDue: null, unknownScheduleCount: 1, monthlyNormalizedExpense: 1800000 });
@@ -120,5 +121,16 @@ describe("multi-ledger workspace API", () => {
     expect(snapshot.workspaces[0]).toMatchObject({ role: "viewer", syncVersion: 0, monthlyIncome: 3000000 });
     expect((await prisma.workspace.findUniqueOrThrow({ where: { id } })).syncVersion).toBe(1);
     await expect(aggregateUserWorkspaces(prisma, viewer.row.id, { workspaceIds: [id] })).rejects.toThrow("Forbidden");
+  });
+  test("rename maps an injected Prisma serialization conflict to 409 without changing name", async () => {
+    const owner = await user();
+    const id = (await create(owner.headers)).json().workspace.id;
+    const transaction = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError("Synthetic serialization conflict", { code: "P2034", clientVersion: Prisma.prismaVersion.client }));
+    try {
+      const response = await app.inject({ method: "PATCH", url: `/workspaces/${id}`, headers: owner.headers, payload: { name: "Should not persist" } });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().message).toBe("Concurrent membership change, please retry");
+      expect((await prisma.workspace.findUniqueOrThrow({ where: { id } })).name).toBe("Personal");
+    } finally { transaction.mockRestore(); }
   });
 });

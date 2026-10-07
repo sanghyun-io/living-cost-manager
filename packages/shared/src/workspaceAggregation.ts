@@ -1,4 +1,4 @@
-import type { WorkspaceFinancialSummary } from "./workspace.js";
+import type { WorkspaceFinancialSummary, WorkspaceAggregateTotals } from "./workspace.js";
 
 const DAY = 86400000;
 type AggregateCost = {
@@ -62,11 +62,10 @@ export function summarizeWorkspaceBudget(
 }
 
 /** Do not round per item or ledger: the client rounds the final display only. */
-export function sumWorkspaceBudgets(summaries: readonly WorkspaceFinancialSummary[]): WorkspaceFinancialSummary {
-  const totals: WorkspaceFinancialSummary = { monthlyIncome: 0, monthlyNormalizedExpense: 0, fixedCostCount: 0,
+export function sumWorkspaceBudgets(summaries: readonly WorkspaceFinancialSummary[]): WorkspaceAggregateTotals {
+  const totals: WorkspaceAggregateTotals = { monthlyNormalizedExpense: 0, fixedCostCount: 0,
     knownScheduleCount: 0, unknownScheduleCount: 0, dueOccurrenceCount: 0, thirtyDayDue: 0 };
   for (const summary of summaries) {
-    totals.monthlyIncome += summary.monthlyIncome;
     totals.monthlyNormalizedExpense += summary.monthlyNormalizedExpense;
     totals.fixedCostCount += summary.fixedCostCount;
     totals.knownScheduleCount += summary.knownScheduleCount;

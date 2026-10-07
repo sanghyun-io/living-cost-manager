@@ -125,6 +125,9 @@ export type WorkspaceFinancialSummary = {
   // Known charges only; null when positive costs exist but no schedule is known.
   thirtyDayDue: number | null;
 };
+// Ledger income may repeat the same salary across purposes. Without an income
+// identity model, selected-ledger income cannot safely be summed or deduped.
+export type WorkspaceAggregateTotals = Omit<WorkspaceFinancialSummary, "monthlyIncome">;
 export type AggregateWorkspacesResponse = {
   currency: "KRW";
   timeZone: "Asia/Seoul";
@@ -132,5 +135,5 @@ export type AggregateWorkspacesResponse = {
   fromDate: string;
   untilDateExclusive: string;
   workspaces: (WorkspaceDto & WorkspaceFinancialSummary & { syncVersion: number })[];
-  totals: WorkspaceFinancialSummary;
+  totals: WorkspaceAggregateTotals;
 };
