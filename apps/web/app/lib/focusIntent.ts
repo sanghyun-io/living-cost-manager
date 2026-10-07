@@ -21,19 +21,27 @@ export function createFocusIntentController(notify: () => void) {
       const doc = options.source.ownerDocument;
       // A non-focused programmatic invocation has no focus to restore.
       if (!options.source.contains(doc.activeElement)) return null;
+      const owner = doc.activeElement;
       const moved = (event: Event) => {
-        if (event.target !== doc.body && !options.source.contains(event.target as Node)) cancel(ticket);
+        if (event.target !== doc.body && event.target !== owner) cancel(ticket);
       };
-      const clickedElsewhere = (event: Event) => {
-        if (!options.source.contains(event.target as Node)) cancel(ticket);
+      // A later click, edit or navigation key is a new user intention, even on
+      // the original input. BODY blur from disabling/unmounting is not one.
+      const intervened = () => cancel(ticket);
+      const keyed = (event: Event) => {
+        if (!['Shift', 'Control', 'Alt', 'Meta'].includes((event as KeyboardEvent).key)) cancel(ticket);
       };
       const ticket: Intent = { ...options, completed: false, release: () => {
         doc.removeEventListener('focusin', moved);
-        doc.removeEventListener('pointerdown', clickedElsewhere);
+        doc.removeEventListener('pointerdown', intervened, true);
+        doc.removeEventListener('input', intervened, true);
+        doc.removeEventListener('keydown', keyed, true);
       } };
       pending = ticket;
       doc.addEventListener('focusin', moved);
-      doc.addEventListener('pointerdown', clickedElsewhere);
+      doc.addEventListener('pointerdown', intervened, true);
+      doc.addEventListener('input', intervened, true);
+      doc.addEventListener('keydown', keyed, true);
       return ticket;
     },
     complete(ticket: Intent | null, completed = true) {

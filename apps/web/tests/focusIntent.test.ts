@@ -4,11 +4,11 @@ import { createFocusIntentController, type FocusDestination } from '../app/lib/f
 // The controller uses only these DOM operations. Browser focus, native disabled
 // controls, remounts, and keyboard paths are separately covered by the audit.
 function fixture() {
-  const listeners = new Map<string, Set<(event: { target: unknown }) => void>>();
+  const listeners = new Map<string, Set<(event: { target: unknown; key?: string }) => void>>();
   const doc: any = { body: {}, activeElement: null,
     addEventListener: (name: string, fn: any) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name)!.add(fn); },
     removeEventListener: (name: string, fn: any) => listeners.get(name)?.delete(fn) };
-  const dispatch = (name: string, target: unknown) => { for (const fn of [...listeners.get(name) ?? []]) fn({ target }); };
+  const dispatch = (name: string, target: unknown, key?: string) => { for (const fn of [...listeners.get(name) ?? []]) fn({ target, key }); };
   const element = () => {
     const el: any = { ownerDocument: doc, isConnected: true, disabled: false, hidden: false,
       contains: (other: unknown) => other === el,
@@ -100,5 +100,27 @@ describe('action-owned keyboard focus restoration', () => {
     expect(f.begin()).toBeNull();
     f.controller.flush('a:two', true, f.targets);
     expect(f.target.focus).not.toHaveBeenCalled();
+  });
+
+  test.each(['create', 'rename'] as const)('%s whole-form containment does not own a different descendant input', destination => {
+    for (const event of ['focusin', 'pointerdown']) {
+      const f = fixture(), input = f.element();
+      const form = f.element(); form.contains = (element: unknown) => [f.source, input].includes(element);
+      const ticket = f.controller.begin({ source: form, destination, fromScope: 'a:one', toScope: 'a:one' });
+      f.doc.activeElement = input; f.dispatch(event, input);
+      f.controller.complete(ticket); f.controller.flush('a:one', true, f.targets);
+      expect(f.target.focus).not.toHaveBeenCalled();
+      expect(f.doc.activeElement).toBe(input);
+    }
+  });
+
+  test.each(['create', 'rename'] as const)('%s Enter submission loses ownership when the same initially focused input is edited again', destination => {
+    for (const event of ['input', 'keydown', 'pointerdown']) {
+      const f = fixture(), ticket = f.begin(destination, 'a:one');
+      f.dispatch(event, f.source, 'ArrowLeft');
+      f.controller.complete(ticket); f.controller.flush('a:one', true, f.targets);
+      expect(f.target.focus).not.toHaveBeenCalled();
+      expect(f.doc.activeElement).toBe(f.source);
+    }
   });
 });

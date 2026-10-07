@@ -1,5 +1,5 @@
 "use client";
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, Checkbox, Group, Text, TextInput } from '@mantine/core';
 import type { WorkspaceDto } from '@living-cost-manager/shared';
 import type { ServerSession } from '../lib/serverApi';
@@ -13,6 +13,7 @@ export function LedgerControls({ session, workspaces, onSwitch, ledgers, canSwit
 }) {
   const [action, setAction] = useState<'create' | 'rename' | null>(null);
   const [name, setName] = useState('');
+  const draftRevision = useRef(0);
   return <div className="ledger-controls" aria-label="가계부 관리">
     <Group gap="sm" wrap="wrap">
       <label className="ledger-selector">현재 가계부
@@ -24,23 +25,30 @@ export function LedgerControls({ session, workspaces, onSwitch, ledgers, canSwit
           {(workspaces.length ? workspaces : session.workspace ? [session.workspace] : []).map(value => <option key={value.id} value={value.id}>{value.name}{value.role === 'viewer' ? ' · 보기 전용' : ''}</option>)}
         </select>
       </label>
-      <Button ref={element => focusRef('create', element)} variant="subtle" disabled={!canSwitch || !session.user.emailVerified || ledgers.busy || ledgers.uncertain} onClick={() => { setAction('create'); setName(''); }}>새 가계부</Button>
-      <Button ref={element => focusRef('rename', element)} variant="subtle" disabled={!canSwitch || session.workspace?.role !== 'owner' || !session.user.emailVerified || ledgers.busy || ledgers.uncertain} onClick={() => { setAction('rename'); setName(session.workspace?.name ?? ''); }}>이름 변경</Button>
+      <Button ref={element => focusRef('create', element)} variant="subtle" disabled={!canSwitch || !session.user.emailVerified || ledgers.busy || ledgers.uncertain} onClick={() => { draftRevision.current++; setAction('create'); setName(''); }}>새 가계부</Button>
+      <Button ref={element => focusRef('rename', element)} variant="subtle" disabled={!canSwitch || session.workspace?.role !== 'owner' || !session.user.emailVerified || ledgers.busy || ledgers.uncertain} onClick={() => { draftRevision.current++; setAction('rename'); setName(session.workspace?.name ?? ''); }}>이름 변경</Button>
       <Checkbox label="합산 보기" checked={ledgers.aggregateMode} onChange={e => ledgers.setAggregateMode(e.currentTarget.checked)} />
       <Button variant="subtle" onClick={() => void ledgers.refresh()} disabled={ledgers.busy}>가계부 목록 새로고침</Button>
     </Group>
     {!session.user.emailVerified ? <Text size="xs">새 가계부와 이름 변경은 이메일 확인 후 사용할 수 있습니다.</Text> : null}
-    {action ? <form onSubmit={e => {
+    {action ? <form onFocusCapture={() => { draftRevision.current++; }} onPointerDownCapture={() => { draftRevision.current++; }}
+      onKeyDownCapture={e => { if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) draftRevision.current++; }} onSubmit={e => {
       e.preventDefault();
-      const done = onFocusIntent(action, e.currentTarget);
+      const focused = e.currentTarget.ownerDocument.activeElement;
+      const done = onFocusIntent(action, focused instanceof HTMLElement && e.currentTarget.contains(focused) ? focused : e.currentTarget);
+      const submittedRevision = draftRevision.current;
       void (action === 'create' ? ledgers.create(name) : ledgers.rename(name)).then(result => {
+        // A completed request must not remove a field the user has returned to
+        // or edited while waiting. Keep that newer draft and its current focus.
+        if (draftRevision.current !== submittedRevision) { done(false); return; }
         if (result !== false) setAction(null);
         done(result !== false);
       }).catch(() => done(false));
     }}>
-      <Group align="end" mt="sm"><TextInput label={action === 'create' ? '새 가계부 이름' : '가계부 이름'} maxLength={100} required value={name} onChange={e => setName(e.currentTarget.value)} />
+      <Group align="end" mt="sm"><TextInput label={action === 'create' ? '새 가계부 이름' : '가계부 이름'} maxLength={100} required value={name} onChange={e => { draftRevision.current++; setName(e.currentTarget.value); }} />
       <Button type="submit" disabled={ledgers.busy || (action === 'create' && ledgers.uncertain) || !canSwitch}>확인</Button><Button variant="default" onClick={e => {
-        const done = onFocusIntent(action, e.currentTarget.closest('form')!);
+        draftRevision.current++;
+        const done = onFocusIntent(action, e.currentTarget);
         setAction(null); done();
       }}>취소</Button></Group>
     </form> : null}
