@@ -1,4 +1,4 @@
-# Billing final integration — INTERNAL deployment approval packet
+# Billing release candidate — INTERNAL deployment approval packet
 
 2026-10-07. Technical preparation only; NOT commercial/legal approval or a
 production change. Main will group actual approval decisions after independent
@@ -6,14 +6,25 @@ tester/reviewer/security checks against the frozen final commit.
 
 ## Immutable integration and customer result
 
-- Backend: `ec088092236a9aabc360fb5984426eaceec41d93`, parent
-  `1fecf301304f2165a4c6f01b8d2f5ea089c9e30f`.
+- Backend: `12ade2ae0907b56e02b352c3c27217c662090732`, verified exact linear
+  fix chain `dc5bca6a84235a6b036a18c1dc42297806c566db`,
+  `b5b5309b31cc03774ef1842e6263ea6b237c35d0`,
+  `12ade2ae0907b56e02b352c3c27217c662090732`, rooted at
+  `ec088092236a9aabc360fb5984426eaceec41d93`.
 - Frontend: `d16cc34e7020bb6f5ad512695cda3dfb48fbd636`; verified its three
   linear, web-only commits `3da1528`, `d63f471`, `d16cc34` before cherry-picking
-  onto the exact backend into new `feat/lcm-billing-final`.
-- Integration commits: `2934d2f`, `3ed0700`, `778625a`. No conflicts or source
-  fixes. Web tree equals original frontend; API/shared/Prisma equal backend.
-  This packet is the only additional source file.
+  onto the exact original backend into `feat/lcm-billing-final`.
+- New worktree/branch `lcm-billing-release-candidate` /
+  `feat/lcm-billing-release-candidate` starts at frozen final
+  `dfc525da9ada36fa3fbdf70694c0736a23242bae`. Fix chain cherry-picked as
+  `da6f50e`, `92a54cf`, `c3b70ed`, with no conflicts or semantic integration edits.
+  Web tree equals original frontend; API/shared/Prisma and provider contract equal
+  latest backend. This packet is the only additional documentation update.
+- Latest fixes require fresh fenced provider evidence before webhook consumption,
+  revalidate renewal authority/time at dispatch claim, and reject contradictory
+  cancellation status/aggregate evidence. Overdue review/stop and verified replay
+  safeguards remain. No DTO/schema/default/gate change. All known regression
+  cases pass implementer tests; independent final-source checks are still needed.
 - Existing free functions remain available. No business gates, checkout defaults,
   paid scope, or commercial materials were changed. Outcome demonstrated is safe
   local synthetic checkout/recovery/management, NOT revenue or LIVE activation.
@@ -29,7 +40,7 @@ Approve this exact file, not only the following table summary. Its SHA-256 is
 Reproduce the exact additive SQL diff from the pre-foundation source:
 
 ```sh
-git diff aeddfee^ ec088092236a9aabc360fb5984426eaceec41d93 -- prisma/migrations/20261007120000_service_billing_foundation/migration.sql
+git diff aeddfee^ 12ade2ae0907b56e02b352c3c27217c662090732 -- prisma/migrations/20261007120000_service_billing_foundation/migration.sql
 ```
 
 Seven new models/tables: `ServiceSubscriptionContract`, `ServiceBillingQuote`,
@@ -98,26 +109,27 @@ Refund is never automatically executed by the frontend or cancellation.
 
 ## Implementer evidence / remaining grouped gates
 
-All logs below are mode 0600 in the approved OpenCode temp parent directory:
+New evidence directory in approved OpenCode temp:
+`lcm-billing-rc-evidence.993A9990-11DD-48FE-9808-ED8C4A97F1EA` (0700).
+Every evidence file was exclusively created (noclobber) at mode 0600. Previous
+evidence files were not reused/overwritten; no old-token investigation was done.
 
-- `lcm-final-install.log`: frozen-lock install, Prisma generate passed.
-- `lcm-final-build.log`: `NEXT_TELEMETRY_DISABLED=1`
+- `install.log`, `generate.log`: frozen-lock install, Prisma generate passed.
+- `build.log`: `NEXT_TELEMETRY_DISABLED=1`
   `NEXT_PUBLIC_API_BASE_URL=https://api.gamja.top/living-cost-manager/v1 pnpm build`
   passed shared/API/web TypeScript and static export, including `/subscription`.
-- `lcm-final-db.log`: all nine migrations passed on owned ephemeral PG16 container
-  `lcm-billing-final-test`, loopback 55443, synthetic database only; API uses
+- `db.log`: all nine migrations passed on owned ephemeral PG16 container
+  `lcm-billing-rc-test-993a9990`, loopback 55443, synthetic database only; API uses
   isolated `billing_test` schema, web opt-in uses separate `public` schema.
-- `lcm-final-additive-sql.diff`: exact additive migration diff above, including
-  existing User FK. `lcm-final-schema-bound-diff.log`: Prisma schema-bound diff
-  with `DATABASE_URL` explicitly matching the test schema returned no difference.
-  First unbound invocation exited 2 because the datamodel defaulted to public
-  (`lcm-final-schema-diff.log`); matching both schemas corrected the command,
-  not source/schema. Prisma diff does not validate custom trigger/check semantics.
-- `lcm-final-tests.log`: `pnpm test` with isolated `API_TEST_DATABASE_URL` and
-  `LCM_WEB_LOCAL_BILLING_TEST=true`: shared **166**, API **343**, web **359** passed.
+- `additive-sql.diff`: exact additive migration diff above, including existing
+  User FK. Migration checksum verified unchanged from frozen final/backend.
+  `schema-diff.log`: schema-bound Prisma diff returned no difference; custom
+  trigger/check semantics are covered by tests, not Prisma structural diff.
+- `tests.log`: `pnpm test` with isolated `API_TEST_DATABASE_URL` and
+  `LCM_WEB_LOCAL_BILLING_TEST=true`: shared **166**, API **388**, web **359** passed.
   Provider transport is fake/in-process; actual API web test uses app.inject and
   synthetic user/mock provider, lost-response lookup with only one dispatch.
-- `lcm-final-browser.log`: local static export served at loopback 3198; exact
+- `browser.log`: local static export served at loopback 3198; exact
   production API origin and SDK requests intercepted/fulfilled, other external
   requests aborted. Browser suite passed recovery/OFF/404/unknown status,
   layout/focus/consent, mock no-SDK, same-ID recovery, refund request/logout privacy.
@@ -130,4 +142,9 @@ complete. Remaining grouped gates: independent frozen-source testing/security/re
 exact DB/backup/locking/rollback approval; actual LCM merchant/channel/domain and SDK
 platform verification; selected paid benefit/seller/consent/tax/refund/retention and
 pre-purchase date disclosure decisions; opskv/registry provisioning; worker and
-activation approval. Existing free functions remain untouched throughout.
+activation approval. Group these actual decisions: (1) paid benefits and approved
+seller/consent/legal/VAT/refund/retention materials; (2) LCM merchant/domain/channel
+and 990-KRW billing support; (3) exact production migration, protected config,
+worker and activation scope. Conservative exact-due renewal needs an approved
+late-cycle policy decision if insufficient; no grace/catch-up policy is invented.
+Existing free functions remain untouched. This packet does not claim billing ON.
