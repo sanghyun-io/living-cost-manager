@@ -2,6 +2,12 @@ import { z } from "zod";
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  // Declared parameters only; provisioning/delivery must use opskv. No real
+  // provider is enabled by these parameters in the phase-one implementation.
+  SERVICE_BILLING_MODE: z.enum(["mock", "sandbox", "live"]).optional(),
+  SERVICE_BILLING_MOCK_ENABLED: z.enum(["true", "false"]).optional(),
+  SERVICE_BILLING_ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional(),
+  SERVICE_BILLING_KEY_VERSION: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
   PORT: z.coerce.number().int().positive().default(4000),
   RELEASE_SHA: z.string().regex(/^[0-9a-f]{40}$/).optional(),
   LCM_RELEASE_ID: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/).optional(),

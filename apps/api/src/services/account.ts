@@ -27,6 +27,11 @@ export class AccountUserNotFoundError extends Error {
   }
 }
 
+export class BillingAccountDeleteBlocked extends Error {
+  readonly code = "BillingAccountDeleteBlocked";
+  constructor() { super("BillingAccountDeleteBlocked"); }
+}
+
 export class AccountInvalidCredentialsError extends Error {
   constructor(message = "Invalid credentials") {
     super(message);
@@ -99,6 +104,25 @@ export async function deleteAccount(
 
   await prisma.$transaction(
     async (tx) => {
+      // Same lock order as billing contract creation: user -> contract. A new
+      // contract cannot race deletion and resurrect a detached payment subject.
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+      const billing = await tx.serviceSubscriptionContract.findUnique({ where: { userId } });
+      if (billing) {
+        await tx.$queryRaw`SELECT "id" FROM "ServiceSubscriptionContract" WHERE "id" = ${billing.id} FOR UPDATE`;
+        const current = await tx.serviceSubscriptionContract.findUniqueOrThrow({ where: { id: billing.id } });
+        const unresolvedAttempt = await tx.servicePaymentAttempt.count({ where: { contractId: billing.id,
+          status: { in: ["created", "dispatch_unknown", "manual_review"] } } });
+        const unresolvedRefund = await tx.serviceRefundRecord.count({ where: { attempt: { contractId: billing.id },
+          status: { notIn: ["verified", "rejected"] } } });
+        const instruments = await tx.serviceBillingInstrument.count({ where: { contractId: billing.id, status: { not: "revoked" } } });
+        const events = await tx.serviceBillingEventReceipt.count({ where: { attempt: { contractId: billing.id }, processedAt: null } });
+        if (unresolvedAttempt || unresolvedRefund || instruments || events ||
+          (current.status !== "idle" && (!current.renewalStopped || current.providerCancellationStatus !== "verified"))) {
+          throw new BillingAccountDeleteBlocked();
+        }
+        // Financial records remain; User FK is SET NULL, no email/name copied.
+      }
       const memberships = await tx.workspaceMember.findMany({
         where: { userId },
         select: {

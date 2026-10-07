@@ -39,6 +39,9 @@ importers:
       '@living-cost-manager/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@portone/server-sdk':
+        specifier: 0.19.0
+        version: 0.19.0
       '@prisma/client':
         specifier: ^6.19.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
@@ -627,6 +630,9 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
+
+  '@portone/server-sdk@0.19.0':
+    resolution: {integrity: sha512-JIbD9HEEqaYuuW0zKU/sapqH1HQBf/Len+8ZPnMRb7E7tHnqRGrKPLS+fom34xUTiF3ZVKTrDjHeQHQ2YZc2og==}
 
   '@prisma/client@6.19.3':
     resolution: {integrity: sha512-mKq3jQFhjvko5LTJFHGilsuQs+W+T3Gm451NzuTDGQxwCzwXHYnIu2zGkRoW+Exq3Rob7yp2MfzSrdIiZVhrBg==}
@@ -2155,6 +2161,8 @@ snapshots:
   '@phc/format@1.0.0': {}
 
   '@pinojs/redact@0.4.0': {}
+
+  '@portone/server-sdk@0.19.0': {}
 
   '@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)':
     optionalDependencies:

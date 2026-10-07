@@ -10,6 +10,7 @@ import { type Env, loadEnv } from "./env.js";
 import { authPlugin } from "./plugins/auth.js";
 import { clearCachedPrismaClient, getPrismaClient } from "./prisma.js";
 import { accountRoutes } from "./routes/account.js";
+import { serviceBillingRoutes } from "./routes/service-billing.js";
 import { authRoutes } from "./routes/auth.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { marketingRoutes } from "./routes/marketing.js";
@@ -53,7 +54,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
     // 마케팅 이벤트 수집 경로는 성공/거절/오류 어느 경우에도 요청·본문·쿼리를
     // 기록하지 않는다(IP/UA 가 로그에 남지 않도록). 다른 라우트의 보안 로그는
     // 그대로 유지된다 — predicate 가 해당 경로만 선별한다.
-    disableRequestLogging: candidate => shouldDisableRequestLogging(candidate) || isTemplateRequest(candidate)
+    disableRequestLogging: candidate => shouldDisableRequestLogging(candidate) || isTemplateRequest(candidate) ||
+      (candidate.url ?? "").split("?")[0]!.split("/").includes("service-billing")
   });
 
   app.decorate("prisma", prisma);
@@ -114,6 +116,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const registerApiRoutes = async (api: FastifyInstance) => {
     await api.register(authRoutes);
     await api.register(accountRoutes);
+    await api.register(serviceBillingRoutes);
     await api.register(workspaceRoutes);
     await api.register(templateRoutes);
     await api.register(invitationRoutes);

@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 
 import {
   AccountInvalidCredentialsError,
+  BillingAccountDeleteBlocked,
   AccountUserNotFoundError,
   AccountWorkspaceConflictError,
   deleteAccount,
@@ -32,6 +33,9 @@ export async function accountRoutes(app: FastifyInstance) {
       try {
         await deleteAccount(app.prisma, request.user.sub, parsed.data.password);
       } catch (error) {
+        if (error instanceof BillingAccountDeleteBlocked) {
+          return reply.code(409).send({ statusCode: 409, code: error.code, message: error.code });
+        }
         if (
           error instanceof AccountInvalidCredentialsError ||
           error instanceof AccountUserNotFoundError
