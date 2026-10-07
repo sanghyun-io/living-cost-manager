@@ -17,7 +17,7 @@ describe("official PortOne evidence helpers (not live merchant integration)", ()
   it("official SDK verifies the exact raw bytes and returns no entitlement", async () => {
     const f = fixture();
     expect(await verifyPortOneRawWebhook(f.raw, f.headers, f.secret, scope)).toEqual({
-      provider: "portone", storeId: scope.storeId, environment: "sandbox", eventId: "synthetic_signed_event", paymentId: "synthetic_payment"
+      provider: "portone", storeId: scope.storeId, environment: "sandbox", eventId: "synthetic_signed_event", paymentId: "synthetic_payment", expectation: "observation"
     });
     const changed = Buffer.from(JSON.stringify(JSON.parse(f.raw.toString())));
     await expect(verifyPortOneRawWebhook(changed, f.headers, f.secret, scope)).rejects.toMatchObject({ statusCode: 400 });

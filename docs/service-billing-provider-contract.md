@@ -287,3 +287,78 @@ approved temp: `lcm-provider-known-regressions-before.log` and
 `lcm-billing-synthetic-restore-33dfb97d-180a-462f-9c47-19c42b09afb8.dump`.
 Independent review of this updated source is still required. No production,
 merchant calls, operational values, frontend changes, push or live activation.
+
+## Reconciliation review corrections (isolated branch from frozen ec08809)
+
+The P1 receipt-consumption fix changes only internal service/provider behavior;
+no shared/browser DTO, Prisma schema or runtime configuration change.
+`reconcile()` now returns an explicit internal outcome:
+`skipped|retry|manual_review|fresh_authoritative_committed`. The fresh outcome
+contains the committed attempt fence, this invocation's GET initiation timestamp,
+and authoritative cancellation/total amounts. A lease-busy skip, timeout, stale
+claim or pre-existing paid row is never a fresh outcome.
+
+`processEvent()` first claims its durable receipt, then starts its own same-ID
+provider GET outside DB locks. It only consumes a receipt when that invocation
+commits a valid observation, began after the receipt boundary, still matches the
+current attempt fence with no newer active lease, and the receipt owner/fence
+still matches. Receipt completion is checked under the contract lock; old attempt
+or receipt leases cannot overwrite a newer completion. Existing `paid` and null
+`nextLookupAt` are NOT freshness evidence. An unrelated GET captured before a
+cancellation event cannot consume that event, even if it completes afterward.
+
+Signed cancellation intent must also converge: a fresh but eventually-consistent
+PAID/zero-cancel observation does not erase a cancellation notification. Minimal
+intent (full cancellation, partial cancellation or cancellation pending) is
+stored in the existing internal receipt lifecycle `status` suffix, without a new
+table/field or raw webhook body. Queue statuses are `pending`, `pending_cancelled`,
+`pending_partial_cancelled`, `pending_cancel_pending`; processed/manual-review
+statuses retain that suffix. The bounded worker handles all queue variants.
+Full cancellation requires authoritative canceled amount equal to total; partial
+and pending cancellation require positive effective authoritative cancellation.
+Only official GET evidence changes coverage/refunds; webhook intent alone never
+settles. An unrequested external cancellation still truncates premium coverage,
+stops renewal, retains the financial review flag and does NOT invent an approved
+refund record. Nonconvergence/failure remains pending with backoff, then manual
+review after eight receipt claims. Matching duplicates keep one receipt; reusing
+an event ID with a different payment or intent is a controlled conflict.
+
+HTTP **202 ACK** still means signature accepted and receipt durably queued, NOT
+payment/cancellation processed. Fresh lookup is required before the later
+processed marker, not before that durable asynchronous ACK. Signed unknown future
+webhook event types remain intentionally ignored separately from payment evidence.
+
+P2: exact recognized statuses inspected in pinned SDK 0.19.0 generated
+`Payment.d.ts` and each union member:
+`PAID|CANCELLED|PARTIAL_CANCELLED|FAILED|PAY_PENDING|READY|VIRTUAL_ACCOUNT_ISSUED`.
+Exact `PaymentCancellation` union: `SUCCEEDED|FAILED|REQUESTED`.
+The SDK's `Unrecognized` forward-compatibility variant is not accepted as
+authoritative evidence. Runtime Zod rejects any other status with sanitized
+`PORTONE_INVALID_EVIDENCE`; it is never mapped to synthetic PENDING or silently
+filtered out of cancellation totals. Recognized FAILED/REQUESTED cancellations
+do not count as succeeded refunds. Existing merchant/store/channel/customer/
+amount/KRW bindings, no-dispatch reconciliation, renewal/cancellation replay fixes,
+free access and default commercial gates remain unchanged.
+
+The new isolated-PG/fake-HTTP suite deterministically holds a GET that captured
+pre-event PAID, queues cancellation while its attempt lease is busy (zero extra
+GETs and receipt remains pending), releases the old GET, then performs a new
+worker GET of CANCELLED before processing. Other tests cover duplicate/concurrent
+events, expired attempt+receipt fences, eventual consistency bounded review,
+partial cancellation, signature ACK followed by failed GET, supported cancellation
+statuses and rejection of invented payment/cancellation statuses. The old mock
+test asserting receipt processed despite an always-throwing provider was corrected
+to pending/retry while retaining its paid-period stability assertions; the pure
+signature helper test now expects the added internal intent field. No historical
+frozen worktree/evidence was edited and no suite/case was excluded.
+
+Implementer validation: shared/API builds passed, shared **166/166**, API full
+**357/357** (343 retained + 14 new cases), isolated Docker PG16 fresh nine
+migrations at loopback 55441/lcm_billing_test/billing_test and empty schema-bound
+Prisma diff. Protected 0600 logs in approved temp:
+`lcm-reconcile-fix-targeted.log` (14/14) and `lcm-reconcile-fix-final.log` (full
+build/test/diff run, 2026-10-07T07:23Z). No real provider request, credential lookup,
+runtime `.env`, production data/change, paid resource, push or deployment.
+Frozen provider ec08809 and integration worktrees remain untouched. Independent
+tester/security/reviewer must validate this follow-up source; synthetic results
+do not imply actual commercial approval or live checkout activation.

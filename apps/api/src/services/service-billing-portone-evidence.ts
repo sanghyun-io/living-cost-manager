@@ -70,5 +70,8 @@ export async function verifyPortOneRawWebhook(
     throw new ServiceBillingError("INVALID_WEBHOOK_EVENT", 400);
   }
   // Caller must claim receipt then use authoritative getPayment; no entitlement.
-  return { provider: "portone", storeId: scope.storeId, environment: scope.environment, eventId, paymentId: data.paymentId };
+  const expectation = webhook.type === "Transaction.Cancelled" ? "cancelled" as const :
+    webhook.type === "Transaction.PartialCancelled" ? "partial_cancelled" as const :
+    webhook.type === "Transaction.CancelPending" ? "cancel_pending" as const : "observation" as const;
+  return { provider: "portone", storeId: scope.storeId, environment: scope.environment, eventId, paymentId: data.paymentId, expectation };
 }

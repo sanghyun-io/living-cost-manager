@@ -60,10 +60,12 @@ export class PortOneHttpTransport {
 const channelSchema = z.object({ id: z.string().min(1), type: z.enum(["TEST", "LIVE"]) });
 const instrumentSchema = z.object({ status: z.enum(["ISSUED", "DELETED"]), storeId: z.string(), merchantId: z.string(),
   issueId: z.string(), customer: z.object({ id: z.string() }), channels: z.array(channelSchema).length(1) });
-const paymentSchema = z.object({ status: z.string(), id: z.string(), storeId: z.string(), merchantId: z.string(),
+// Exact recognized discriminants from SDK 0.19.0 Payment/PaymentCancellation.
+// SDK's Unrecognized union is intentionally unsupported authoritative evidence.
+const paymentSchema = z.object({ status: z.enum(["PAID", "CANCELLED", "PARTIAL_CANCELLED", "FAILED", "PAY_PENDING", "READY", "VIRTUAL_ACCOUNT_ISSUED"]), id: z.string(), storeId: z.string(), merchantId: z.string(),
   channel: channelSchema, customer: z.object({ id: z.string() }), currency: z.literal("KRW"),
   amount: z.object({ total: z.number().int().positive(), cancelled: z.number().int().nonnegative() }),
-  paidAt: z.string().optional(), cancellations: z.array(z.object({ status: z.string(), id: z.string(),
+  paidAt: z.string().optional(), cancellations: z.array(z.object({ status: z.enum(["SUCCEEDED", "FAILED", "REQUESTED"]), id: z.string(),
     totalAmount: z.number().int().positive(), reason: z.string().max(3000) })).optional() });
 
 export class PortOneServiceBillingProvider implements ServiceBillingProvider {

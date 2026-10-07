@@ -147,7 +147,7 @@ describe("durable isolated service billing", () => {
     expect(a.status).toBe("manual_review");
     expect(await prisma.servicePaidPeriod.count()).toBe(0);
   });
-  it("paid is stable under late failed observations and duplicate concurrent events", async () => {
+  it("paid is stable but duplicate event receipts remain pending without a fresh successful observation", async () => {
     const { input } = await prepared();
     const a = await service.charge(userId, input);
     provider.getPayment = async () => { throw new Error("Must not downgrade a settled period"); };
@@ -158,7 +158,10 @@ describe("durable isolated service billing", () => {
     expect(new Set(ids).size).toBe(1);
     expect(await prisma.servicePaidPeriod.count()).toBe(1);
     expect((await service.poll(userId, a.attemptId)).status).toBe("paid");
-    expect((await prisma.serviceBillingEventReceipt.findUniqueOrThrow({ where: { id: ids[0] } })).status).toBe("processed");
+    const receipt = await prisma.serviceBillingEventReceipt.findUniqueOrThrow({ where: { id: ids[0] } });
+    expect(receipt.status).toBe("pending");
+    expect(receipt.processedAt).toBeNull();
+    expect(receipt.nextRetryAt).not.toBeNull();
     await expect(service.recordVerifiedEvent({ ...event, storeId: "wrong" })).rejects.toMatchObject({ code: "EVENT_SCOPE_MISMATCH" });
     await expect(service.recordVerifiedEvent({ ...event, paymentId: "other" })).rejects.toMatchObject({ code: "EVENT_IDEMPOTENCY_CONFLICT" });
   });

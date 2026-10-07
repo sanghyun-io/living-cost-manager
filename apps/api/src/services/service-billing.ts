@@ -265,10 +265,13 @@ export class ServiceBillingService {
     } });
     await this.reconcile(attemptId);
   }
-  async reconcile(attemptId: string, force = false) {
+  async reconcile(attemptId: string, force = false): Promise<
+    { outcome: "skipped" | "retry" | "manual_review" } |
+    { outcome: "fresh_authoritative_committed"; fence: number; initiatedAt: Date; cancelledAmount: number; totalAmount: number }
+  > {
     this.requireReady();
     const seed = await this.prisma.servicePaymentAttempt.findUnique({ where: { id: attemptId } });
-    if (!seed) return;
+    if (!seed) return { outcome: "skipped" };
     if (seed.provider !== this.provider!.scope.provider || seed.storeId !== this.provider!.scope.storeId || seed.environment !== this.mode) fail("BILLING_SCOPE_MISMATCH");
     const owner = randomUUID();
     const claim = await this.prisma.$transaction(async tx => {
@@ -282,15 +285,18 @@ export class ServiceBillingService {
       } });
       return { a: next, c };
     });
-    if (!claim) return;
+    if (!claim) return { outcome: "skipped" };
+    const initiatedAt = this.clock(); // this invocation ONLY; never borrow another worker's observation
     let observed = null;
     let invalidEvidence = false;
     try { observed = await this.provider!.getPayment(claim.a.paymentId); }
     catch (error) { invalidEvidence = error instanceof PortOneTransportError && error.code === "PORTONE_INVALID_EVIDENCE"; }
-    await this.prisma.$transaction(async tx => {
+    return this.prisma.$transaction(async tx => {
       const c = await this.lockContract(tx, seed.contractId);
       const a = await tx.servicePaymentAttempt.findUniqueOrThrow({ where: { id: attemptId } });
-      if (a.leaseOwner !== owner || a.fence !== claim.a.fence) return;
+      if (a.leaseOwner !== owner || a.fence !== claim.a.fence) return { outcome: "skipped" as const };
+      const fresh = () => ({ outcome: "fresh_authoritative_committed" as const, fence: claim.a.fence, initiatedAt,
+        cancelledAmount: observed?.cancelledAmount ?? 0, totalAmount: a.totalAmount });
       const release = { leaseOwner: null, leaseUntil: null };
       const q = await tx.serviceBillingQuote.findUniqueOrThrow({ where: { id: a.quoteId } });
       const valid = observed && observed.paymentId === a.paymentId && observed.subjectId === c.subjectId &&
@@ -299,7 +305,7 @@ export class ServiceBillingService {
       if (invalidEvidence || (observed && !valid)) {
         await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { ...release,
           ...(["paid", "refunded"].includes(a.status) ? { reviewRequired: true } : { status: "manual_review" }), nextLookupAt: null } });
-        return;
+        return { outcome: "manual_review" as const };
       }
       if (["paid", "refunded"].includes(a.status)) {
         if (valid && observed!.status === "PAID") {
@@ -320,16 +326,19 @@ export class ServiceBillingService {
             await tx.serviceSubscriptionContract.update({ where: { id: c.id }, data: { renewalStopped: true, cancelRequested: true,
               providerCancellationStatus: c.providerCancellationStatus === "verified" ? "verified" : "pending", version: { increment: 1 } } });
           }
+          // Cancellation coverage changes are committed even for unknown external
+          // refunds; the durable review flag separately blocks operator deletion.
+          return fresh();
         } else {
           const exhausted = a.lookupCount >= lookupLimit;
           await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { ...release,
             ...(exhausted ? { reviewRequired: true } : {}), nextLookupAt: exhausted ? null : new Date(this.clock().getTime() + leaseMs) } });
+          return { outcome: exhausted ? "manual_review" as const : "retry" as const };
         }
-        return;
       }
       if (valid && (observed!.cancelledAmount ?? 0) > 0) {
         await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { ...release, status: "manual_review", reviewRequired: true, nextLookupAt: null } });
-        return;
+        return { outcome: "manual_review" as const };
       }
       if (valid && observed!.status === "PAID" && observed!.paidAt && Number.isFinite(observed!.paidAt.getTime()) && observed!.paidAt <= this.clock()) {
         const previous = await tx.servicePaidPeriod.findFirst({ where: { contractId: c.id }, orderBy: { cycle: "desc" } });
@@ -345,13 +354,16 @@ export class ServiceBillingService {
           status: c.cancelRequested ? "cancel_at_period_end" : "active", planId: q.planId,
           originalAnchor: anchor, nextCycle: a.cycle + 1, version: { increment: 1 }
         } });
+        return fresh();
       } else if (valid && observed!.status === "FAILED") {
         await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { ...release, status: "failed", nextLookupAt: null } });
+        return fresh();
       } else {
         const exhausted = a.lookupCount >= lookupLimit;
         await tx.servicePaymentAttempt.update({ where: { id: a.id }, data: { ...release,
           status: exhausted ? "manual_review" : "dispatch_unknown",
           nextLookupAt: exhausted ? null : new Date(this.clock().getTime() + Math.min(3600_000, 1000 * 2 ** a.lookupCount)) } });
+        return { outcome: exhausted ? "manual_review" as const : "retry" as const };
       }
     });
   }
@@ -607,7 +619,7 @@ export class ServiceBillingService {
     for (const a of due) await this.reconcile(a.id, this.mode !== "mock");
     const events = await this.prisma.serviceBillingEventReceipt.findMany({ where: {
       provider: this.provider!.scope.provider, storeId: this.provider!.scope.storeId, environment: this.mode,
-      status: "pending", OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: this.clock() } }],
+      status: { in: ["pending", "pending_cancelled", "pending_partial_cancelled", "pending_cancel_pending"] }, OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: this.clock() } }],
       AND: [{ OR: [{ leaseUntil: null }, { leaseUntil: { lte: this.clock() } }] }]
     }, take: Math.min(100, Math.max(1, limit)), orderBy: { receivedAt: "asc" } });
     for (const event of events) await this.processEvent(event.id);
@@ -638,7 +650,8 @@ export class ServiceBillingService {
 
   /** Called ONLY with verified adapter output; not exposed as a client endpoint.
    * Tests use synthetic IDs, not a fabricated PortOne signature fixture. */
-  async recordVerifiedEvent(input: { provider: string; storeId: string; environment: string; eventId: string; paymentId: string }) {
+  async recordVerifiedEvent(input: { provider: string; storeId: string; environment: string; eventId: string; paymentId: string;
+    expectation?: "observation" | "cancelled" | "partial_cancelled" | "cancel_pending" }) {
     this.requireReady();
     if (input.provider !== this.provider!.scope.provider || input.storeId !== this.provider!.scope.storeId ||
       input.environment !== this.mode || !/^[A-Za-z0-9_-]{1,128}$/.test(input.eventId) || !/^[A-Za-z0-9_-]{1,40}$/.test(input.paymentId)) fail("EVENT_SCOPE_MISMATCH", 400);
@@ -648,12 +661,16 @@ export class ServiceBillingService {
     if (!attempt && this.mode !== "mock") return null; // signed but not OUR persisted payment: ACK + no provider lookup
     await this.prisma.serviceBillingEventReceipt.createMany({ data: [{
       provider: input.provider, storeId: input.storeId, environment: input.environment,
-      eventId: input.eventId, paymentId: input.paymentId, attemptId: attempt?.id
+      eventId: input.eventId, paymentId: input.paymentId, attemptId: attempt?.id,
+      // Minimal durable cancellation intent, no payload/PII/new schema. Preserve
+      // it in the internal receipt lifecycle status until observed or reviewed.
+      status: !input.expectation || input.expectation === "observation" ? "pending" : `pending_${input.expectation}`
     }], skipDuplicates: true });
     const event = await this.prisma.serviceBillingEventReceipt.findUniqueOrThrow({ where: {
       provider_storeId_environment_eventId: { provider: input.provider, storeId: input.storeId, environment: input.environment, eventId: input.eventId }
     } });
-    if (event.paymentId !== input.paymentId) fail("EVENT_IDEMPOTENCY_CONFLICT");
+    const expectedSuffix = !input.expectation || input.expectation === "observation" ? "" : `_${input.expectation}`;
+    if (event.paymentId !== input.paymentId || event.status.replace(/^(pending|processed|manual_review)/, "") !== expectedSuffix) fail("EVENT_IDEMPOTENCY_CONFLICT");
     return event.id;
   }
   async acceptPortOneWebhook(raw: Buffer, headers: Record<string, string>) {
@@ -673,7 +690,8 @@ export class ServiceBillingService {
       await tx.$queryRaw`SELECT "id" FROM "ServiceBillingEventReceipt" WHERE "id" = ${eventId} FOR UPDATE`;
       const e = await tx.serviceBillingEventReceipt.findUnique({ where: { id: eventId } });
       if (!e || e.provider !== this.provider!.scope.provider || e.storeId !== this.provider!.scope.storeId || e.environment !== this.mode ||
-        e.status !== "pending" || (e.leaseUntil && e.leaseUntil > this.clock()) || (e.nextRetryAt && e.nextRetryAt > this.clock())) return null;
+        !["pending", "pending_cancelled", "pending_partial_cancelled", "pending_cancel_pending"].includes(e.status) ||
+        (e.leaseUntil && e.leaseUntil > this.clock()) || (e.nextRetryAt && e.nextRetryAt > this.clock())) return null;
       return tx.serviceBillingEventReceipt.update({ where: { id: e.id }, data: { leaseOwner: owner,
         leaseUntil: new Date(this.clock().getTime() + leaseMs), fence: { increment: 1 }, retryCount: { increment: 1 } } });
     });
@@ -684,19 +702,30 @@ export class ServiceBillingService {
         provider: claim.provider, storeId: claim.storeId, environment: claim.environment, paymentId: claim.paymentId
       } } }))?.id ?? null;
     }
-    let processed = false;
+    let observation: Awaited<ReturnType<ServiceBillingService["reconcile"]>> = { outcome: "skipped" };
     if (attemptId) {
       try {
-        await this.reconcile(attemptId, this.mode !== "mock");
-        const a = await this.prisma.servicePaymentAttempt.findUnique({ where: { id: attemptId } });
-        processed = !!a && !a.reviewRequired && !a.nextLookupAt && ["paid", "failed", "refunded", "canceled_before_dispatch"].includes(a.status);
+        // A lease-busy result cannot consume an event using a pre-existing PAID
+        // row. This GET starts only after the durable receipt claim above.
+        observation = await this.reconcile(attemptId, true);
       } catch { /* bounded retry; no event payload errors leak */ }
     }
-    const exhausted = claim.retryCount >= lookupLimit;
-    await this.prisma.serviceBillingEventReceipt.updateMany({ where: { id: claim.id, leaseOwner: owner, fence: claim.fence }, data: {
-      attemptId, leaseOwner: null, leaseUntil: null, processedAt: processed ? this.clock() : null,
-      status: processed ? "processed" : exhausted ? "manual_review" : "pending",
-      nextRetryAt: processed || exhausted ? null : new Date(this.clock().getTime() + 1000 * 2 ** claim.retryCount)
-    } });
+    await this.prisma.$transaction(async tx => {
+      const a = attemptId ? await tx.servicePaymentAttempt.findUnique({ where: { id: attemptId } }) : null;
+      if (a) await this.lockContract(tx, a.contractId);
+      const current = a ? await tx.servicePaymentAttempt.findUniqueOrThrow({ where: { id: a.id } }) : null;
+      const fresh = observation.outcome === "fresh_authoritative_committed" && current?.fence === observation.fence &&
+        !current.leaseOwner && observation.initiatedAt >= claim.receivedAt;
+      const expectationMatched = observation.outcome === "fresh_authoritative_committed" &&
+        (claim.status === "pending" || (claim.status === "pending_cancelled" ? observation.cancelledAmount === observation.totalAmount : observation.cancelledAmount > 0));
+      const processed = fresh && expectationMatched;
+      const exhausted = claim.retryCount >= lookupLimit || observation.outcome === "manual_review";
+      const suffix = claim.status.slice("pending".length);
+      await tx.serviceBillingEventReceipt.updateMany({ where: { id: claim.id, leaseOwner: owner, fence: claim.fence }, data: {
+        attemptId, leaseOwner: null, leaseUntil: null, processedAt: processed ? this.clock() : null,
+        status: processed ? `processed${suffix}` : exhausted ? `manual_review${suffix}` : claim.status,
+        nextRetryAt: processed || exhausted ? null : new Date(this.clock().getTime() + 1000 * 2 ** claim.retryCount)
+      } });
+    });
   }
 }
