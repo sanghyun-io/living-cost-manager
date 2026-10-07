@@ -6,4 +6,5 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
   alternates: { canonical: "https://living-cost-manager.gamja.top/subscription/" }
 };
+// Archived route entry. Not a Next route in the free public release.
 export default function Page() { return <SubscriptionPage />; }

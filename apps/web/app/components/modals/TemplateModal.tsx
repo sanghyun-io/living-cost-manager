@@ -12,6 +12,8 @@ interface Props {
   opened: boolean; onOpen: () => void; onClose: () => void;
   session: ServerSession | null; onLogin: () => void;
   canApply: boolean;
+  accountCanCreate?: boolean;
+  creationUnavailableMessage?: string;
   /** Returns true only when the new local space was actually created. */
   onApply: (blueprint: TemplateBlueprint, snapshot: LocalBudgetSnapshot) => boolean | Promise<boolean>;
   /** Malformed share links surface in the page status (normal UI), not in this dialog. */
@@ -23,7 +25,7 @@ const copy = (blueprint: TemplateBlueprint): TemplateBlueprint => ({ ...blueprin
 // It is never rendered as if it were the author's content.
 const PLACEHOLDER: TemplateBlueprint = { title: "", description: "", authorLabel: "", items: [{ name: "", category: "", periodMonths: 1 }] };
 const INVALID_SHARE_MESSAGE = "공유 링크 형식이 올바르지 않습니다. 링크를 다시 확인하거나 작성자에게 새 링크를 요청하세요.";
-export function TemplateModal({ opened, onOpen, onClose, session, onLogin, canApply, onApply, onShareError }: Props) {
+export function TemplateModal({ opened, onOpen, onClose, session, onLogin, canApply, accountCanCreate = false, creationUnavailableMessage, onApply, onShareError }: Props) {
   const [blueprint, setBlueprint] = useState(() => copy(TEMPLATE_SCENARIOS[0]));
   const [owned, setOwned] = useState<OwnedTemplate[]>([]);
   const [entry, setEntry] = useState<OwnedTemplate | null>(null);
@@ -123,6 +125,7 @@ export function TemplateModal({ opened, onOpen, onClose, session, onLogin, canAp
   try { if (valid.success) budget = buildTemplateBudget(valid.data, amounts, income); } catch { /* missing amounts remain visibly unset */ }
   const edit = (value: TemplateBlueprint) => { setBlueprint(value); setReviewed(false); setRights(false); setShareUrl(""); setSharedToken(null); };
   const filledCount = blueprint.items.map((_, index) => amounts[index] ?? "").filter(value => value !== "").length;
+  const creationAllowed = !session || accountCanCreate;
 
   return <ModalShell opened={opened} onClose={onClose} sectionLabel="설계도" title="생활비 템플릿" size="lg">
     <Text size="sm" c="dimmed">고정비 항목의 틀을 만들고 공유합니다. 엑셀 수식·변동 지출 장부·판매 결제 기능은 아닙니다. 현재 생활비 데이터는 자동으로 가져오지 않습니다. <a href="/guide/templates/" target="_blank" rel="noopener noreferrer">공유 범위와 만료 정책 안내</a></Text>
@@ -198,17 +201,17 @@ export function TemplateModal({ opened, onOpen, onClose, session, onLogin, canAp
     </section>
     <section aria-label="새 공간에 템플릿 적용" className="template-preview">
       <Title order={3} size={16}>새 공간에 적용</Title>
-      <Text size="sm">비어 있는 금액은 0원이 아닙니다. 모든 실제 청구 금액과 월 수입을 직접 입력하세요. 입력한 값은 설계도에 포함되지 않습니다. 로그인 상태에서는 새 가계부를 서버 계정에 저장하며 원래 가계부는 바꾸지 않습니다. 날짜·결제수단은 생성 후 직접 설정합니다.</Text>
+      <Text size="sm">비어 있는 금액은 0원이 아닙니다. 모든 실제 청구 금액과 월 수입을 직접 입력하세요. 입력한 값은 설계도에 포함되지 않습니다. 로그인 상태에서는 소유 가계부가 없는 계정의 첫 가계부만 서버에 만들 수 있습니다. 기존 가계부는 바꾸지 않습니다. 게스트는 별도 로컬 공간에 적용합니다. 날짜·결제수단은 생성 후 직접 설정합니다.</Text>
       <Stack gap="sm" mt="sm">
         <TextInput label="새 공간 월 수입 (원)" inputMode="numeric" value={income} disabled={busy} onChange={e => setIncome(e.currentTarget.value)} />
         {blueprint.items.map((item, i) => <TextInput key={i} label={`${item.name || `설계 항목 ${i + 1}`} 실제 청구 금액 (원)`} inputMode="numeric" placeholder="직접 입력 · 미입력" value={amounts[i] ?? ""} disabled={busy} onChange={e => { const value = e.currentTarget.value; setAmounts(values => blueprint.items.map((_, index) => index === i ? value : values[index] ?? "")); }} />)}
       </Stack>
       <Text size="xs" c="dimmed" mt="xs">금액 입력 {filledCount}/{blueprint.items.length} · 모든 항목과 수입을 채워야 생성할 수 있습니다 · 실제 0원인 항목에만 0을 입력하세요</Text>
       {!canApply ? <Text size="sm" c="dimmed" mt="sm">현재 공간의 저장·복구 상태를 확인한 뒤 적용하세요. 기존 데이터는 교체하지 않습니다.</Text> : null}
-      {session ? <Text size="sm" mt="sm">계정 연결을 유지한 채 새 가계부를 만듭니다. 기존 가계부는 변경하지 않습니다.</Text> : null}
-      <Button mt="sm" disabled={!budget || !canApply || busy || unavailable || (session !== null && !session.user.emailVerified)} onClick={() => void run(async current => {
+      {session ? <Text size="sm" mt="sm">{creationAllowed ? '계정 연결을 유지한 채 첫 가계부를 만듭니다. 기존 가계부는 변경하지 않습니다.' : creationUnavailableMessage}</Text> : null}
+      <Button mt="sm" disabled={!budget || !canApply || !creationAllowed || busy || unavailable || (session !== null && !session.user.emailVerified)} onClick={() => void run(async current => {
         if (sharedToken) await templateApi.shared(sharedToken); // revoked or expired links can no longer be applied
-        if (!budget || !fresh(token) || !current()) return;
+        if (!budget || !creationAllowed || !fresh(token) || !current()) return;
         const applied = await onApply(blueprint, budget);
         if (!fresh(token) || !current()) return;
         // Consume the share capability only when the new space really exists.

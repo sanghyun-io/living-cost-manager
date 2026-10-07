@@ -34,6 +34,7 @@ import { useLedgers } from './lib/useLedgers';
 import { LedgerControls } from './components/LedgerControls';
 import { LedgerSummary } from './components/LedgerSummary';
 import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
+import { CROSS_LEDGER_AGGREGATION_AVAILABLE } from './lib/publicRelease';
 
 export default function Home() {
   // Hook creation order respects render-time data flow:
@@ -191,7 +192,7 @@ export default function Home() {
       <main className="page-shell">
       {templateError ? <Text role="alert" aria-live="assertive" c="rose" mb="md">{templateError}</Text> : null}
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
-      {ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 가계부를 선택하고 조회하세요. 자동으로 전체 가계부를 선택하지 않습니다.</Text>}</section> : <>
+      {CROSS_LEDGER_AGGREGATION_AVAILABLE && ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 가계부를 선택하고 조회하세요. 자동으로 전체 가계부를 선택하지 않습니다.</Text>}</section> : <>
       {viewer ? <Text role="status">보기 전용 가계부입니다. 편집과 업로드는 할 수 없습니다.</Text> : null}
       <fieldset disabled={!canEdit} className="ledger-edit-region">
       <HeroPanel
@@ -284,6 +285,7 @@ export default function Home() {
       </fieldset></>}
       <TemplateModal key={auth.serverSession ? auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id : users.currentUser?.id} opened={templatesOpen} onOpen={() => setTemplatesOpen(true)} onClose={() => setTemplatesOpen(false)} session={auth.serverSession}
         onLogin={() => { setTemplatesOpen(false); ui.setIsAuthModalOpen(true); }} canApply={users.isLoaded && !budget.saveError && !budget.localRecoveryRequired}
+        accountCanCreate={ledgers.canCreate} creationUnavailableMessage={ledgers.creationUnavailableMessage}
         onShareError={setTemplateError}
         onApply={async (blueprint, snapshot) => { if (auth.serverSession) return ledgers.create(blueprint.title, snapshot); try { users.applyTemplate(blueprint, snapshot); setTemplateError(""); return true; } catch (error) { setTemplateError(error instanceof Error ? error.message : "새 공간을 만들지 못했습니다. 기존 데이터는 교체하지 않았습니다."); return false; } }} />
       <DataModal

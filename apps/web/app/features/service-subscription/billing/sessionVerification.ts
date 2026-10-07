@@ -1,4 +1,4 @@
-import { ServerApiError, type ServerSession } from "../../lib/serverApi";
+import { ServerApiError, type ServerSession } from "../../../lib/serverApi";
 
 export interface VerificationState {
   session: ServerSession | null;

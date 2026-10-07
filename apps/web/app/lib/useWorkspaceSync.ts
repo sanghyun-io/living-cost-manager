@@ -27,6 +27,7 @@ import type { CoachApi } from "./useCoach";
 import { buildLivingCostBackup } from "./backup";
 import { getUserDataKey } from "./users";
 import { blockSync, canAutoSync, canReplaceLocal, createSyncSafety, establishSyncBaseline, syncScope, syncSnapshotKey as buildSnapshotKey } from "./syncSafety";
+import { canCreateFirstOwnedLedger } from './publicRelease';
 
 interface UseWorkspaceSyncOptions {
   ui: UIStateApi;
@@ -81,6 +82,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
   const sharingScope = useRef<ReturnType<typeof createSyncSafety> | null>(null);
   const decisionRequest = useRef(0);
   const workspaceListRequest = useRef(0);
+  const workspaceListProof = useRef<{ workspaces: WorkspaceDto[]; isCurrent: () => boolean } | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -168,6 +170,10 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
   // ── workspaces & sync decision ───────────────────────────────────────
   async function loadServerWorkspaces(session = serverSession): Promise<WorkspaceListLoadResult> {
     const request = ++workspaceListRequest.current;
+    // Keep the old list for access, but never use it to authorize creation
+    // while a newer read is pending or failed. Notify even if that read fails.
+    workspaceListProof.current = null;
+    notifySafety();
     if (!serverApi || !session) {
       setServerWorkspaces([]);
       return { status: "discarded" };
@@ -182,6 +188,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     const workspaces = await serverApi.listWorkspaces(session.token);
     if (!isCurrent()) return { status: "discarded" };
     setServerWorkspaces(workspaces);
+    workspaceListProof.current = { workspaces, isCurrent };
     return { status: "applied", workspaces, isCurrent };
   }
 
@@ -599,6 +606,11 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     isServerSnapshotChecked: isChecked,
     lastServerSyncedAt: safety.current.baseline !== null ? lastServerSyncedAt : null,
     serverWorkspaces,
+    isWorkspaceListChecked: !!workspaceListProof.current?.isCurrent(),
+    canCreateFirstOwnedLedger: canCreateFirstOwnedLedger(workspaceListProof.current?.workspaces ?? [], !!workspaceListProof.current?.isCurrent()),
+    // Event-time proof also protects an older template handler resumed after
+    // an async shared-link check. A render-time boolean is not authorization.
+    canCreateFirstOwnedLedgerNow: () => canCreateFirstOwnedLedger(workspaceListProof.current?.workspaces ?? [], !!workspaceListProof.current?.isCurrent()),
     members,
     invitations,
     sentInvitations,

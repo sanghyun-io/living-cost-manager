@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+// Internal paid-ready mutation regressions, not a production browser toggle.
+vi.mock('../app/lib/publicRelease', async importOriginal => ({ ...await importOriginal<object>(), FREE_PUBLIC_RELEASE: false, CROSS_LEDGER_AGGREGATION_AVAILABLE: true }));
 const hooks = vi.hoisted(() => ({ slots: [] as any[], cursor: 0, effects: [] as (() => void)[], dirty: false }));
 vi.mock('react', () => ({
   useRef(initial: unknown) { const i = hooks.cursor++; if (!(i in hooks.slots)) hooks.slots[i] = { current: initial }; return hooks.slots[i]; },

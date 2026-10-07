@@ -1,4 +1,4 @@
-import { getServerApiBaseUrl } from "../../lib/serverApi";
+import { getServerApiBaseUrl } from "../../../lib/serverApi";
 import type { BillingApi, Instrument } from "./types";
 import { serviceBillingReadinessResponseSchema, serviceBillingQuoteResponseSchema, serviceBillingAttemptResponseSchema,
   serviceBillingSubscriptionResponseSchema, serviceBillingInstrumentResponseSchema, serviceBillingRefundResponseSchema,

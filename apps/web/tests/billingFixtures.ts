@@ -1,7 +1,7 @@
 import { vi } from "vitest";
-import { BillingController } from "../app/subscription/billing/controller";
-import { BillingError } from "../app/subscription/billing/api";
-import type { Attempt, BillingApi, BillingSdk, Quote, Readiness, Subscription, SdkRequest, Mode } from "../app/subscription/billing/types";
+import { BillingController } from "../app/features/service-subscription/billing/controller";
+import { BillingError } from "../app/features/service-subscription/billing/api";
+import type { Attempt, BillingApi, BillingSdk, Quote, Readiness, Subscription, SdkRequest, Mode } from "../app/features/service-subscription/billing/types";
 export const now = Date.parse("2026-10-07T00:00:00Z");
 export const readiness = (): Readiness => ({ mode: "mock", checkoutEnabled: true,
   blockingCodes: ["MOCK_ONLY", "PAID_PRODUCT_APPROVAL_PENDING", "LEGAL_TAX_APPROVAL_PENDING"], catalogVersion: "lcm-990-9900-v1", currency: "KRW", taxTreatment: "pending",

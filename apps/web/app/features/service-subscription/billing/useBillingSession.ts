@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { createServerApiClient, SERVER_SESSION_STORAGE_KEY, type ServerSession } from "../../lib/serverApi";
-import { readJson } from "../../lib/storage";
+import { createServerApiClient, SERVER_SESSION_STORAGE_KEY, type ServerSession } from "../../../lib/serverApi";
+import { readJson } from "../../../lib/storage";
 import { SessionVerification, type VerificationState } from "./sessionVerification";
 
 /** Reuse the existing login/session, never add a second signup/credential flow. */

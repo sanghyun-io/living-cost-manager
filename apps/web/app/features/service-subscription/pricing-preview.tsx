@@ -1,5 +1,5 @@
 import { servicePricingCopy } from "@living-cost-manager/shared";
-import styles from "./guide.module.css";
+import styles from "../../guide/guide.module.css";
 
 export function PricingPreview() {
   const copy = servicePricingCopy();

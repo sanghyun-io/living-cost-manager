@@ -65,11 +65,34 @@ it('a genuine applied empty list enables explicit review, without automatically 
   const f = setup(); f.auth.serverApi.listWorkspaces.mockResolvedValueOnce([]);
   await f.render().ledgers.refresh();
   expect(f.render().sync.serverWorkspaces).toEqual([]);
+  expect(f.render().sync.canCreateFirstOwnedLedger).toBe(true);
   expect(f.render().ledgers.reconciliationReady).toBe(true);
   expect(storage.has(ledgerCreationKey('a'))).toBe(true);
   f.render().ledgers.acknowledgeReconciliation();
   expect(f.render().ledgers.uncertain).toBe(false);
   expect(storage.has(ledgerCreationKey('a'))).toBe(false);
+});
+it('first-ledger proof invalidates on mode/scope change and never infers zero from a failed read', async () => {
+  const f = setup();
+  expect(f.render().sync.canCreateFirstOwnedLedger).toBe(false);
+  f.auth.serverApi.listWorkspaces.mockResolvedValueOnce([]); await f.render().sync.loadServerWorkspaces();
+  expect(f.render().sync.canCreateFirstOwnedLedger).toBe(true);
+  f.options.localUserId = 'sample'; expect(f.render().sync.canCreateFirstOwnedLedger).toBe(false);
+  f.auth.serverApi.listWorkspaces.mockRejectedValueOnce(Error('synthetic unavailable'));
+  await expect(f.render().sync.loadServerWorkspaces()).rejects.toThrow('synthetic unavailable');
+  expect(f.render().sync.canCreateFirstOwnedLedger).toBe(false);
+});
+it('pending and failed newer reads revoke even old event-time first-ledger proof but preserve access list', async () => {
+  const f = setup(); f.auth.serverApi.listWorkspaces.mockResolvedValueOnce([]);
+  await f.render().sync.loadServerWorkspaces();
+  const previous = f.render().sync; expect(previous.canCreateFirstOwnedLedgerNow()).toBe(true);
+  const response = held<any[]>(); f.auth.serverApi.listWorkspaces.mockReturnValueOnce(response.promise);
+  const request = previous.loadServerWorkspaces();
+  expect(previous.canCreateFirstOwnedLedgerNow()).toBe(false);
+  expect(f.render().sync.canCreateFirstOwnedLedger).toBe(false);
+  response.reject(Error('synthetic failed list')); await expect(request).rejects.toThrow('synthetic failed list');
+  expect(f.render().sync.canCreateFirstOwnedLedger).toBe(false);
+  expect(f.render().sync.serverWorkspaces).toEqual([]);
 });
 it('concurrent refreshes apply and review only the newest request', async () => {
   const f = setup(), first = held<any[]>(), second = held<any[]>();

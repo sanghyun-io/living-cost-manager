@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
-import { BillingController } from "../app/subscription/billing/controller";
-import { createBillingApi } from "../app/subscription/billing/api";
-import { browserBillingSdk } from "../app/subscription/billing/sdk";
+import { BillingController } from "../app/features/service-subscription/billing/controller";
+import { createBillingApi } from "../app/features/service-subscription/billing/api";
+import { browserBillingSdk } from "../app/features/service-subscription/billing/sdk";
 
 // Opt-in ONLY to the dedicated synthetic loopback test DB. Never use DATABASE_URL.
 const database = "postgresql://billing_test:synthetic_test_only@127.0.0.1:55443/lcm_billing_test?schema=public";

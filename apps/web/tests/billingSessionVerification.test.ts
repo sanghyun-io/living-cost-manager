@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { SessionVerification } from "../app/subscription/billing/sessionVerification";
+import { SessionVerification } from "../app/features/service-subscription/billing/sessionVerification";
 import { ServerApiError, type ServerSession } from "../app/lib/serverApi";
 const session = (id = "synthetic-account", token = "synthetic-token"): ServerSession => ({ token, refreshToken: "synthetic-refresh", user: { id } as ServerSession["user"], workspace: null });
 afterEach(() => vi.useRealTimers());

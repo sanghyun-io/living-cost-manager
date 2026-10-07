@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { validSubscription } from "../app/subscription/billing/subscriptionValidation";
+import { validSubscription } from "../app/features/service-subscription/billing/subscriptionValidation";
 import { now, subscription } from "./billingFixtures";
 const active = () => ({ ...subscription(), contractId: "synthetic", planId: "monthly" as const, status: "active" as const, paidAccess: true,
   premiumScope: "account-subscription-v1" as const, paidThrough: "2026-11-07T00:00:00Z", nextChargeAt: "2026-11-07T00:00:00Z" });

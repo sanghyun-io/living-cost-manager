@@ -1,5 +1,7 @@
 # Billing frontend integration — INTERNAL technical handoff
 
+> Free public release supersedes public exposure on 2026-10-07: this is the preserved historical paid-module contract, not a currently published route or launch approval. Source is now under `app/features/service-subscription/`, with no `/subscription/` route. Historical verification counts below belong to that earlier integration run. See `free-public-release.md` for current scope, current verification commands and restoration gates.
+
 ## Immutable source and ownership
 
 Authoritative backend base verified as **1fecf301304f2165a4c6f01b8d2f5ea089c9e30f** (2026-10-07). New worktree `lcm-billing-ui-integrated`, branch `feat/lcm-billing-ui-integrated`, in the approved OpenCode temp directory. Web-only commits `496fdf3` and `dc39c6c` were cherry-picked as `3da1528` and `d63f471`. Original frontend worktree remains historical and unchanged; backend worktree/uncommitted corrections were not inspected.

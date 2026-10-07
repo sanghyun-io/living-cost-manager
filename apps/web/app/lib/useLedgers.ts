@@ -6,6 +6,7 @@ import type { WorkspaceSyncApi } from './useWorkspaceSync';
 import type { LocalBudgetSnapshot } from './snapshot';
 import { buildWorkspaceSnapshot } from './snapshot';
 import { ServerApiError } from './serverApi';
+import { FREE_PUBLIC_RELEASE, CROSS_LEDGER_AGGREGATION_AVAILABLE, FREE_LEDGER_LIMIT_MESSAGE, LEDGER_LIST_UNAVAILABLE_MESSAGE } from './publicRelease';
 
 type Mutation = { pending: boolean; uncertain: boolean; name: string; status: string; listReviewed: boolean; reviewCurrent?: () => boolean };
 export const ledgerCreationKey = (accountId: string) => 'living-cost-manager:ledger-creation:' + encodeURIComponent(accountId);
@@ -73,6 +74,10 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
     const session = auth.serverSession, api = auth.serverApi, ticket = epoch.current;
     if (!session || !api || !session.user.emailVerified) return false;
     const state = mutation(session.user.id), trimmed = name.trim();
+    if (FREE_PUBLIC_RELEASE && !sync.canCreateFirstOwnedLedgerNow()) {
+      state.status = sync.isWorkspaceListChecked ? FREE_LEDGER_LIMIT_MESSAGE : LEDGER_LIST_UNAVAILABLE_MESSAGE;
+      notify(); return false;
+    }
     if (state.pending || state.uncertain || !trimmed || trimmed.length > 100) return false;
     try {
       const unresolved = window.localStorage.getItem(ledgerCreationKey(session.user.id));
@@ -106,7 +111,7 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
       if (!(error instanceof ServerApiError) || error.status >= 500) {
         state.uncertain = true; state.status = '생성 결과를 확인할 수 없습니다. 중복 생성을 막기 위해 자동 재시도하지 않습니다. 가계부 목록을 새로 확인하세요.';
       } else {
-        try { window.localStorage.removeItem(ledgerCreationKey(session.user.id)); state.uncertain = false; state.status = '가계부 생성에 실패했습니다. 이메일 확인과 입력값을 확인하세요.'; }
+        try { window.localStorage.removeItem(ledgerCreationKey(session.user.id)); state.uncertain = false; state.status = error.code === 'FREE_WORKSPACE_LIMIT' || error.code === 'FEATURE_NOT_AVAILABLE' ? FREE_LEDGER_LIMIT_MESSAGE : '가계부 생성에 실패했습니다. 이메일 확인과 입력값을 확인하세요.'; }
         catch { state.uncertain = true; state.status = '실패 응답을 받았지만 확인 상태를 저장하지 못했습니다. 목록 확인 전에는 생성하지 않습니다.'; }
       }
       return false;
@@ -127,6 +132,7 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
   }
   function select(ids: string[]) { requestId.current++; setSelected([...new Set(ids)].slice(0, 20)); setAggregate(null); }
   async function loadAggregate() {
+    if (!CROSS_LEDGER_AGGREGATION_AVAILABLE) return;
     const session = auth.serverSession, api = auth.serverApi, ticket = epoch.current, id = ++requestId.current;
     if (!session || !api || selected.length === 0) return;
     setAggregate(null); setReading(true);
@@ -140,5 +146,7 @@ export function useLedgers(auth: ServerAuthApi, sync: WorkspaceSyncApi) {
   return { busy: reading || !!activeMutation?.pending, mutationPending: !!activeMutation?.pending,
     uncertain: !!activeMutation?.uncertain, uncertainName: activeMutation?.name ?? '', reconciliationReady,
     status: activeMutation?.pending || activeMutation?.uncertain ? mutationStatus : status || mutationStatus, create, rename, refresh, acknowledgeReconciliation,
-    aggregateMode, setAggregateMode: (value: boolean) => { requestId.current++; setReading(false); setAggregateMode(value); setAggregate(null); }, selected, select, aggregate, loadAggregate };
+    canCreate: !FREE_PUBLIC_RELEASE || sync.canCreateFirstOwnedLedger,
+    creationUnavailableMessage: sync.isWorkspaceListChecked ? FREE_LEDGER_LIMIT_MESSAGE : LEDGER_LIST_UNAVAILABLE_MESSAGE,
+    aggregateMode: CROSS_LEDGER_AGGREGATION_AVAILABLE && aggregateMode, setAggregateMode: (value: boolean) => { if (!CROSS_LEDGER_AGGREGATION_AVAILABLE) return; requestId.current++; setReading(false); setAggregateMode(value); setAggregate(null); }, selected, select, aggregate, loadAggregate };
 }

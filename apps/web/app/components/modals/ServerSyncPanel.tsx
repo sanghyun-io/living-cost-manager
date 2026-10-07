@@ -222,7 +222,7 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
       ) : null}
       {serverSession && serverWorkspaces.length === 0 ? (
         <Text size="xs" c="dimmed" mb="sm">
-          선택한 가계부가 없습니다. 화면 상단에서 새 가계부를 만들거나 초대를 수락한 뒤 가계부를 선택하세요.
+          선택한 가계부가 없습니다. 가계부 목록을 확인한 뒤 첫 가계부를 만들거나, 초대를 수락하고 화면 상단에서 가계부를 선택하세요. 무료판의 소유 가계부는 1개이며 기존 가계부와 공유 권한은 유지됩니다.
         </Text>
       ) : null}
 

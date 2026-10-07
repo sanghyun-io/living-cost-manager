@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest";
-import { BillingController, checkoutReady, renewalConfirmed, validQuote } from "../app/subscription/billing/controller";
-import { BillingError, createBillingApi } from "../app/subscription/billing/api";
-import { browserBillingSdk } from "../app/subscription/billing/sdk";
-import type { BillingApi, Subscription } from "../app/subscription/billing/types";
+import { BillingController, checkoutReady, renewalConfirmed, validQuote } from "../app/features/service-subscription/billing/controller";
+import { BillingError, createBillingApi } from "../app/features/service-subscription/billing/api";
+import { browserBillingSdk } from "../app/features/service-subscription/billing/sdk";
+import type { BillingApi, Subscription } from "../app/features/service-subscription/billing/types";
 import { approved, attempt, fixture, now, quote, readiness, ready, subscription } from "./billingFixtures";
 test("OFF / mock without local adapter never prepares or loads SDK", async () => {
   const f = fixture(); f.api.readiness.mockResolvedValue({ ...readiness(), checkoutEnabled: false }); await ready(f); await f.controller.pay();
@@ -145,7 +145,7 @@ test("SDK exception retains intent and never blindly retries registration or cha
 });
 test("approved material renders as escaped text, never HTML", async () => {
   const { createElement } = await import("react"); const { renderToStaticMarkup } = await import("react-dom/server");
-  const { BillingPanel } = await import("../app/subscription/subscription-page");
+  const { BillingPanel } = await import("../app/features/service-subscription/subscription-page");
   const f = fixture(), r = approved(); r.approvedMaterial!.features = '<img src="x" onerror="alert(1)">';
   f.api.readiness.mockResolvedValue(r); f.api.quote.mockResolvedValue(quote(r)); await ready(f);
   const html = renderToStaticMarkup(createElement(BillingPanel, { controller: f.controller }));
