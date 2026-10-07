@@ -1,5 +1,11 @@
 # Multi-ledger frontend integration — 2026-10-07
 
+Final combined candidate additionally integrates frontend `4ccf609` and debugger
+`dd91a10` atop frozen integration `3d2edae` in a separate worktree. Current
+sample-return persistence/live-registry and applied-current-list reconciliation
+contracts, fresh combined test results and pending independent checks are in
+`multiledger-final-verification.md`. Source-author results below remain historical.
+
 Base: backend `317befc490902ce3e42dbe89cfde6d2a512d6c06` (source base
 `8c4e128`). Isolated branch `frontend/multiledger`; no original dirty checkout,
 API/shared source, production, DB, credential, or billing changes.

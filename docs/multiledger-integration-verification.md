@@ -1,5 +1,10 @@
 # Multi-ledger integration handoff — 2026-10-07
 
+Historical handoff for frozen `3d2edae` and its earlier tree. The new separate
+`multiledger-final` candidate's provenance, current contracts and freshly run
+results are in `multiledger-final-verification.md`; do not treat counts below
+as new final-candidate validation.
+
 ## Source and scope
 
 Isolated approved-temp worktree `lcm-multiledger-integration`, branch
