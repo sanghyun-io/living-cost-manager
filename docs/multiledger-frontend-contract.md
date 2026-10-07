@@ -173,3 +173,52 @@ all **6 review-reproduction browser scenarios** and the existing broad browser
 regression script passed. Both scripts intercepted every API request and used
 only synthetic local data. `git diff --check` passed. No independent follow-up
 review or real API/DB/production validation is claimed.
+
+## Second independent-review follow-up (parent `b839214`, 2026-10-07)
+
+The original three findings were independently closed, but two new sample-return
+race findings were reported. This follow-up is scoped to `useLocalUsers.ts`, its
+synthetic browser regressions, and this contract; it does not modify the frozen
+integration revision `3d2` or its active independent tester/reviewer work.
+
+- Permission requests no longer mutate auth/session/selection before final
+  outgoing persistence. A live render ref plus return generation checks the
+  outgoing profile, authenticated account/workspace, and active storage pointer.
+  AFTER `/me` and membership validation, the latest outgoing save callback is
+  invoked immediately before the synchronous transition, with no intervening
+  await. This guard also applies to invalid-auth/deleted-target guest fallback.
+  Quota/conflict failure keeps the current sample and latest memory edits and
+  displays a refusal message. Editing while permission validation is pending
+  remains supported; disabling the editor is not used as a substitute for save.
+- Return/fallback registry writes use freshly loaded, tombstone-filtered storage,
+  never the pre-request list or an in-memory registry fallback. Account targets
+  must still exist in that live registry with matching account identity and no
+  erasure marker. Successful permission responses cannot resurrect erased
+  metadata, financial caches, session, or account selection. Existing server
+  profile cache is not seeded by this path. Legitimate concurrent guest/profile
+  entries are preserved. Adjacent login/logout registry reads and template-return
+  target lookup now likewise use live filtered storage. No tombstone is cleared
+  and no legacy backup is deleted by these changes.
+
+Author validation on final source at 2026-10-07 10:39: **24 files / 246 Vitest
+tests passed** (count unchanged); TypeScript and explicit-origin static export
+passed. The review browser script now passes **13 scenarios: original 6 + 7
+new race cases**, covering newer return cancellation, newer logout cancellation,
+latest sample edit persistence, held `/me` with sample edit + quota failure for
+both successful and failed permission responses, and actual second-page erasure
+plus concurrent guest registration for both successful and failed responses.
+The broader `multiledger-browser.mjs` script also passed. The final added browser
+case was executed after that build without further implementation changes.
+Commands: `pnpm test:web`;
+`NEXT_PUBLIC_API_BASE_URL=https://api.gamja.top/living-cost-manager/v1 pnpm --filter @living-cost-manager/web build`;
+`node apps/web/tests/multiledger-review-browser.mjs`;
+`node apps/web/tests/multiledger-browser.mjs`; `git diff --check`.
+Synthetic follow-up evidence uses separate approved-temp filenames
+`multiledger-rereview-uncertainty.png` and
+`multiledger-rereview-synthetic-legacy.json`.
+
+This is author verification on the isolated frontend branch, NOT a PASS claim
+for frozen integration `3d2`, latest backend `6935972`, independent rereview,
+real API/DB, production, or desktop/screen-reader validation. localStorage checks
+are not transactional cross-tab locking; creation has no backend idempotency
+guarantee. Production and credentials remain untouched; no subdelegation.
