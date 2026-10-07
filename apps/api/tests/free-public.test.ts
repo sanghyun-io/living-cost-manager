@@ -150,11 +150,12 @@ describe("FREE_PUBLIC is the real server default", () => {
     expect(Object.values(parseBillingConfiguration(dark).capabilities)).toEqual([false, false, false, false, false]);
     expect(service.readiness().checkoutEnabled).toBe(false);
     for (const operation of [() => service.createQuote("synthetic-user", "monthly"), () => service.prepare("synthetic-user", "synthetic-quote"),
-      () => service.charge("synthetic-user", {} as never), () => service.renew("synthetic-user"), () => service.approveAndExecuteRefund("synthetic-refund", "synthetic-operation", "policy-v1"),
+      () => service.charge("synthetic-user", {} as never), () => service.renew("synthetic-user"),
       () => service.cancel("synthetic-user"),
       () => service.renewOnce(), () => service.revokeInstrument("synthetic-user", "synthetic-instrument")]) {
       await expect(operation()).rejects.toMatchObject({ code: "SERVICE_BILLING_NOT_READY" });
     }
+    await expect(service.approveAndExecuteRefund("synthetic-refund", "synthetic-operation", "policy-v1")).rejects.toMatchObject({ code: "FEATURE_NOT_AVAILABLE", statusCode: 403 });
     for (const job of ["renew", "refund"] as const) await expect(runBillingWorker(dark, job)).rejects.toThrow("approval/capability required");
     expect(fake.calls).toHaveLength(0);
   });

@@ -20,6 +20,7 @@ export class ServiceBillingError extends Error {
 function fail(code: string, status = 409): never { throw new ServiceBillingError(code, status); }
 type Tx = Prisma.TransactionClient;
 type ChargeInput = z.infer<typeof serviceBillingChargeRequestSchema>;
+type RefundWithAttempt = Prisma.ServiceRefundRecordGetPayload<{ include: { attempt: { include: { contract: true; quote: true } } } }>;
 const leaseMs = 30_000;
 const lookupLimit = 8;
 
@@ -561,6 +562,7 @@ export class ServiceBillingService {
     return this.executeRefund(userId, requestId);
   }
   async approveAndExecuteRefund(requestId: string, operationId: string, policyVersion: string) {
+    if (this.env.SERVICE_PAID_FEATURES_PUBLISHED !== "true") fail("FEATURE_NOT_AVAILABLE", 403);
     this.requireReady("refund");
     if (this.mode === "mock" || !/^[A-Za-z0-9_-]{16,128}$/.test(operationId) || policyVersion !== this.config.manifest?.policyVersion) fail("REFUND_APPROVAL_REQUIRED");
     const r = await this.prisma.serviceRefundRecord.findUnique({ where: { id: requestId }, include: { attempt: { include: { contract: true, quote: true } } } });
@@ -579,7 +581,7 @@ export class ServiceBillingService {
   }
   private async executeRefund(userId: string, requestId: string) {
     this.requireReady("refund");
-    const r = await this.prisma.serviceRefundRecord.findFirst({ where: { id: requestId, attempt: { contract: { userId } } }, include: { attempt: { include: { contract: true } } } });
+    const r = await this.prisma.serviceRefundRecord.findFirst({ where: { id: requestId, attempt: { contract: { userId } } }, include: { attempt: { include: { contract: true, quote: true } } } });
     if (!r) fail("BILLING_NOT_FOUND", 404);
     if (r.provider !== this.provider!.scope.provider || r.storeId !== this.provider!.scope.storeId || r.environment !== this.mode) fail("BILLING_SCOPE_MISMATCH");
     if (this.mode !== "mock" && (!r.approvalOperationId || r.approvalPolicyVersion !== this.config.manifest?.policyVersion)) fail("REFUND_APPROVAL_REQUIRED");
@@ -610,11 +612,25 @@ export class ServiceBillingService {
       return;
     }
     if (observed.paymentId !== r!.attempt.paymentId || observed.amount !== r!.requestAmount) fail("REFUND_OBSERVATION_MISMATCH");
+    await this.commitRefundObservation(r, owner, claim.refund.fence, observed);
+    // Dispatch-capable execution only; readonly recovery never calls cancel,
+    // revokes instruments or dispatches any provider operation.
+    await this.cancel(userId);
+  }
+  private async commitRefundObservation(r: RefundWithAttempt, owner: string, fence: number,
+    observed: { paymentId: string; amount: number; cancelId: string }) {
     await this.prisma.$transaction(async tx => {
       await this.lockContract(tx, r!.attempt.contractId);
-      const current = await tx.serviceRefundRecord.findUniqueOrThrow({ where: { id: requestId } });
-      if (current.status === "verified" || current.leaseOwner !== owner || current.fence !== claim.refund.fence) return;
-      await tx.serviceRefundRecord.update({ where: { id: requestId }, data: { status: "verified", providerCancelId: observed!.cancelId,
+      const current = await tx.serviceRefundRecord.findUniqueOrThrow({ where: { id: r.id } });
+      if (current.status !== "dispatch_unknown" || current.leaseOwner !== owner || current.fence !== fence) return;
+      // Immutable reservation/approval binding must survive the async GET.
+      if (current.attemptId !== r.attemptId || current.requestAmount !== r.requestAmount || current.provider !== r.provider ||
+        current.storeId !== r.storeId || current.environment !== r.environment || current.idempotencyKey !== r.idempotencyKey ||
+        current.approvalOperationId !== r.approvalOperationId || current.approvalPolicyVersion !== r.approvalPolicyVersion) {
+        await tx.serviceRefundRecord.update({ where: { id: r.id }, data: { status: "manual_review", leaseOwner: null, leaseUntil: null, nextLookupAt: null } });
+        return;
+      }
+      await tx.serviceRefundRecord.update({ where: { id: r.id }, data: { status: "verified", providerCancelId: observed!.cancelId,
         verifiedAmount: observed!.amount, verifiedAt: this.clock(), leaseOwner: null, leaseUntil: null, nextLookupAt: null } });
       await tx.servicePaymentAttempt.update({ where: { id: r!.attemptId }, data: { status: "refunded" } });
       const p = await tx.servicePaidPeriod.findUnique({ where: { attemptId: r!.attemptId } });
@@ -623,13 +639,70 @@ export class ServiceBillingService {
         renewalStopped: true, cancelRequested: true, providerCancellationStatus: "pending", version: { increment: 1 }
       } });
     });
-    // Synthetic full refund stops renewal too; real policy remains blocked.
-    await this.cancel(userId);
   }
   async refundDto(userId: string, requestId: string) {
     const refund = await this.prisma.serviceRefundRecord.findFirst({ where: { id: requestId, attempt: { contract: { userId } } } });
     if (!refund) fail("BILLING_NOT_FOUND", 404);
     return serviceBillingRefundResponseSchema.parse({ requestId: refund.id, status: refund.status, requestAmount: refund.requestAmount, currency: "KRW" as const });
+  }
+  /** Private recovery only: an existing durable dispatch-intent claim, not a
+   * new approval or reservation. Uses only the scoped cancellation GET adapter.
+   * Publication controls POST authorization, not previously dispatched audit. */
+  private async reconcileRefundUnknown(requestId: string) {
+    this.requireReady();
+    if (this.mode === "mock" || !this.config.manifest?.workers.reconcile || !this.provider!.lookupCancellation) return;
+    const owner = randomUUID();
+    const manifest = this.config.manifest;
+    const claim = await this.prisma.$transaction(async tx => {
+      const seed = await tx.serviceRefundRecord.findUnique({ where: { id: requestId }, select: { attempt: { select: { contractId: true } } } });
+      if (!seed) return null;
+      await this.lockContract(tx, seed.attempt.contractId);
+      const r = await tx.serviceRefundRecord.findUniqueOrThrow({ where: { id: requestId }, include: { attempt: { include: { contract: true, quote: true } } } });
+      if (r.status !== "dispatch_unknown" || (r.leaseUntil && r.leaseUntil > this.clock()) || (r.nextLookupAt && r.nextLookupAt > this.clock())) return null;
+      const a = r.attempt; const c = a.contract; const q = a.quote;
+      // The pre-POST claim writes status + positive fence/lookupCount atomically.
+      // There is no new schema/dispatchAt field. This is dispatch intent, not
+      // evidence that the POST reached PG; a missing observation never reposts.
+      const valid = r.fence > 0 && r.lookupCount > 0 && r.lookupCount < lookupLimit &&
+        !!r.approvalOperationId && /^[A-Za-z0-9_-]{16,128}$/.test(r.approvalOperationId) &&
+        r.approvalPolicyVersion === manifest.policyVersion && q.policyVersion === r.approvalPolicyVersion &&
+        !!c.userId && r.provider === this.provider!.scope.provider && r.storeId === this.provider!.scope.storeId && r.environment === this.mode &&
+        a.provider === r.provider && a.storeId === r.storeId && a.environment === r.environment &&
+        c.provider === r.provider && c.storeId === r.storeId && c.environment === r.environment &&
+        q.provider === r.provider && q.storeId === r.storeId && q.environment === r.environment && q.channelId === manifest.channelId &&
+        r.requestAmount > 0 && r.requestAmount <= a.totalAmount && a.currency === "KRW" &&
+        ["paid", "refunded"].includes(a.status) && !a.reviewRequired;
+      if (!valid) {
+        await tx.serviceRefundRecord.update({ where: { id: r.id }, data: { status: "manual_review", leaseOwner: null, leaseUntil: null, nextLookupAt: null } });
+        return null;
+      }
+      const next = await tx.serviceRefundRecord.update({ where: { id: r.id }, data: { leaseOwner: owner,
+        leaseUntil: new Date(this.clock().getTime() + leaseMs), fence: { increment: 1 }, lookupCount: { increment: 1 } } });
+      return { r, next };
+    });
+    if (!claim) return;
+    const { r, next } = claim;
+    let observed: Awaited<ReturnType<NonNullable<ServiceBillingProvider["lookupCancellation"]>>> = null;
+    let invalid = false;
+    try {
+      observed = await this.provider!.lookupCancellation!({ paymentId: r.attempt.paymentId, requestId: r.id, amount: r.requestAmount,
+        subjectId: r.attempt.contract.subjectId, totalAmount: r.attempt.totalAmount, currency: r.attempt.currency });
+      if (observed && (observed.paymentId !== r.attempt.paymentId || observed.amount !== r.requestAmount ||
+        !observed.cancelId || observed.cancelId.length > 200)) invalid = true;
+    } catch (error) {
+      invalid = error instanceof PortOneTransportError && error.code === "PORTONE_INVALID_EVIDENCE";
+    }
+    if (observed && !invalid) {
+      try { await this.commitRefundObservation(r, owner, next.fence, observed); return; }
+      catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+        invalid = true; // cancellation entry already bound to another record
+      }
+    }
+    const exhausted = invalid || next.lookupCount >= lookupLimit;
+    await this.prisma.serviceRefundRecord.updateMany({ where: { id: r.id, status: "dispatch_unknown", leaseOwner: owner, fence: next.fence }, data: {
+      leaseOwner: null, leaseUntil: null, status: exhausted ? "manual_review" : "dispatch_unknown",
+      nextLookupAt: exhausted ? null : new Date(this.clock().getTime() + 1000 * 2 ** next.lookupCount) } });
   }
   /** Bounded durable reconciliation; never charges or creates cycles. */
   async reconcileOnce(limit = 25) {
@@ -650,10 +723,12 @@ export class ServiceBillingService {
       const pendingCancels = await this.prisma.serviceSubscriptionContract.findMany({ where: { provider: this.provider!.scope.provider,
         storeId: this.provider!.scope.storeId, environment: this.mode, cancelRequested: true, providerCancellationStatus: "pending", userId: { not: null } }, take: Math.min(10, limit) });
       for (const c of pendingCancels) { try { await this.cancel(c.userId!); } catch { /* durable pending */ } }
-      if (this.config.capabilities.refund) {
+      if (this.config.manifest?.workers.reconcile) {
         const refunds = await this.prisma.serviceRefundRecord.findMany({ where: { provider: this.provider!.scope.provider, storeId: this.provider!.scope.storeId,
-          environment: this.mode, status: "dispatch_unknown", approvalOperationId: { not: null }, approvalPolicyVersion: this.config.manifest!.policyVersion }, include: { attempt: { include: { contract: true } } }, take: Math.min(10, limit) });
-        for (const r of refunds) if (r.attempt.contract.userId) { try { await this.executeRefund(r.attempt.contract.userId, r.id); } catch { /* lookup only */ } }
+          environment: this.mode, status: "dispatch_unknown", OR: [{ nextLookupAt: null }, { nextLookupAt: { lte: this.clock() } }],
+          AND: [{ OR: [{ leaseUntil: null }, { leaseUntil: { lte: this.clock() } }] }] },
+          select: { id: true }, take: Math.min(10, Math.max(1, limit)), orderBy: { createdAt: "asc" } });
+        for (const r of refunds) { try { await this.reconcileRefundUnknown(r.id); } catch { /* durable pending; never dispatch */ } }
       }
     }
     return due.length;

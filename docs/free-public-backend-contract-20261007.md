@@ -78,6 +78,41 @@ the existing fully verified scope/configuration and explicit registered
 it cannot create charges/cycles or execute dark cancel/refund dispatch. There
 are no automatically registered workers/timers or currently asserted approvals.
 
+### P2 recovery correction (follow-up to ca168)
+
+Private registered reconciliation also selects **existing**
+`ServiceRefundRecord.status = dispatch_unknown` independently of public
+`capabilities.refund` (which remains false while dark). A dedicated internal
+read path never calls `executeRefund`, reserves an amount, changes an
+idempotency/approval binding or sends any POST/DELETE. It uses only the scoped
+provider cancellation lookup GET. Fresh `requested` refunds are excluded, and
+dark operator `approveAndExecuteRefund` returns 403 `FEATURE_NOT_AVAILABLE`,
+including attempts to pass a different operation ID.
+
+Eligibility requires the durable pre-POST **dispatch-intent** marker already
+present in this schema (`dispatch_unknown` plus positive fence/lookupCount),
+an existing valid SQL-immutable approval operation/policy, matching original
+quote policy/channel, account/contract/payment provider/store/environment,
+and a configured trusted adapter with registered read reconciliation. This
+marker proves an application dispatch claim, not that PG accepted a request;
+missing remote evidence never causes a re-POST. No new marker column,
+approval, authorization flag, policy or migration was added. Missing/invalid
+markers or bindings go to manual review without a provider call; missing
+trusted configuration leaves the pending record untouched and blocks the
+worker before network access.
+
+The existing adapter verifies merchant, channel, customer, payment/currency,
+amount, cancellation-entry identity and request-specific reason/amount. The
+recovery lease/fence and immutable binding are checked again before atomic
+audit settlement. Valid GET evidence closes the existing refund and updates
+its existing coverage/local renewal stop. Provider cancellation/instrument
+revocation stays pending while dark—read recovery never calls `cancel`.
+Invalid evidence goes to manual review; unavailable/unmatched observations
+retry with bounded backoff (eight total observations including the original
+dispatch lookup). A verified refund is excluded from subsequent scans.
+Existing unknown-charge GET reconciliation is still available without
+publication. This is retained audited recovery code, not activated PG billing.
+
 Publication **alone is insufficient**. Non-test HTTP billing exposure also
 requires LIVE mode, encryption configuration, verified commercial manifest,
 scoped provider credentials/webhook verification, and complete
@@ -119,9 +154,16 @@ and test the combined frontend/backend merge before sequencing any deployment.
 
 Implementation verification: offline frozen-lock install, Prisma client
 generation from the unchanged schema, shared/API TypeScript builds, and full
-API suite **402 tests / 26 files passed** (baseline 388 + 14 default-free
-regressions). Tests used an independently created local
-`lcm_free_backend_test_20261007` database and `lcm_free_backend_test` schema,
+API suite **422 tests / 27 files passed** (ca168 baseline 402 + 20 recovery
+regressions). Follow-up tests used an independently created local
+`lcm_free_recovery_test_20261007` database and `lcm_free_recovery_test` schema,
 not another worktree's schema. No skips or expected-failure conversions were
 added. Main's separate security/reviewer and combined frontend/deployment
 checks are still pending; these results do not claim them complete.
+The primary regression dispatches an approved refund once against fake HTTP,
+loses the POST response after fake acceptance and fails the initial GET,
+keeps the parent paid attempt's nextLookupAt null
+and has no receipt, then restarts with publication false: **one GET, zero new
+POSTs**, verified audit, unchanged approval binding and no second lookup on
+replay. Other cases cover invalid bindings/evidence, bounded outages,
+concurrent/stale fences, no-key configuration and unknown-charge recovery.
