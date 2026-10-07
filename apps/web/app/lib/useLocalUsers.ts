@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cleanupLocalAccountData } from "./account";
 import { track } from "./analytics";
-import { createUser, createServerLocalUser, getUserDataKey, getUserErasureKey, LOCAL_USER_NAME, mergeUsers, resolveStartupUser, type AppUser } from "./users";
+import { createUser, createGuestUser, createServerLocalUser, getUserDataKey, getUserErasureKey, LOCAL_USER_NAME, mergeUsers, resolveStartupUser, type AppUser } from "./users";
 import { SERVER_SESSION_STORAGE_KEY, type ServerSession } from "./serverApi";
 import { ACTIVE_USER_KEY, USERS_KEY, STORAGE_KEY, LEGACY_STORAGE_KEY, isServerSession, readJson } from "./storage";
 import { emptyBudgetSnapshot, sampleBudgetSnapshot } from "./seedData";
@@ -39,7 +39,20 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
   const [isLoaded, setIsLoaded] = useState(false);
   const templateReturnId = currentUser?.templateReturnId ?? null;
   const sampleUserId = "demo-sample";
-  const sampleReturnKey = "living-cost-manager:sample-return:v1";
+  const sampleReturnKey = "living-cost-manager:sample-return:v2";
+  const sampleTransition = useRef(0);
+  // An independently invalidated session also gets a durable explicit guest
+  // profile; never leave an account profile active without its auth boundary.
+  useEffect(() => {
+    if (!isBootLoaded || auth.serverSession || !currentUser?.serverUserId) return;
+    const guest = createGuestUser();
+    try {
+      const nextUsers = mergeUsers(readJson<AppUser[]>(USERS_KEY, knownUsers), guest);
+      window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
+      window.localStorage.setItem(ACTIVE_USER_KEY, guest.id);
+      setKnownUsers(nextUsers); setCurrentUser(guest); setIsLoaded(false);
+    } catch { ui.setImportMessage('게스트 가계부 전환을 저장하지 못했습니다. 이전 계정 원본은 자동으로 편집하지 않습니다.'); }
+  }, [isBootLoaded, auth.serverSession?.user.id, currentUser?.id]);
 
   useEffect(() => {
     const users = readJson<AppUser[]>(USERS_KEY, []).filter((user) => !window.localStorage.getItem(getUserErasureKey(user.id)));
@@ -121,16 +134,35 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
   }
 
   // Demo lives in its own local profile; neither direction replaces real data.
-  function handleChooseDataMode(mode: "sample" | "blank") {
+  async function handleChooseDataMode(mode: "sample" | "blank") {
     if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return;
-    auth.handleServerLogout();
+    const transition = ++sampleTransition.current;
     const liveUsers = readJson<AppUser[]>(USERS_KEY, knownUsers).filter((user) => !window.localStorage.getItem(getUserErasureKey(user.id)));
     if (mode === "sample" && currentUser && currentUser.id !== sampleUserId && !window.localStorage.getItem(getUserErasureKey(currentUser.id))) {
-      window.localStorage.setItem(sampleReturnKey, currentUser.id);
+      window.localStorage.setItem(sampleReturnKey, JSON.stringify({ profileId: currentUser.id,
+        accountId: auth.serverSession?.user.id ?? null, workspaceId: auth.serverSession?.workspace?.id ?? null }));
     }
-    const returnId = window.localStorage.getItem(sampleReturnKey);
-    const nextUser = mode === "sample" ? { id: sampleUserId, name: "샘플 체험" }
-      : liveUsers.find((user) => user.id === returnId && user.id !== sampleUserId) ?? createUser(LOCAL_USER_NAME);
+    let nextUser: AppUser = { id: sampleUserId, name: '샘플 체험' };
+    if (mode === 'blank') {
+      const target = readJson<{ profileId: string; accountId: string | null; workspaceId: string | null } | null>(sampleReturnKey, null);
+      const original = liveUsers.find(user => user.id === target?.profileId && user.id !== sampleUserId);
+      nextUser = original && !original.serverUserId && !target?.accountId ? original : createGuestUser();
+      if (target?.accountId && target.workspaceId && original?.serverUserId === target.accountId && auth.serverApi && auth.serverSession?.user.id === target.accountId) {
+        const session = auth.serverSession;
+        try {
+          const { user: verifiedAccount } = await auth.serverApi.me(session.token);
+          if (verifiedAccount.id !== target.accountId) throw new Error('Sample return account mismatch');
+          const available = await auth.serverApi.listWorkspaces(session.token);
+          if (transition !== sampleTransition.current || !auth.matchesServerScope(session.user.id, session.workspace?.id)) return;
+          const workspace = available.find(value => value.id === target.workspaceId);
+          if (workspace && !window.localStorage.getItem(getUserErasureKey(original.id))) { const restored = { ...session, workspace }; auth.saveServerSession(restored); auth.setServerSession(restored); nextUser = original; }
+          else auth.handleServerLogout();
+        } catch {
+          if (transition !== sampleTransition.current || !auth.matchesServerScope(session.user.id, session.workspace?.id)) return;
+          auth.handleServerLogout();
+        }
+      } else if (auth.serverSession) auth.handleServerLogout();
+    }
     const key = getUserDataKey(nextUser.id);
     if (!window.localStorage.getItem(key)) {
       window.localStorage.setItem(key, JSON.stringify(mode === "sample" ? sampleBudgetSnapshot : emptyBudgetSnapshot));
@@ -144,8 +176,10 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
   }
 
   function handleLogout() {
-    if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return;
-    const localUser = createUser(LOCAL_USER_NAME);
+    if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return false;
+    sampleTransition.current++;
+    window.localStorage.removeItem(sampleReturnKey);
+    const localUser = createGuestUser();
     const liveUsers = readJson<AppUser[]>(USERS_KEY, knownUsers).filter((user) => !window.localStorage.getItem(getUserErasureKey(user.id)));
     const nextUsers = mergeUsers(liveUsers, localUser);
 
@@ -158,6 +192,7 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
     ui.setIsDeleteMode(false);
     ui.setSelectedDeleteIds([]);
     track({ type: "auth.logout", timestamp: Date.now(), data: {} });
+    return true;
   }
 
   function applyTemplate(blueprint: TemplateBlueprint, snapshot: LocalBudgetSnapshot) {
@@ -183,6 +218,7 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
     if (isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) return '현재 공간을 저장하지 못해 전환하지 않았습니다.';
     if (!templateReturnId) return "이전 공간 정보가 없습니다. 현재 공간을 유지합니다.";
     const user = knownUsers.find(entry => entry.id === templateReturnId);
+    if (user?.serverUserId) return '이전 계정 가계부는 로그인 후 가계부 선택에서 열어주세요. 보관한 이전 캐시는 자동으로 편집하지 않습니다.';
     // A stale or erased target (e.g. deleted from another tab or a removed
     // account) must not be restored, and we validate this BEFORE disconnecting
     // so a refused return never tears down the server session for nothing.

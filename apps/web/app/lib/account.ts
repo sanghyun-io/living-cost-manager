@@ -61,7 +61,11 @@ export function cleanupLocalAccountData(
     for (const key of keys) if (key?.startsWith(ledgerPrefix)) storage.removeItem(key);
     storage.removeItem('living-cost-manager:ledger-migration:' + encodeURIComponent(accountId));
     storage.removeItem('living-cost-manager:ledger-migration:' + encodeURIComponent(accountId) + ':complete');
+    storage.removeItem('living-cost-manager:ledger-creation:' + encodeURIComponent(accountId));
+    const returnKey = 'living-cost-manager:sample-return:v2';
+    try { const target = JSON.parse(storage.getItem(returnKey) ?? 'null'); if (target?.accountId === accountId || target?.profileId === removedUserId) storage.removeItem(returnKey); } catch { /* preserve unknown legacy metadata */ }
   }
+  if (storage.getItem('living-cost-manager:sample-return:v1') === removedUserId) storage.removeItem('living-cost-manager:sample-return:v1');
   const erasedPrefixes = [getUserDataKey(removedUserId), STORAGE_KEY, LEGACY_STORAGE_KEY];
   for (const key of keys) {
     if (key && erasedPrefixes.some((prefix) => key.startsWith(prefix + ":corrupt:") || key.startsWith(prefix + ":recovery:"))) {

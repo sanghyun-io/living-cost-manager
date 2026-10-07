@@ -428,7 +428,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
       }
       if (error instanceof ServerApiError && error.code === DELETE_ACCOUNT_CONFLICT_CODE) {
         setServerErrorKind("request");
-        setServerStatus("공동 워크스페이스의 소유권부터 이전해야 계정을 삭제할 수 있습니다.");
+        setServerStatus("공동 가계부의 소유권부터 이전해야 계정을 삭제할 수 있습니다.");
         return "error";
       }
       if (isServerAuthFailure(error)) {
@@ -496,7 +496,7 @@ export function useServerAuth({ ui, getUsers, getSync }: UseServerAuthOptions) {
       if (restoredSession.workspace) {
         await getSync().prepareServerSyncDecision(restoredSession);
       } else {
-        setServerStatus("사용 가능한 서버 워크스페이스가 없습니다.");
+        setServerStatus("선택한 가계부가 없습니다. 화면 상단에서 가계부를 선택하거나 새로 만드세요.");
       }
     } catch (error) {
       if (!isCurrent(generation)) return;

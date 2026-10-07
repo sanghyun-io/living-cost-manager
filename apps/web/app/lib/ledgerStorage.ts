@@ -7,6 +7,10 @@ export function ledgerAccountId(profileId: string): string | null {
   if (!profileId.startsWith('ledger:')) return null;
   try { const pair = JSON.parse(profileId.slice(7)); return Array.isArray(pair) && typeof pair[0] === 'string' ? pair[0] : null; } catch { return null; }
 }
+export function recordUnselectedLedger(storage: StringStorage, accountId: string): void {
+  const marker = 'living-cost-manager:ledger-migration:' + encodeURIComponent(accountId);
+  if (storage.getItem(marker) === null) storage.setItem(marker, '~unselected');
+}
 /** Copy, never move or overwrite. Only the first active ledger inherits legacy
  * unsynced edits. Conflicts keep both copies for an explicit sync decision. */
 export function migrateLedgerCache(storage: StringStorage, accountId: string, workspaceId: string, legacyProfileId: string): boolean {

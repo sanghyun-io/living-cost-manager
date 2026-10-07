@@ -47,7 +47,8 @@ API/shared source, production, DB, credential, or billing changes.
   Guest template behavior remains a new local profile.
 - POST creation has a 15-second abort timeout, exactly one attempt, no retry.
   Network/timeout/5xx uncertainty blocks new creation until a successful manual
-  list refresh; the user must check whether the book already exists. There is
+  list refresh AND explicit user reconciliation; the user must check whether
+  the book already exists and acknowledge possible delayed completion. There is
   no server idempotency key, so this is not an exactly-once creation guarantee.
 - `합산 보기` starts with zero selected ledgers, caps selection at 20, dedups
   workspace IDs, and requests server totals only for explicit selection.
@@ -56,8 +57,8 @@ API/shared source, production, DB, credential, or billing changes.
   books counts twice. Unsynced edits are excluded from server aggregate totals.
 - No new ledger archive/delete workflow. Existing account deletion boundary,
   guest/sample paths, privacy/GPC/DNT defaults and billing settings are retained.
-  Sample-switch wording now distinguishes logout from authenticated ledger
-  selection (which keeps the account connected).
+  Authenticated sample entry now retains the connection but disables server
+  sync; exit verifies the same account and current ledger membership/role.
 
 ## Financial display
 
@@ -105,3 +106,62 @@ independent validation. Conflicting legacy caches are preserved and reported;
 there is no new UI that automatically merges or restores that old source.
 No production deployment was performed. The credential incident remains OPEN;
 identity is unconfirmed and this work does not touch or close it.
+
+## Independent-review follow-up (2026-10-07)
+
+The parent independently reproduced three defects in `721f10a`. This follow-up
+changes only this frontend branch, not the active integration worktree:
+
+1. All visible account exits use one persistence-guarded page handler, including
+   the sync dialog. Logout creates a unique empty `guest:<uuid>` profile, never
+   reactivates `server:<user>` legacy data. The budget hook also refuses that
+   fallback if auth disappears independently. Exact legacy sources remain
+   preserved and have an authenticated raw-JSON export (no automatic hydration).
+   A session with no original selected workspace records that fact, so later
+   creating/selecting a book cannot inherit an unknown obsolete source.
+2. Sample return metadata stores account+workspace+profile identity, with no
+   tokens. Sample entry saves the outgoing ledger and isolates editable demo
+   data. Return verifies `/me` identity and fresh membership/role. Revoked or
+   unconfirmed authentication returns to a distinct empty guest. Logout during
+   sample clears the return pointer. No guest/account cache is copied across.
+3. Pending creation and ambiguous outcomes belong to the ACCOUNT, not the
+   selected-ledger/read-only-view epoch. A pre-POST durable marker prevents a
+   reload from becoming a blind retry. Late results update their originating
+   account's state even after scope/logout/account changes; other accounts do
+   not display that uncertainty. Aggregate toggles cancel only read requests.
+   Refresh shows the actual list but does not clear uncertainty: explicit user
+   acknowledgment of delayed-completion/duplicate risk is required. This still
+   is NOT an exactly-once guarantee or server transaction reconciliation.
+4. The header `현재 가계부` chooser is authoritative. The competing sync-modal
+   selector and callback route are removed; the modal shows read-only current
+   context and guarded sync actions. Creation/rename respect readiness, role,
+   verification, account-pending and uncertainty conditions. User-facing ledger
+   terminology is `가계부`; guide text no longer describes authenticated
+   templates as logging out. API/internal identifiers remain Workspace.
+
+Regression browser evidence uses local static export and exclusively synthetic
+fixtures. `multiledger-review-browser.mjs` has six reproduced scenarios:
+modal logout (scoped 200 vs preserved legacy 100, downloadable exact source),
+sample return (200 with freshly changed viewer role) and sample logout,
+invalid-auth sample return, quota failure refusing exit, held POST → aggregate
+→ workspace switch → network failure, and held POST → logout → account B →
+late failure → account A → reload. Both held-POST cases make exactly ONE POST;
+refresh alone keeps creation disabled. The existing broader mock-browser suite
+is retained. The uncertainty screenshot and raw-source download are synthetic
+evidence at approved-temp `multiledger-review-uncertainty.png` and
+`multiledger-review-synthetic-legacy.json`; no original captures/logs were erased.
+
+New hook tests exercise actual `useLedgers` with dependency-aware hook state:
+account pending/read epoch separation, late-account outcomes, durable reload,
+explicit reconciliation, and refusal before POST when marker persistence fails.
+An additional storage test covers unknown original-workspace migration. The
+parent must independently review/test this follow-up and compile against its
+latest backend `6935972`; this branch intentionally does not cherry-pick that
+backend or claim latest-backend integration, production validation or signoff.
+
+Follow-up author validation at 2026-10-07 10:31 local: web **24 files / 246
+tests passed**; explicit-production-API static export and TypeScript passed;
+all **6 review-reproduction browser scenarios** and the existing broad browser
+regression script passed. Both scripts intercepted every API request and used
+only synthetic local data. `git diff --check` passed. No independent follow-up
+review or real API/DB/production validation is claimed.

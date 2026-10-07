@@ -8,7 +8,6 @@ import {
   Divider,
   Group,
   PasswordInput,
-  Select,
   SimpleGrid,
   Stack,
   Text
@@ -54,7 +53,6 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
     onChangePassword,
     onChangeCurrentPassword,
     onChangeNewPassword,
-    onSelectWorkspace,
     onCheckServer,
     onSyncNow,
     onLoadSnapshot,
@@ -90,7 +88,7 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
         <Card withBorder padding="sm" radius="sm">
           <Text size="xs" c="dimmed">마지막 서버 동기화</Text>
           <Text fw={700}>{lastServerSyncedAt ? formatSaveTime(lastServerSyncedAt) : "아직 없음"}</Text>
-          <Text size="xs" c="dimmed">{serverSession?.workspace ? serverSession.workspace.name : "서버 워크스페이스 선택 전"}</Text>
+          <Text size="xs" c="dimmed">{serverSession?.workspace ? serverSession.workspace.name : "가계부 선택 전"}</Text>
         </Card>
       </SimpleGrid>
 
@@ -126,20 +124,10 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
             <Text size="xs" c="dimmed">{serverSession.user.email}</Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">현재 장부 · 위 장부 선택과 동일</Text>
+            <Text size="xs" c="dimmed">현재 가계부</Text>
             <Text fw={700}>{serverSession.workspace?.name ?? "선택 안 됨"}</Text>
             <Text size="xs" c="dimmed">{currentWorkspaceRole ? workspaceRoleLabels[currentWorkspaceRole] : "초대 수락 후 선택"}</Text>
-            {serverWorkspaces.length > 1 ? (
-              <Select
-                aria-label="서버 워크스페이스 선택"
-                mt="xs"
-                size="xs"
-                allowDeselect={false}
-                value={serverSession.workspace?.id ?? null}
-                data={serverWorkspaces.map((w) => ({ value: w.id, label: w.name }))}
-                onChange={(value) => onSelectWorkspace(value ?? "")}
-              />
-            ) : null}
+            <Text size="xs" c="dimmed">가계부 변경은 화면 상단의 현재 가계부 선택을 사용하세요.</Text>
           </div>
         </SimpleGrid>
       ) : null}
@@ -234,7 +222,7 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
       ) : null}
       {serverSession && serverWorkspaces.length === 0 ? (
         <Text size="xs" c="dimmed" mb="sm">
-          사용 가능한 장부가 없습니다. 이메일 확인 후 위 ‘새 장부’에서 만들거나 초대를 수락하세요. 장부 목록을 새로고침하면 다시 확인할 수 있습니다.
+          선택한 가계부가 없습니다. 화면 상단에서 새 가계부를 만들거나 초대를 수락한 뒤 가계부를 선택하세요.
         </Text>
       ) : null}
 

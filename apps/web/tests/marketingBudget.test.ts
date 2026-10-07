@@ -153,7 +153,10 @@ describe("real budget hook marketing integration", () => {
     enableMarketingConsent(); const { render, users } = setup();
     users.currentUser.serverUserId = "server-account";
     render().handleQuickAdd("넷플릭스 17000원 매달"); render(); await flush();
-    expect(JSON.parse(values.get(getUserDataKey("local-a"))!).fixedCosts).toHaveLength(1);
+    expect(JSON.parse(values.get(getUserDataKey("local-a"))!).fixedCosts).toHaveLength(0);
+    const guest = render().localScopeKey!;
+    expect(guest).toMatch(/^guest:/);
+    expect(JSON.parse(values.get(getUserDataKey(guest))!).fixedCosts).toHaveLength(1);
     expect(fetch).not.toHaveBeenCalled();
   });
   test("hydration and sync snapshot application never generate events or replay queued saves", async () => {

@@ -198,14 +198,14 @@ export function TemplateModal({ opened, onOpen, onClose, session, onLogin, canAp
     </section>
     <section aria-label="새 공간에 템플릿 적용" className="template-preview">
       <Title order={3} size={16}>새 공간에 적용</Title>
-      <Text size="sm">비어 있는 금액은 0원이 아닙니다. 모든 실제 청구 금액과 월 수입을 직접 입력하세요. 입력한 값은 설계도에 포함되지 않습니다. 로그인 상태에서는 새 장부를 서버 계정에 저장하며 원래 장부는 바꾸지 않습니다. 날짜·결제수단은 생성 후 직접 설정합니다.</Text>
+      <Text size="sm">비어 있는 금액은 0원이 아닙니다. 모든 실제 청구 금액과 월 수입을 직접 입력하세요. 입력한 값은 설계도에 포함되지 않습니다. 로그인 상태에서는 새 가계부를 서버 계정에 저장하며 원래 가계부는 바꾸지 않습니다. 날짜·결제수단은 생성 후 직접 설정합니다.</Text>
       <Stack gap="sm" mt="sm">
         <TextInput label="새 공간 월 수입 (원)" inputMode="numeric" value={income} disabled={busy} onChange={e => setIncome(e.currentTarget.value)} />
         {blueprint.items.map((item, i) => <TextInput key={i} label={`${item.name || `설계 항목 ${i + 1}`} 실제 청구 금액 (원)`} inputMode="numeric" placeholder="직접 입력 · 미입력" value={amounts[i] ?? ""} disabled={busy} onChange={e => { const value = e.currentTarget.value; setAmounts(values => blueprint.items.map((_, index) => index === i ? value : values[index] ?? "")); }} />)}
       </Stack>
       <Text size="xs" c="dimmed" mt="xs">금액 입력 {filledCount}/{blueprint.items.length} · 모든 항목과 수입을 채워야 생성할 수 있습니다 · 실제 0원인 항목에만 0을 입력하세요</Text>
       {!canApply ? <Text size="sm" c="dimmed" mt="sm">현재 공간의 저장·복구 상태를 확인한 뒤 적용하세요. 기존 데이터는 교체하지 않습니다.</Text> : null}
-      {session ? <Text size="sm" mt="sm">계정 연결을 유지한 채 새 장부를 만듭니다. 기존 장부는 변경하지 않습니다.</Text> : null}
+      {session ? <Text size="sm" mt="sm">계정 연결을 유지한 채 새 가계부를 만듭니다. 기존 가계부는 변경하지 않습니다.</Text> : null}
       <Button mt="sm" disabled={!budget || !canApply || busy || unavailable || (session !== null && !session.user.emailVerified)} onClick={() => void run(async current => {
         if (sharedToken) await templateApi.shared(sharedToken); // revoked or expired links can no longer be applied
         if (!budget || !fresh(token) || !current()) return;

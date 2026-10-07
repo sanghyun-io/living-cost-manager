@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ledgerProfileId, migrateLedgerCache } from './ledgerStorage';
+import { ledgerProfileId, migrateLedgerCache, recordUnselectedLedger } from './ledgerStorage';
 import type { ServerSession } from './serverApi';
 import {
   buildBudgetSummary,
@@ -28,7 +28,7 @@ import {
 import { buildFixedCostCsvTemplate, parseFixedCostCsvTemplate } from "./budgetImportExport";
 import { buildLivingCostBackup, parseLivingCostBackup } from "./backup";
 import { buildPieBackground, clampBillingDay, mergeCards, mergeCategories } from "./formatting";
-import { getUserDataKey, getUserErasureKey } from "./users";
+import { createGuestUser, getUserDataKey, getUserErasureKey } from "./users";
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, parseBudgetSnapshot } from "./storage";
 import { seedFixedCosts, emptyBudgetSnapshot } from "./seedData";
 import { previewQuickAdd } from "./quickAdd";
@@ -55,9 +55,10 @@ interface UseBudgetDataOptions {
  * summaries the dashboard renders.
  */
 export function useBudgetData({ users: accountUsers, ui, marketingPersonal = false, session = null }: UseBudgetDataOptions) {
+  marketingPersonal = marketingPersonal && !accountUsers.currentUser?.serverUserId;
   const currentLedgerUser = useMemo(() => session?.workspace && accountUsers.currentUser?.serverUserId === session.user.id
     ? { ...accountUsers.currentUser, id: ledgerProfileId(session.user.id, session.workspace.id), name: session.workspace.name }
-    : accountUsers.currentUser, [accountUsers.currentUser, session?.user.id, session?.workspace?.id]);
+    : accountUsers.currentUser?.serverUserId ? createGuestUser() : accountUsers.currentUser, [accountUsers.currentUser, session?.user.id, session?.workspace?.id]);
   const users = { ...accountUsers, currentUser: currentLedgerUser };
   const storedValue = useRef<string | null>(null);
   const freshLedgerCache = useRef<{ id: string; initial: string } | null>(null);
@@ -104,7 +105,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
       if (!window.localStorage.getItem(getUserErasureKey(currentUser.id))) {
         if (event?.key === getUserDataKey(currentUser.id) && event.newValue !== storedValue.current) {
           setBlockedSaveUserId(currentUser.id);
-          setSaveError('다른 탭에서 이 장부를 변경했습니다. 현재 내용을 백업하고 새로고침하세요.');
+          setSaveError('다른 탭에서 이 가계부를 변경했습니다. 현재 내용을 백업하고 새로고침하세요.');
         }
         return;
       }
@@ -132,14 +133,26 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
 
     setIsLoaded(false);
     setDeletedBatch(null);
+    if (!session && loadedUserId?.startsWith('ledger:') && loadedUserId !== currentUser.id && !window.localStorage.getItem(getUserErasureKey(loadedUserId))) {
+      // Auth can be invalidated independently of an explicit exit click. Save
+      // that outgoing scope before loading a guest, including an edit batched
+      // with the auth failure. Refuse cross-tab overwrite or quota failure.
+      try {
+        const outgoingKey = getUserDataKey(loadedUserId);
+        if (window.localStorage.getItem(outgoingKey) !== storedValue.current) throw new Error('Concurrent outgoing change');
+        const value = JSON.stringify(getCurrentBudgetSnapshot()); window.localStorage.setItem(outgoingKey, value);
+        if (window.localStorage.getItem(outgoingKey) !== value) throw new Error('Outgoing save failed');
+      } catch { setSaveError('계정 연결 해제 전 내용을 저장하지 못했습니다. 메모리 내용을 백업한 뒤 다시 열어주세요.'); return; }
+    }
     if (window.localStorage.getItem(getUserErasureKey(currentUser.id))) {
       applyBudgetSnapshot(emptyBudgetSnapshot); setErasedScope(currentUser.id); setBlockedSaveUserId(currentUser.id);
       setSaveError('다른 탭에서 계정이 삭제되어 저장과 동기화를 중단했습니다.'); setLoadedUserId(currentUser.id); setIsLoaded(true); return;
     }
     try {
+      if (session && !session.workspace) recordUnselectedLedger(window.localStorage, session.user.id);
       if (session?.workspace && currentUser.id.startsWith('ledger:') && accountUsers.currentUser) {
         const conflict = migrateLedgerCache(window.localStorage, session.user.id, session.workspace.id, accountUsers.currentUser.id);
-        if (conflict) setImportMessage('이전 단일 장부의 캐시와 현재 장부 캐시가 달라 두 원본을 모두 보존했습니다. 자동으로 덮어쓰거나 업로드하지 않습니다. 이전 캐시는 기존 계정 저장 키에 남아 있습니다.');
+        if (conflict) setImportMessage('이전 단일 가계부의 캐시와 현재 가계부 캐시가 달라 두 원본을 모두 보존했습니다. 자동으로 덮어쓰거나 업로드하지 않습니다. 이전 캐시는 기존 계정 저장 키에 남아 있습니다.');
       }
     } catch {
       setSaveError('기존 공간을 안전하게 보존하지 못해 전환을 중단했습니다. 백업을 내보내세요.');
@@ -148,7 +161,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     const stored = window.localStorage.getItem(getUserDataKey(currentUser.id));
     storedValue.current = stored;
     const legacyStored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    const parsed = parseBudgetSnapshot(stored ?? (currentUser.id.startsWith('ledger:') ? JSON.stringify(emptyBudgetSnapshot) : legacyStored));
+    const parsed = parseBudgetSnapshot(stored ?? (currentUser.id.startsWith('ledger:') || currentUser.id.startsWith('guest:') ? JSON.stringify(emptyBudgetSnapshot) : legacyStored));
     freshLedgerCache.current = stored === null && currentUser.id.startsWith('ledger:') ? { id: currentUser.id, initial: JSON.stringify({ monthlyIncome: parsed.snapshot.monthlyIncome, categories: parsed.snapshot.categories, cards: parsed.snapshot.cards, fixedCosts: parsed.snapshot.fixedCosts }) } : null;
 
     let recoveryFailed = false;
@@ -525,6 +538,18 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     setImportMessage("전체 백업을 내보냈습니다.");
   }
 
+  function handleExportLegacySource() {
+    const profile = accountUsers.currentUser;
+    if (!session || !profile?.serverUserId || profile.serverUserId !== session.user.id || window.localStorage.getItem(getUserErasureKey(profile.id))) return;
+    const source = window.localStorage.getItem(getUserDataKey(profile.id));
+    if (source === null) return;
+    // Preserve the exact original (including unsynced or corrupt fields), never
+    // hydrate it into the active guest/account ledger or overwrite any cache.
+    const url = URL.createObjectURL(new Blob([source], { type: 'application/json;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'living-cost-legacy-source.json';
+    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+  }
+
   async function handleImportTemplate(file: File | null) {
     if (!file) {
       return;
@@ -631,6 +656,8 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
   }
 
   return {
+    profileName: currentUser?.name,
+    handleExportLegacySource,
     saveBeforeSwitch,
     initializeFreshLedger,
     monthlyIncome,

@@ -80,13 +80,13 @@ export function getSyncStateView(state: AccountSyncState): SyncStateView {
     case "server-available":
       return {
         label: "서버 연결 가능",
-        description: "서버 계정으로 로그인하면 백업과 워크스페이스 동기화를 사용할 수 있습니다.",
+        description: "서버 계정으로 로그인하면 백업과 가계부 동기화를 사용할 수 있습니다.",
         tone: "neutral"
       };
     case "signed-in":
       return {
         label: "서버 계정 연결됨",
-        description: "워크스페이스가 선택되었습니다. 필요할 때 서버 상태를 확인하거나 동기화하세요.",
+        description: "가계부가 선택되었습니다. 필요할 때 서버 상태를 확인하거나 동기화하세요.",
         tone: "success"
       };
     case "checking":

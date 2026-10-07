@@ -55,19 +55,19 @@ export function DeleteAccountModal({
         <Stack gap="sm">
           <Alert variant="light" color="rose" title="삭제한 계정은 되돌릴 수 없습니다.">
             <Text size="sm">
-              서버의 계정과 소유 워크스페이스(고정비·카테고리·카드·백업 포함)가 즉시 영구
+              서버의 계정과 소유 가계부(고정비·카테고리·카드·백업 포함)가 즉시 영구
               삭제됩니다. 다른 기기관련 데이터는 지워지지 않으므로, 필요하면 데이터 관리의
               &quot;전체 Export&quot;로 백업하세요.
             </Text>
           </Alert>
           <List size="sm" withPadding>
             <List.Item>
-              소유한 워크스페이스에 <Text span fw={700}>다른 멤버가 있으면</Text>{" "}
+              소유한 가계부에 <Text span fw={700}>다른 멤버가 있으면</Text>{" "}
               삭제가 차단됩니다. 먼저 소유권을 이전하세요.
             </List.Item>
             {hasSharedWorkspaces ? (
               <List.Item>
-                남의 워크스페이스에 멤버로 참여 중입니다. 삭제 시 그 워크스페이스에서는
+                다른 사람의 가계부에 멤버로 참여 중입니다. 삭제 시 그 가계부에서는
                 멤버십만 제거되고 상대 데이터는 그대로 남습니다.
               </List.Item>
             ) : null}
@@ -113,7 +113,7 @@ export function DeleteAccountModal({
           </Group>
           <Divider />
           <Text size="xs" c="dimmed">
-            소유권을 이전할 워크스페이스가 있다면 삭제 대신 “서버 로그아웃”으로 브라우저만
+            소유권을 이전할 가계부가 있다면 삭제 대신 “서버 로그아웃”으로 브라우저만
             정리할 수 있습니다.
           </Text>
         </Stack>

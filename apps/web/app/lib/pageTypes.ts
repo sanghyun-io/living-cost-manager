@@ -72,7 +72,6 @@ export interface SyncProps {
   onChangePassword: () => void;
   onChangeCurrentPassword: (value: string) => void;
   onChangeNewPassword: (value: string) => void;
-  onSelectWorkspace: (workspaceId: string) => void;
   onCheckServer: () => void;
   onSyncNow: () => void;
   onLoadSnapshot: () => void;

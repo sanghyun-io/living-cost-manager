@@ -12,6 +12,7 @@ export type StartupServerUser = {
 };
 
 export const LOCAL_USER_NAME = "로컬 사용자";
+export function createGuestUser(): AppUser { return { id: 'guest:' + crypto.randomUUID(), name: '게스트 가계부' }; }
 
 export function createServerLocalUser(user: StartupServerUser): AppUser {
   return user.id ? { id: "server:" + user.id, name: user.name || user.email, serverUserId: user.id } : createUser(user.name || user.email);

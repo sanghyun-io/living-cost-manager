@@ -192,7 +192,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     auth.setServerErrorKind(null);
 
     if (!session.workspace) {
-      auth.setServerStatus("서버 계정은 연결됐지만 선택된 워크스페이스가 없습니다. 초대 수락 후 동기화를 사용할 수 있습니다.");
+      auth.setServerStatus("계정은 연결됐지만 선택한 가계부가 없습니다. 화면 상단에서 가계부를 선택하거나 새로 만드세요.");
       return false;
     }
 
@@ -208,7 +208,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       if (latestBudget.current.initializeFreshLedger(hydrated)) {
         establishSyncBaseline(startingTicket, buildSnapshotKey(hydrated), remoteSnapshot.syncVersion);
         setLastServerSyncedAt(new Date());
-        auth.setServerStatus('새로 선택한 장부를 서버에서 불러왔습니다. 기존 장부와 편집 캐시는 변경하지 않았습니다.');
+        auth.setServerStatus('새로 선택한 가계부를 서버에서 불러왔습니다. 기존 가계부와 편집 캐시는 변경하지 않았습니다.');
         void coach.refreshMonthlyReport(session);
         return true;
       }
@@ -216,7 +216,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       void coach.refreshMonthlyReport(session);
 
       if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(budget.getCurrentBudgetSnapshot())) {
-        auth.setServerStatus("서버 워크스페이스가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
+        auth.setServerStatus("서버 가계부가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
         return true;
       }
 
@@ -225,7 +225,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
         return true;
       }
 
-      auth.setServerStatus("서버 워크스페이스와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
+      auth.setServerStatus("서버 가계부와 연결되었습니다. 로컬 전용으로 계속해도 됩니다.");
       return true;
     } catch (error) {
       if (!isActive(startingTicket) || request !== decisionRequest.current) return false;
@@ -242,7 +242,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
 
     const workspace = serverWorkspaces.find((item) => item.id === workspaceId) ?? null;
     if (!workspace || workspace.id === serverSession.workspace?.id) return;
-    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 장부를 저장하지 못해 전환하지 않았습니다. 백업을 먼저 내보내세요.'); return; }
+    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 가계부를 저장하지 못해 전환하지 않았습니다. 백업을 먼저 내보내세요.'); return; }
     const nextSession = {
       ...serverSession,
       workspace
@@ -269,7 +269,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
 
   async function uploadSnapshot(automatic: boolean) {
     if (!serverApi || !serverSession?.workspace) {
-      auth.setServerStatus("동기화할 서버 워크스페이스가 없습니다.");
+      auth.setServerStatus("동기화할 서버 가계부가 없습니다.");
       return;
     }
 
@@ -327,7 +327,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
 
   async function handleLoadServerSnapshot() {
     if (!serverApi || !serverSession?.workspace) {
-      auth.setServerStatus("불러올 서버 워크스페이스가 없습니다.");
+      auth.setServerStatus("불러올 서버 가계부가 없습니다.");
       return;
     }
 
@@ -470,7 +470,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       return;
     }
 
-    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 장부 저장을 확인한 뒤 초대를 수락하세요.'); return; }
+    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 가계부 저장을 확인한 뒤 초대를 수락하세요.'); return; }
 
     const ticket = safety.current;
     auth.setIsServerBusy(true);
@@ -480,7 +480,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       const nextSession = await auth.resolveAndStoreServerSession({ ...serverSession, workspace: accepted.workspace });
       if (latestLocal.current.localUserId !== localUserId || latestLocal.current.isLocalDataReady !== isLocalDataReady) return;
       clearWorkspaceScopedSharingDrafts();
-      auth.setServerStatus("초대를 수락했습니다. 새 워크스페이스가 선택되었습니다.");
+      auth.setServerStatus("초대를 수락했습니다. 새 가계부가 선택되었습니다.");
       auth.setServerErrorKind(null);
       if (await prepareServerSyncDecision(nextSession)) await refreshSharing(nextSession);
     } catch (error) {
@@ -519,7 +519,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       return;
     }
 
-    if (!window.confirm("이 멤버를 워크스페이스에서 제거할까요?")) {
+    if (!window.confirm("이 멤버를 가계부에서 제거할까요?")) {
       return;
     }
 

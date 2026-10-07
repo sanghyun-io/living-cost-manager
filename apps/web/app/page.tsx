@@ -63,8 +63,9 @@ export default function Home() {
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: budget.localScopeKey,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
   const ledgers = useLedgers(auth, sync);
-  const viewer = sync.currentWorkspaceRole === 'viewer';
+  const viewer = !users.isSampleMode && sync.currentWorkspaceRole === 'viewer';
   const canEdit = !viewer && !ledgers.aggregateMode && !!budget.localScopeKey;
+  const syncAvailable = !!budget.localScopeKey && !budget.saveError && !users.isSampleMode && !ledgers.mutationPending;
   const [reviewDate, setReviewDate] = useState(() => new Date().toDateString());
   const [referenceInstant, setReferenceInstant] = useState(() => new Date());
   useEffect(() => {
@@ -133,6 +134,12 @@ export default function Home() {
     track({ type: "share.accept", timestamp: Date.now(), data: {} });
     void sync.handleAcceptInvitation(invitationId);
   }
+  function handleExitAccount() {
+    try {
+      if (!budget.saveBeforeSwitch() || !users.handleLogout()) return;
+      auth.handleServerLogout(); setTemplatesOpen(false);
+    } catch { setTemplateError('가계부를 안전하게 저장하지 못해 로그아웃하지 않았습니다. 현재 내용을 백업하세요.'); }
+  }
 
   if (!users.isBootLoaded || !users.isLoaded || (!budget.localScopeKey && !budget.saveError)) {
     return (
@@ -151,29 +158,25 @@ export default function Home() {
     <>
       <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
       <AppHeader
-        ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={id => void sync.handleSelectServerWorkspace(id)} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError} /> : null}
+        ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={id => void sync.handleSelectServerWorkspace(id)} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError && !users.isSampleMode} /> : null}
         saveError={budget.saveError}
         onRetrySave={budget.retrySave}
         onExportUnsaved={budget.handleExportBackup}
         recoveryRequired={budget.localRecoveryRequired}
         lastSavedAt={budget.lastSavedAt}
         serverSession={auth.serverSession}
-        currentUserName={users.currentUser?.name}
+        currentUserName={budget.profileName}
         onOpenData={() => ui.setIsDataModalOpen(true)}
         onOpenAuth={() => ui.setIsAuthModalOpen(true)}
         onOpenCoach={coach.openCoachModal}
         onOpenTemplates={() => { setTemplateError(""); setTemplatesOpen(true); }}
-        onServerLogout={() => {
-          if (!budget.saveBeforeSwitch()) return;
-          auth.handleServerLogout();
-          users.handleLogout();
-        }}
+        onServerLogout={handleExitAccount}
       />
       <main className="page-shell">
       {templateError ? <Text role="alert" aria-live="assertive" c="rose" mb="md">{templateError}</Text> : null}
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
-      {ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 장부를 선택하고 조회하세요. 자동으로 전체 장부를 선택하지 않습니다.</Text>}</section> : <>
-      {viewer ? <Text role="status">보기 전용 장부입니다. 편집과 업로드는 할 수 없습니다.</Text> : null}
+      {ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 가계부를 선택하고 조회하세요. 자동으로 전체 가계부를 선택하지 않습니다.</Text>}</section> : <>
+      {viewer ? <Text role="status">보기 전용 가계부입니다. 편집과 업로드는 할 수 없습니다.</Text> : null}
       <fieldset disabled={!canEdit} className="ledger-edit-region">
       <HeroPanel
         // Individual editing is never mounted as aggregate data.
@@ -182,14 +185,16 @@ export default function Home() {
         hasServerWorkspace={Boolean(auth.serverSession?.workspace)}
         onIncomeChange={budget.handleIncomeChange}
       />
+      </fieldset>
 
       <section className="workspace-note" aria-label="시작 방식">
         <Text size="sm">{users.isSampleMode ? "샘플 체험 중 · 내 데이터와 분리된 예시입니다." : "내 데이터 · 기준 납부일을 입력하면 다음 30일 예정액을 확인할 수 있습니다."}</Text>
-        <Button variant="default" size="xs" onClick={() => users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample")}>
+        <Button variant="default" size="xs" onClick={() => void users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample").catch(() => setTemplateError('가계부 저장에 실패하여 샘플 전환을 중단했습니다. 현재 내용을 백업하세요.'))}>
           {users.isSampleMode ? "내 데이터로 시작 / 돌아가기" : "분리된 샘플 체험"}
         </Button>
-        <Text size="xs" c="dimmed">샘플 체험 전환은 서버 연결을 해제합니다. 위 장부 선택은 계정 연결을 유지합니다. 기존 내 데이터는 보존됩니다.</Text>
+        <Text size="xs" c="dimmed">샘플은 별도 게스트 예시이며 서버로 업로드하지 않습니다. 돌아갈 때 계정과 가계부 권한을 다시 확인합니다.</Text>
         <Button variant="subtle" color={budget.localRecoveryRequired ? "rose" : "gray"} size="xs" onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? "저장 원본 내보내기" : "최근 교체 전 복구본 내보내기"}</Button>
+        {auth.serverSession && !users.isSampleMode ? <Button variant="subtle" color="gray" size="xs" onClick={budget.handleExportLegacySource}>이전 단일 가계부 원본(JSON) 내보내기</Button> : null}
       </section>
 
       <div className="dashboard-overview">
@@ -197,6 +202,7 @@ export default function Home() {
         <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
       </div>
 
+      <fieldset disabled={!canEdit} className="ledger-edit-region">
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
         <section className="renewal-queue" aria-label="갱신 검토 작업목록">
           <Text fw={700}>갱신 검토 작업목록</Text>
@@ -289,27 +295,26 @@ export default function Home() {
             serverSnapshot: sync.serverSnapshot,
             serverWorkspaces: sync.serverWorkspaces,
             currentWorkspaceRole: sync.currentWorkspaceRole,
-            canUploadServerSnapshot: sync.canUploadServerSnapshot,
-            isServerBusy: auth.isServerBusy,
+             canUploadServerSnapshot: sync.canUploadServerSnapshot && syncAvailable,
+             isServerBusy: auth.isServerBusy || !syncAvailable,
             serverStatus: auth.serverStatus,
             serverErrorKind: auth.serverErrorKind,
             changeCurrentPassword: auth.changeCurrentPassword,
             changeNewPassword: auth.changeNewPassword,
             showUploadButton: sync.showUploadButton,
             showLoadButton: sync.showLoadButton,
-            onServerLogout: auth.handleServerLogout,
+             onServerLogout: handleExitAccount,
             onResendVerification: () => void auth.handleResendVerification(),
             onChangePassword: () => void auth.handleChangePassword(),
             onChangeCurrentPassword: auth.setChangeCurrentPassword,
             onChangeNewPassword: auth.setChangeNewPassword,
-            onSelectWorkspace: (workspaceId) => void sync.handleSelectServerWorkspace(workspaceId),
             onCheckServer: () => {
-              if (auth.serverSession) {
+               if (auth.serverSession && syncAvailable) {
                 void sync.prepareServerSyncDecision(auth.serverSession);
               }
             },
-            onSyncNow: () => void sync.handleSyncNow(),
-            onLoadSnapshot: () => void sync.handleLoadServerSnapshot(),
+             onSyncNow: () => { if (syncAvailable) void sync.handleSyncNow(); },
+             onLoadSnapshot: () => { if (syncAvailable) void sync.handleLoadServerSnapshot(); },
             onStayLocal: sync.handleStayLocalOnly,
             onOpenAuth: () => {
               ui.setIsDataModalOpen(false);

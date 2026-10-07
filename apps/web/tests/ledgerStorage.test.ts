@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ledgerProfileId, migrateLedgerCache } from '../app/lib/ledgerStorage';
+import { ledgerProfileId, migrateLedgerCache, recordUnselectedLedger } from '../app/lib/ledgerStorage';
 import { getUserDataKey, getUserErasureKey } from '../app/lib/users';
 import { cleanupLocalAccountData } from '../app/lib/account';
 import { USERS_KEY } from '../app/lib/storage';
@@ -13,6 +13,12 @@ function storage() {
     getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
 }
 describe('account + ledger isolation', () => {
+  it('unknown original workspace cannot migrate an obsolete account cache into a later selected/created ledger', () => {
+    const store = storage(); store.setItem(getUserDataKey('server:a'), 'legacy unsynced backup');
+    recordUnselectedLedger(store, 'a'); migrateLedgerCache(store, 'a', 'new', 'server:a');
+    expect(store.getItem(getUserDataKey(ledgerProfileId('a', 'new')))).toBeNull();
+    expect(store.getItem(getUserDataKey('server:a'))).toBe('legacy unsynced backup');
+  });
   it('preserves unsynced legacy data only in the original active ledger and leaves the source intact', () => {
     const store = storage(), original = JSON.stringify({ unsynced: 'edits', monthlyIncome: 123 });
     store.setItem(getUserDataKey('server:a'), original);

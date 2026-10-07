@@ -52,13 +52,13 @@ await page.addInitScript(({ user, workspaces, original, second, keyOne, keyTwo }
 }, { user, workspaces, original: snapshot(100), second: snapshot(200), keyOne: key('server:' + user.id), keyTwo: key(profile('two')) });
 try {
   await page.goto(origin);
-  await page.getByLabel('현재 장부', { exact: true }).waitFor();
+  await page.getByLabel('현재 가계부', { exact: true }).waitFor();
   const amount = () => page.getByLabel('금액', { exact: true }).first();
   await amount().fill('111'); await amount().blur();
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('two');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('two');
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '200');
   assert.equal(await amount().inputValue(), '200');
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('one');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('one');
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '111');
   assert.equal(await amount().inputValue(), '111');
   // A late remote pull must not replace the newly selected ledger.
@@ -68,26 +68,26 @@ try {
   await page.waitForFunction(() => true); // click completed; route promise is held
   assert.ok(releasePull, 'pull request started');
   await page.getByRole('button', { name: '데이터 관리 닫기' }).click();
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('two');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('two');
   releasePull();
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '200');
   assert.equal(await amount().inputValue(), '200');
   // A late push updates only its outgoing ledger; cannot adopt B's baseline.
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('one');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('one');
   await page.getByRole('button', { name: '서버 연결됨 · 동기화 관리' }).click();
   holdPush = true; page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: /지금 동기화/ }).click();
   assert.ok(releasePush, 'push request started');
   await page.getByRole('button', { name: '데이터 관리 닫기' }).click();
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('two'); releasePush();
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('two'); releasePush();
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '200');
   assert.equal(puts.at(-1).id, 'one'); assert.equal(puts.at(-1).snapshot.fixedCosts[0].amount, 111);
   // Explicit selection only; no financial editing/income in aggregate state.
   await page.getByRole('checkbox', { name: '합산 보기', exact: true }).check();
   assert.equal(await page.locator('.ledger-aggregate-selection input:checked').count(), 0);
   await page.getByLabel('생활 장부', { exact: true }).check(); await page.getByLabel('여행 장부', { exact: true }).check();
-  await page.getByRole('button', { name: '선택한 장부 합산 조회' }).click();
-  await page.getByRole('heading', { name: '선택 장부 합산 · 읽기 전용' }).waitFor();
+  await page.getByRole('button', { name: '선택한 가계부 합산 조회' }).click();
+  await page.getByRole('heading', { name: '선택 가계부 합산 · 읽기 전용' }).waitFor();
   assert.ok((await page.locator('.ledger-summary').textContent()).includes('각각 합산'));
   assert.ok(!(await page.locator('.ledger-summary').textContent()).includes('99,999,999'));
   assert.equal(await page.getByLabel('금액', { exact: true }).count(), 0);
@@ -102,34 +102,36 @@ try {
   await fields.first().waitFor();
   for (let i = 0; i < await fields.count(); i++) await fields.nth(i).fill(i === 0 ? '1000' : '100');
   await page.getByRole('button', { name: '금액 확인 후 새 공간 만들기' }).click();
-  await page.getByText('새 장부를 만들었습니다.', { exact: false }).waitFor();
+  await page.getByText('새 가계부를 만들었습니다.', { exact: false }).waitFor();
   assert.equal(creates, 1); assert.equal(createdInputs[0].initialBudget.monthlyIncome, 1000);
   assert.ok(createdInputs[0].initialBudget.fixedCosts.every(cost => cost.amount === 100 && !('workspaceId' in cost)));
   assert.equal(await page.evaluate(key => localStorage.getItem(key), key(profile('two'))), before);
-  assert.equal(await page.getByLabel('현재 장부', { exact: true }).inputValue(), 'two');
+  assert.equal(await page.getByLabel('현재 가계부', { exact: true }).inputValue(), 'two');
   assert.ok(await page.getByRole('button', { name: '서버 로그아웃', exact: true }).isVisible());
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('created-1');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('created-1');
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '100');
   assert.equal(await amount().inputValue(), '100'); // brand-new cache initializes safely
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('two');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('two');
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '200');
   // Ambiguous POST outcome cannot trigger an automatic duplicate retry.
-  await page.getByRole('button', { name: '새 장부', exact: true }).click();
-  await page.getByLabel(/새 장부 이름/).fill('불확실 장부'); abortCreate = true;
+  await page.getByRole('button', { name: '새 가계부', exact: true }).click();
+  await page.getByLabel(/새 가계부 이름/).fill('불확실 장부'); abortCreate = true;
   await page.locator('.ledger-controls form').getByRole('button', { name: '확인', exact: true }).click();
   await page.getByText('생성 결과를 확인할 수 없습니다.', { exact: false }).waitFor();
   assert.equal(creates, 2);
   assert.equal(await page.locator('.ledger-controls form').getByRole('button', { name: '확인', exact: true }).isDisabled(), true);
-  await page.getByRole('button', { name: '장부 목록 새로고침', exact: true }).click();
-  await page.getByText('목록을 확인했습니다.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: '가계부 목록 새로고침', exact: true }).click();
+  await page.getByText('최신 가계부 목록을 표시했습니다.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.ledger-controls form').getByRole('button', { name: '확인', exact: true }).isDisabled(), true);
+  await page.getByRole('button', { name: '목록을 직접 확인했고 지연 완료·중복 위험을 이해합니다' }).click();
   await page.locator('.ledger-controls form').getByRole('button', { name: '취소', exact: true }).click();
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('view');
-  await page.getByText('보기 전용 장부입니다.', { exact: false }).waitFor();
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('view');
+  await page.getByText('보기 전용 가계부입니다.', { exact: false }).waitFor();
   assert.equal(await page.getByRole('button', { name: '항목 추가', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: '이름 변경', exact: true }).isDisabled(), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   // Offline local edits persist only to B; undo from B cannot appear in A.
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('two');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('two');
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '200');
   await context.setOffline(true);
   await amount().fill('222'); await amount().blur();
@@ -138,7 +140,7 @@ try {
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: '선택 삭제', exact: true }).click();
   await page.getByRole('button', { name: '최근 삭제 취소', exact: true }).waitFor();
-  await page.getByLabel('현재 장부', { exact: true }).selectOption('one');
+  await page.getByLabel('현재 가계부', { exact: true }).selectOption('one');
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '111');
   assert.equal(await page.getByRole('button', { name: '최근 삭제 취소', exact: true }).count(), 0);
   const bCache = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), key(profile('two')));
@@ -147,8 +149,8 @@ try {
   // Real same-origin second-tab write blocks rather than silently overwrites.
   const tab = await context.newPage(); await tab.goto(origin);
   await tab.evaluate(key => { const value = JSON.parse(localStorage.getItem(key)); value.fixedCosts[0].amount = 777; localStorage.setItem(key, JSON.stringify(value)); }, key(profile('one')));
-  await page.getByText('다른 탭에서 이 장부를 변경했습니다.', { exact: false }).waitFor();
-  assert.equal(await page.getByLabel('현재 장부', { exact: true }).isDisabled(), true);
+  await page.getByText('다른 탭에서 이 가계부를 변경했습니다.', { exact: false }).waitFor();
+  assert.equal(await page.getByLabel('현재 가계부', { exact: true }).isDisabled(), true);
   await tab.evaluate(key => localStorage.setItem(key, '1'), key('server:' + user.id) + ':erased');
   await page.getByText('다른 탭에서 계정이 삭제되어', { exact: false }).waitFor();
   assert.equal(await page.getByRole('button', { name: '항목 추가', exact: true }).isDisabled(), true);
