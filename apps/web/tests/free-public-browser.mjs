@@ -69,6 +69,7 @@ async function fixture(initial, selected, viewport = { width: 390, height: 844 }
 async function templateFields(page) {
   await page.getByRole('button', { name: '템플릿', exact: true }).click();
   const fields = page.getByRole('region', { name: '새 공간에 템플릿 적용' }).locator('input');
+  await fields.first().waitFor(); // Wait for the asynchronous template panel before counting/filling fields.
   for (let i = 0; i < await fields.count(); i++) await fields.nth(i).fill(i === 0 ? '1000' : '100');
   return page.getByRole('button', { name: '금액 확인 후 새 공간 만들기' });
 }

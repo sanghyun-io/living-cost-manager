@@ -12,7 +12,7 @@ function renderRows(count: number, deleteMode = false) {
   return renderToStaticMarkup(<MantineProvider><FixedCostTable
     focusItemId={null} focusRequest={0} costFilters={emptyCostFilters}
     onCostFilters={noop} onResetFilters={noop} categories={[{ id: "other", label: "기타" }]} cards={[]}
-    visibleFixedCosts={Array.from({ length: count }, (_, i) => createFixedCost({ id: `cost-${i}`, name: `테스트 ${i}`, amount: 1000, periodMonths: 1 }))}
+    visibleFixedCosts={Array.from({ length: count }, (_, i) => createFixedCost({ id: `cost-${i}`, name: `테스트 ${i}`, amount: 1000, periodMonths: 1, billingDay: 1 }))}
     visibleFixedCostTotal={count * 1000} categoryFilterId="all" isDeleteMode={deleteMode} selectedDeleteIds={[]}
     importMessage="" onItemChange={noop} onPaymentMethodChange={noop} onPaymentOptionChange={noop}
     onAddItem={noop} onDuplicateItem={noop} onEnterDeleteMode={noop} onCancelDeleteMode={noop}
@@ -41,7 +41,7 @@ test("delete mode preserves selection and confirmation flow without row menus", 
 });
 
 test("compact schedule status keeps unknown, fractional, invalid and next due semantics", () => {
-  const item = createFixedCost({ id: "x", name: "테스트", amount: 1200, periodMonths: 1 });
+  const item = createFixedCost({ id: "x", name: "테스트", amount: 1200, periodMonths: 1, billingDay: 1 });
   expect(getScheduleStatus(item)).toBe("납부일 미입력");
   expect(getScheduleStatus({ ...item, billingAnchorDate: "2024-01-31", periodMonths: 0.5 })).toContain("주기를 정수 개월로 설정");
   expect(getScheduleStatus({ ...item, billingAnchorDate: "invalid" })).toContain("기준일과 주기를 확인");

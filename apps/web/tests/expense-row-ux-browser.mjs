@@ -9,6 +9,8 @@ import { createHash, randomUUID } from 'node:crypto';
 
 const root = resolve(process.env.ROW_UX_EXPORT ?? fileURLToPath(new URL('../out/', import.meta.url)));
 const before = process.env.ROW_UX_BEFORE === '1';
+const apiBase = process.env.ROW_UX_API_BASE ?? 'https://api.gamja.top/living-cost-manager/v1';
+const apiUrl = new URL(apiBase);
 const evidence = resolve(process.env.ROW_UX_EVIDENCE ?? `/private/var/folders/f_/kdvkncsn11l2nssxg_75xglc0000gp/T/opencode/expense-row-evidence-${randomUUID()}`);
 await mkdir(evidence, { recursive: true, mode: 0o700 });
 const server = createServer(async (req, res) => {
@@ -36,8 +38,9 @@ async function fixture(count, viewport, serverLedger = false) {
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.origin === origin) return route.continue();
-    if (serverLedger && url.origin === 'http://127.0.0.1:41999') {
-      const path = url.pathname.replace('/living-cost-manager/v1', '');
+    if (serverLedger && url.origin === apiUrl.origin && url.pathname.startsWith(apiUrl.pathname + '/')) {
+      // Fulfill synthetic responses in-process, never forward to the configured origin.
+      const path = url.pathname.slice(apiUrl.pathname.length);
       const headers = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, OPTIONS', 'access-control-allow-headers': '*' };
       if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
       const user = { id: 'row-server-fixture', name: '테스트 사용자', email: 'row@synthetic.invalid', emailVerified: true };
@@ -165,7 +168,7 @@ try {
   }
   const buildId = (await readFile(resolve(root, '../.next/BUILD_ID'), 'utf8')).trim();
   const exportIndexSha256 = createHash('sha256').update(await readFile(resolve(root, 'index.html'))).digest('hex');
-  await writeFile(resolve(evidence, `${before ? 'before' : 'after'}-results.json`), JSON.stringify({ root, source: process.env.ROW_UX_SOURCE, buildId, exportIndexSha256, apiBase: 'http://127.0.0.1:41999/living-cost-manager/v1', before, results }, null, 2), { mode: 0o600 });
+   await writeFile(resolve(evidence, `${before ? 'before' : 'after'}-results.json`), JSON.stringify({ root, source: process.env.ROW_UX_SOURCE, buildId, exportIndexSha256, apiBase, before, results }, null, 2), { mode: 0o600 });
   for (const file of await readdir(evidence)) await chmod(resolve(evidence, file), 0o600);
   console.log('PASS', before ? 'baseline synthetic screenshots' : '30-row desktop/mobile; single guidance; date labels; menu Enter/Space/ArrowDown/Escape/Tab/ShiftTab/outside; clone once/new ID/data/focus/cache; delete cancel/confirm; profile-switch menu cleanup; no remote requests', evidence);
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

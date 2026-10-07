@@ -1,5 +1,26 @@
 # Free-public integration handoff — 2026-10-07
 
+## Final free + expense-row UX handoff (supersedes earlier integration state below)
+
+New isolated branch/worktree: `feat/lcm-free-ux-final` / `lcm-free-ux-final`. Frozen `bc74fc6aa84576cfd3f20a21f3484c5d91364f25` remains untouched. Applied backend `31ae137f364041341f8905472e7ddc705494b8ff` as `322966b`, then frontend UX `013c4110d3de334d05ac9801d88620050c0f788d` as `b7da056a960c023e800777bb3f865e520fe088ab`, without semantic conflict. Final handoff commit follows those two picks.
+
+API/shared/Prisma/root lockfile match backend `31ae137` exactly. Runtime frontend matches UX `013c411` exactly (which includes free frontend `c34f3c7`). The only web differences are tests: the prior guarded private billing fixture, explicit required `billingDay: 1` in two UX unit fixtures, an asynchronous template-field visibility wait before counting/filling fields, and the UX browser's synthetic interception base matching the explicit production-origin export. All non-local browser requests are fulfilled with synthetic fixtures or aborted, never forwarded to production.
+
+Final evidence directory (new exclusive directory, files 0600, screenshots preserved):
+`/private/var/folders/f_/kdvkncsn11l2nssxg_75xglc0000gp/T/opencode/lcm-free-ux-evidence-779DDE95-EA34-4F38-BDD5-B5A0B4EFFF5B`
+
+- Fresh loopback-only PostgreSQL 16 cluster/database/schema, port 55483; guarded setup applied all nine migrations; cluster stopped after testing. No operational credentials or existing databases used.
+- `API_TEST_DATABASE_URL=<guarded synthetic loopback URL> LCM_WEB_LOCAL_BILLING_TEST=true pnpm -r --workspace-concurrency=1 test`: final pass (`full-test-final.log`), shared **166**, API **422**, web **374**, total **962** tests, **73** files, no skips. Explicit sequential execution prevents API reset from racing the real combined API/frontend mock-provider fixture. Free-default guards and dark refund recovery/private paid regressions all run; private fixture publication override does not change public false defaults.
+- `NEXT_PUBLIC_API_BASE_URL=https://api.gamja.top/living-cost-manager/v1 pnpm build`: final shared/API/web pass (`build-final.log`). Web `tsc --noEmit` passes (`web-types-final.log`).
+- Free browser passes (`free-browser-final.log`): unpublished subscription route 404, no paid HTML/JS/SEO/UI/SDK/aggregate entries, guest-local template and first OWN0 creation, OWN1/multiple and shared membership preservation, fail-closed list behavior.
+- UX browser passes (`row-browser-final.log`, `row-browser-final/after-results.json` and PNGs): 30 rows at desktop 1440/mobile 375; one shared schedule explanation, no repeated row instruction; secondary copy menu; Enter/Space/ArrowDown/Escape/Tab/ShiftTab/outside/focus handling; copy once with new ID and preserved fields; cache/reload; delete cancel/confirm; disabled fieldset and workspace/profile switch cleanup. No remote network calls/page errors/overflow. Measured first-row height: desktop 121.78px, mobile 665.64px; this scoped change is **not** a full mobile row-height redesign.
+
+Failures remain preserved: initial direct web TypeScript check found missing required `billingDay` in UX test fixtures (fixed without casts/type weakening); initial free browser counted template fields before asynchronous panel completion (fixed with a visibility wait); initial UX browser expected a historical loopback API origin while testing the production-origin export (fixed synthetic interception only). No financial test or safety guard was skipped/disabled.
+
+No new financial policy, schema/migration, runtime configuration, worker, provider, opskv access, push or deployment was introduced. SQL hash remains `38f33ea4fb564637ebf82368d5e2a0c3abedb8e0521d4cb16d3c6bd2178fafdc`. Production's already-applied billing tables remain supplied main context, not independently queried here. Main must complete final independent review and sequenced deployment approval/backup/rollback/health checks. Existing personal expense/card/monthly calculations remain free; paid service controls remain hidden/dark. Future dates/renewal-window/PG readiness gaps remain separate future work, not one-click launch claims.
+
+## Earlier integration evidence (historical, preserved)
+
 ## Source and scope
 
 - Branch: `feat/lcm-free-public-final`, new isolated `lcm-free-public-final` worktree.
