@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Text } from "@mantine/core";
-import { getUpcomingDues, kstThirtyDayWindow, type UpcomingDue } from "@living-cost-manager/shared";
+import { getUpcomingDues, kstThirtyDayWindow, summarizeWorkspaceBudget } from "@living-cost-manager/shared";
 import type { FixedCost } from "../lib/budget";
 import { formatWon } from "../lib/formatting";
 
@@ -20,14 +20,15 @@ function dueLabel(daysUntil: number): { text: string; urgent: boolean } {
 }
 
 export function UpcomingDues({ fixedCosts, asOf }: UpcomingDuesProps) {
-  const [upcoming, setUpcoming] = useState<UpcomingDue<FixedCost>[]>([]);
   const [showAll, setShowAll] = useState(false);
-
-  useEffect(() => {
-    const [year, month, day] = kstThirtyDayWindow(asOf ?? new Date()).fromDate.split('-').map(Number);
+  const { upcoming, unknownCount } = useMemo(() => {
+    const reference = asOf ?? new Date();
+    const [year, month, day] = kstThirtyDayWindow(reference).fromDate.split('-').map(Number);
     const now = new Date(year, month - 1, day);
-    const dues = getUpcomingDues(fixedCosts, now, UPCOMING_WINDOW_DAYS);
-    setUpcoming(dues);
+    return {
+      upcoming: getUpcomingDues(fixedCosts, now, UPCOMING_WINDOW_DAYS),
+      unknownCount: summarizeWorkspaceBudget(0, fixedCosts, reference).unknownScheduleCount
+    };
   }, [fixedCosts, asOf]);
 
   const displayed = showAll ? upcoming : upcoming.slice(0, UPCOMING_MAX_DEFAULT);
@@ -48,11 +49,12 @@ export function UpcomingDues({ fixedCosts, asOf }: UpcomingDuesProps) {
         )}
       </div>
 
-      {upcoming.length === 0 ? (
+      {unknownCount > 0 ? <Text size="xs" c="dimmed" py="xs">일정 미확인 {unknownCount}개</Text> : null}
+      {upcoming.length === 0 && unknownCount === 0 ? (
         <Text size="xs" c="dimmed" py="sm">
           30일 이내 납부 예정이 없습니다
         </Text>
-      ) : (
+      ) : upcoming.length > 0 ? (
         <>
           <div className="quiet-upcoming-list">
             {displayed.map(({ item, daysUntil }) => {
@@ -83,7 +85,7 @@ export function UpcomingDues({ fixedCosts, asOf }: UpcomingDuesProps) {
             </div>
           )}
         </>
-      )}
+      ) : null}
     </aside>
   );
 }

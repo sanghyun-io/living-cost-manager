@@ -33,23 +33,49 @@ const costs = count => Array.from({ length: count }, (_, i) => ({
   isEndOfMonth: false, billingAnchorDate: '2026-10-15', renewalStatus: 'unreviewed',
   potentialMonthlySavings: 0, confirmedMonthlySavings: 0
 }));
-async function fixture(count, width, scheme = 'light') {
+async function fixture(count, width, scheme = 'light', serverRole = null) {
   const context = await browser.newContext({ viewport: { width, height: width > 1000 ? 900 : 844 }, serviceWorkers: 'block' });
   const forbidden = [], errors = [];
   await context.route('**/*', route => {
-    if (new URL(route.request().url()).origin === origin) return route.continue();
+    const url = new URL(route.request().url());
+    if (url.origin === origin) return route.continue();
+    if (serverRole && url.origin === 'https://api.gamja.top' && url.pathname.startsWith('/living-cost-manager/v1/')) {
+      const headers = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, OPTIONS', 'access-control-allow-headers': '*' };
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      const path = url.pathname.slice('/living-cost-manager/v1'.length);
+      const user = { id: 'quiet-viewer', name: '테스트 사용자', email: 'quiet@synthetic.invalid', emailVerified: true };
+      let body;
+      if (route.request().method() === 'GET') {
+        if (path === '/me') body = { user };
+        else if (path === '/workspaces') body = [{ id: 'one', name: '보기 전용 테스트', role: serverRole }];
+        else if (path === '/workspaces/one/snapshot') body = { workspaceId: 'one', syncVersion: 1, monthlyIncome: 3000000,
+          categories: [{ id: 'other', label: '기타', workspaceId: 'one' }], cards: [],
+          fixedCosts: costs(count).map(cost => ({ ...cost, workspaceId: 'one' })) };
+        else if (path === '/workspaces/one/snapshot/history') body = { entries: [] };
+        else if (path.endsWith('/members') || path.includes('invitations')) body = [];
+      }
+      if (body !== undefined) return route.fulfill({ status: 200, contentType: 'application/json', headers, body: JSON.stringify(body) });
+    }
     forbidden.push(route.request().url()); return route.abort();
   });
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
-  await page.addInitScript(({ storageKey, fixedCosts, userId, scheme }) => {
+  await page.addInitScript(({ storageKey, fixedCosts, userId, scheme, serverRole }) => {
     if (localStorage.getItem('quiet-seeded')) return;
     localStorage.setItem('quiet-seeded', '1');
     localStorage.setItem('mantine-color-scheme-value', scheme);
     localStorage.setItem('living-cost-manager:users:v1', JSON.stringify([{ id: userId, name: '테스트 사용자' }]));
     localStorage.setItem('living-cost-manager:active-user:v1', userId);
     localStorage.setItem(storageKey, JSON.stringify({ monthlyIncome: 3000000, categories: [{ id: 'other', label: '기타' }], cards: [], fixedCosts }));
-  }, { storageKey, fixedCosts: costs(count), userId, scheme });
+    if (serverRole) {
+      const user = { id: 'quiet-viewer', name: '테스트 사용자', email: 'quiet@synthetic.invalid', emailVerified: true };
+      localStorage.setItem('living-cost-manager:users:v1', JSON.stringify([{ id: 'server:' + user.id, name: user.name, serverUserId: user.id }]));
+      localStorage.setItem('living-cost-manager:active-user:v1', 'server:' + user.id);
+      localStorage.setItem('living-cost-manager:server-session:v2', JSON.stringify({ token: 'synthetic-quiet-session', refreshToken: 'synthetic-quiet-refresh', user,
+        workspace: { id: 'one', name: '보기 전용 테스트', role: serverRole } }));
+      localStorage.setItem('living-cost-manager:user:' + encodeURIComponent('server:' + user.id) + ':v1', localStorage.getItem(storageKey));
+    }
+  }, { storageKey, fixedCosts: costs(count), userId, scheme, serverRole });
   await page.goto(origin);
   await page.locator('.cost-list').waitFor();
   await page.waitForFunction(count => document.querySelectorAll('.table-row:not(.table-head)').length === count, count);
@@ -181,6 +207,40 @@ try {
     assert.deepEqual(failure.forbidden, []); assert.deepEqual(failure.errors, []);
     results.push({ unsavedFailureVisible: true, retryAndExportVisible: true });
     await failure.context.close();
+    const viewer = await fixture(4, 390, 'light', 'viewer');
+    await viewer.page.getByText('보기 전용 가계부입니다.', { exact: false }).waitFor();
+    const upcoming = viewer.page.getByRole('complementary', { name: '가까운 납부 예정', exact: true });
+    assert.equal(await upcoming.locator('.quiet-upcoming-item').count(), 3);
+    const expand = upcoming.getByRole('button', { name: '전체 보기 (4건)', exact: true });
+    assert.equal(await expand.isEnabled(), true);
+    await expand.click(); assert.equal(await upcoming.locator('.quiet-upcoming-item').count(), 4);
+    await viewer.page.screenshot({ path: resolve(evidence, 'after-390-viewer-upcoming-expanded.png'), animations: 'disabled' });
+    for (const name of ['항목명', '금액', '월 수입', '이름 검색']) {
+      assert.equal(await viewer.page.getByLabel(name, { exact: true }).first().isDisabled(), true);
+    }
+    assert.equal(await viewer.page.getByRole('button', { name: '테스트 지출 1 더보기', exact: true }).isDisabled(), true);
+    assert.equal(await viewer.page.getByRole('button', { name: '항목 추가', exact: true }).isDisabled(), true);
+    await viewer.page.locator('.editor-tools > summary').click();
+    assert.equal(await viewer.page.getByRole('button', { name: '삭제 모드', exact: true }).isDisabled(), true);
+    await viewer.page.getByRole('button', { name: '동기화 관리', exact: true }).click();
+    await viewer.page.getByRole('button', { name: '지금 동기화', exact: true }).waitFor();
+    assert.equal(await viewer.page.getByRole('button', { name: '지금 동기화', exact: true }).isDisabled(), true);
+    const upload = viewer.page.getByRole('button', { name: '이 브라우저 데이터 업로드', exact: true });
+    if (await upload.count()) assert.equal(await upload.isDisabled(), true);
+    assert.deepEqual(viewer.forbidden, []); assert.deepEqual(viewer.errors, []);
+    results.push({ viewerReadOnlyExpandFourDues: true, incomeTableCopyDeleteUploadProtected: true, remoteWrites: 0 });
+    await viewer.context.close();
+    const unknown = await fixture(1, 390);
+    await unknown.page.getByLabel('테스트 지출 1 기준 납부일', { exact: true }).fill('');
+    const unknownUpcoming = unknown.page.getByRole('complementary', { name: '가까운 납부 예정', exact: true });
+    await unknownUpcoming.getByText('일정 미확인 1개', { exact: true }).waitFor();
+    assert.equal(await unknownUpcoming.getByText('30일 이내 납부 예정이 없습니다', { exact: true }).count(), 0);
+    await unknown.page.evaluate(() => window.scrollTo(0, 0));
+    await unknown.page.screenshot({ path: resolve(evidence, 'after-390-unknown-schedule-viewport.png'), animations: 'disabled' });
+    await unknownUpcoming.screenshot({ path: resolve(evidence, 'after-390-unknown-upcoming.png'), animations: 'disabled' });
+    assert.deepEqual(unknown.forbidden, []); assert.deepEqual(unknown.errors, []);
+    results.push({ unknownScheduleNotFalseEmpty: true });
+    await unknown.context.close();
   }
   await writeFile(resolve(evidence, 'results.json'), JSON.stringify({ root, source: process.env.QUIET_EDITOR_SOURCE, before, results }, null, 2), { mode: 0o600 });
   console.log('PASS', evidence, JSON.stringify(results));

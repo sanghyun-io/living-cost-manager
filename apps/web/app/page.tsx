@@ -207,8 +207,8 @@ export default function Home() {
       {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}
       {budget.localRecoveryRequired ? <Button color="rose" variant="default" mb="sm" onClick={budget.handleExportRecovery}>저장 원본 내보내기</Button> : null}
 
-      <fieldset disabled={!canEdit} className="ledger-edit-region">
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
+      <fieldset disabled={!canEdit} className="ledger-edit-region">
         {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
 
         <div className="editor-layout">
@@ -245,10 +245,12 @@ export default function Home() {
             />
           </div>
 
-          <aside className="workspace-sidebar">
-            <UpcomingDues fixedCosts={budget.fixedCosts} asOf={referenceInstant} />
-          </aside>
         </div>
+      </fieldset>
+        <aside className="workspace-sidebar">
+          <UpcomingDues fixedCosts={budget.fixedCosts} asOf={referenceInstant} />
+        </aside>
+      <fieldset disabled={!canEdit} className="ledger-edit-region">
         {reviewItems.length > 0 ? <details className="quiet-disclosure renewal-queue" aria-label="갱신 검토 작업목록">
           <summary>갱신 검토 · {reviewItems.length}건</summary>
           <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
@@ -286,9 +288,8 @@ export default function Home() {
               </details>
             )}
         </details>
-      </section>
-
       </fieldset>
+      </section>
       <details className="quiet-disclosure workspace-tools" open={workspaceToolsOpen} onToggle={event => setWorkspaceToolsOpen(event.currentTarget.open)}>
         <summary>샘플 및 복구 도구</summary>
         <Text size="sm" c="dimmed">샘플은 내 데이터와 분리되며 서버로 업로드하지 않습니다.</Text>
