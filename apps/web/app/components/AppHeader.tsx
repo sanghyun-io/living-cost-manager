@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Group, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
+import { Button, Group, Menu, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { LOCAL_USER_NAME } from "../lib/users";
 import { formatSaveTime } from "../lib/formatting";
 import type { ServerSession } from "../lib/serverApi";
@@ -44,28 +44,12 @@ export function AppHeader({
     <header className="app-header-shell">
       <Group className="app-header" justify="flex-end" gap="sm" wrap="wrap">
         <Text fw={700} className="app-brand">생활비 관리자</Text>
-        <a className="guide-link" href="/guide/">사용 안내</a>
-        <Button variant="subtle" color="gray" onClick={onOpenTemplates}>템플릿</Button>
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          size={44}
-          aria-label="색상 모드 전환"
-          onClick={() => setColorScheme(computed === "dark" ? "light" : "dark")}
-        >
-          <span aria-hidden="true">{computed === "dark" ? "☀" : "☾"}</span>
-        </ActionIcon>
-        <Text className="save-status" size="xs" c={saveError ? "rose" : "dimmed"} role={saveError ? "alert" : undefined}>
+        {!saveError ? <Text className="save-status" size="xs" c="dimmed">
           {saveLabel}
-        </Text>
-        {saveError ? <Group gap="xs">
-          <Button onClick={onRetrySave} disabled={recoveryRequired}>브라우저 저장 재시도</Button>
-          <Button variant="default" onClick={onExportUnsaved}>{recoveryRequired ? "현재 편집 내용 내보내기" : "미저장 데이터 내보내기"}</Button>
-          {recoveryRequired ? <Text size="xs">손상 원본은 아래 ‘저장 원본 내보내기’로 별도 보관하세요.</Text> : null}
-        </Group> : null}
+        </Text> : null}
         {serverSession ? (
           <Button variant="default" onClick={onOpenData}>
-            서버 연결됨 · 동기화 관리
+            동기화 관리
           </Button>
         ) : (
           <>
@@ -80,14 +64,26 @@ export function AppHeader({
             </Button>
           </>
         )}
-        <Text size="sm" c="dimmed">{serverSession?.workspace?.name ?? currentUserName ?? LOCAL_USER_NAME}</Text>
-        <Button variant="subtle" color="gray" size="xs" onClick={onOpenCoach}>지출 코치</Button>
-        {serverSession ? (
-          <Button variant="default" onClick={onServerLogout}>
-            서버 로그아웃
-          </Button>
-        ) : null}
+        <Menu position="bottom-end" withinPortal>
+          <Menu.Target><Button variant="subtle" color="gray">도구</Button></Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>{serverSession?.workspace?.name ?? currentUserName ?? LOCAL_USER_NAME}</Menu.Label>
+            <Menu.Item onClick={onOpenTemplates}>템플릿</Menu.Item>
+            <Menu.Item onClick={onOpenCoach}>지출 코치</Menu.Item>
+            <Menu.Item component="a" href="/guide/">사용 안내</Menu.Item>
+            <Menu.Item onClick={() => setColorScheme(computed === 'dark' ? 'light' : 'dark')}>색상 모드 전환</Menu.Item>
+            {serverSession ? <Menu.Item onClick={onServerLogout}>서버 로그아웃</Menu.Item> : null}
+          </Menu.Dropdown>
+        </Menu>
       </Group>
+      {saveError ? <div className="header-save-error">
+        <Text role="alert" c="rose">{saveError}</Text>
+        <Group gap="xs">
+          <Button onClick={onRetrySave} disabled={recoveryRequired}>브라우저 저장 재시도</Button>
+          <Button variant="default" onClick={onExportUnsaved}>{recoveryRequired ? '현재 편집 내용 내보내기' : '미저장 데이터 내보내기'}</Button>
+        </Group>
+        {recoveryRequired ? <Text size="xs">손상 원본은 아래 ‘저장 원본 내보내기’로 별도 보관하세요.</Text> : null}
+      </div> : null}
       {ledgerControls}
     </header>
   );

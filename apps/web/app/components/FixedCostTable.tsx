@@ -99,7 +99,6 @@ export function FixedCostTable({
       <div className="section-heading">
         <div>
           <Title order={2} size={20}>고정비 항목</Title>
-          <Text size="sm" c="dimmed" mt={4}>금액은 매 청구 시 실제 결제액입니다. 월 환산은 비교용이며 실제 청구액과 다를 수 있어요.</Text>
         </div>
         {isDeleteMode ? (
           <Group className="action-group delete-actions" gap="xs">
@@ -113,6 +112,9 @@ export function FixedCostTable({
           </Group>
         ) : (
           <Group className="action-group" gap="xs">
+            <details className="editor-tools">
+            <summary>항목 관리</summary>
+            <div className="editor-tools-actions">
             <Button variant="subtle" color="gray" onClick={onOpenCategory}>
               카테고리 관리
             </Button>
@@ -125,6 +127,8 @@ export function FixedCostTable({
             <Button color="gray" variant="subtle" onClick={onEnterDeleteMode}>
               삭제 모드
             </Button>
+            </div>
+            </details>
             <Button onClick={onAddItem}>항목 추가</Button>
           </Group>
         )}
@@ -134,13 +138,14 @@ export function FixedCostTable({
           {importMessage}
         </Alert>
       ) : null}
+      <div className="editor-toolbar">
       {!isDeleteMode && onQuickAdd ? (
         <Group className="quick-add" gap="xs" mb="md" align="flex-end" wrap="nowrap">
           <TextInput
             style={{ flex: 1, minWidth: 0 }}
             label="빠른 추가"
-            description="예: 넷플릭스 17000원 매달"
-            placeholder="항목명과 금액, 주기를 한 줄로 입력하세요"
+            classNames={{ label: 'sr-only' }}
+            placeholder="예: 넷플릭스 17000원 매달"
             value={quickAddText}
             onChange={(event) => setQuickAddText(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -155,11 +160,11 @@ export function FixedCostTable({
           </Button>
         </Group>
       ) : null}
-      {quickAddText && !isDeleteMode ? <Text role="status" size="sm" mb="sm">{quickPreview.valid
-          ? `미리보기: ${quickPreview.name} · ${formatWon(quickPreview.amount!)} · ${quickPreview.periodMonths}개월${quickPreview.defaultPeriod ? " (주기 생략: 매월)" : ""}${!Number.isInteger(quickPreview.periodMonths) ? " · 월환산 비교에 사용하며 정확한 청구 일정은 계산하지 않습니다." : ""}`
-          : "이름과 유효한 금액을 입력하세요. 입력 내용은 유지됩니다."}</Text> : null}
-      <div className="filter-bar" aria-label="고정비 필터">
-        <TextInput label="이름 검색" value={costFilters.query} onChange={(e) => onCostFilters({ ...costFilters, query: e.currentTarget.value })} />
+      <div className="editor-search">
+        <TextInput label="이름 검색" classNames={{ label: 'sr-only' }} placeholder="이름 검색" value={costFilters.query} onChange={(e) => onCostFilters({ ...costFilters, query: e.currentTarget.value })} />
+        <details className="editor-filters">
+        <summary>필터 · 정렬{costFilters.method !== 'all' || costFilters.review !== 'all' || costFilters.sort !== 'original' || categoryFilterId !== 'all' ? ' · 적용 중' : ''}</summary>
+        <div className="filter-bar" aria-label="고정비 필터">
         <Select label="결제수단 필터" value={costFilters.method} data={[{ value: "all", label: "모든 결제수단" }, ...methodData]} onChange={(value) => onCostFilters({ ...costFilters, method: value ?? "all" })} />
         <Select label="검토 상태 필터" value={costFilters.review} data={[{ value: "all", label: "모든 검토 상태" }, { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" }, { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" }, { value: "completed", label: "검토 완료" }]} onChange={(value) => onCostFilters({ ...costFilters, review: value ?? "all" })} />
         <Select label="정렬" value={costFilters.sort} data={[{ value: "original", label: "등록 순서" }, { value: "amount", label: "청구 금액 큰 순" }, { value: "due", label: "다음 납부일 순 (미확인 마지막)" }]} onChange={(value) => onCostFilters({ ...costFilters, sort: value ?? "original" })} />
@@ -172,14 +177,17 @@ export function FixedCostTable({
           size="sm"
         />
         <Button variant="default" onClick={onResetFilters}>필터 초기화</Button>
+        </div>
+        </details>
       </div>
+      </div>
+      {quickAddText && !isDeleteMode ? <Text role="status" size="sm" mb="sm">{quickPreview.valid
+          ? `미리보기: ${quickPreview.name} · ${formatWon(quickPreview.amount!)} · ${quickPreview.periodMonths}개월${quickPreview.defaultPeriod ? " (주기 생략: 매월)" : ""}${!Number.isInteger(quickPreview.periodMonths) ? " · 월환산 비교에 사용하며 정확한 청구 일정은 계산하지 않습니다." : ""}`
+          : "이름과 유효한 금액을 입력하세요. 입력 내용은 유지됩니다."}</Text> : null}
       <div className="filter-summary">
         <Text size="sm">{visibleFixedCosts.length}개 항목</Text>
         <Text size="sm" fw={700} className="tnum">월 환산 {formatWon(visibleFixedCostTotal)}</Text>
       </div>
-      <Text id={scheduleHelpId} size="xs" c="dimmed" mb="sm">
-        납부일은 실제 청구 기준이며 카드 결제일과 별개입니다. 날짜가 없는 달에는 말일을 적용합니다.
-      </Text>
       <div className="table" role="group" aria-label="고정비 목록">
         <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} aria-hidden="true">
           <span>항목</span>
@@ -198,8 +206,7 @@ export function FixedCostTable({
               <>
                 <Text fw={700} mb={4}>아직 등록된 고정비가 없어요</Text>
                 <Text size="sm" c="dimmed">
-                  위의 <strong>빠른 추가</strong>에 “넷플릭스 17000원 매달”처럼 한 줄로 입력하거나,
-                  <strong> 항목 추가</strong> 버튼으로 직접 추가해 보세요. 항목명을 적으면 카테고리를 자동으로 추천해 드려요.
+                  빠른 추가에 이름과 금액을 입력하거나 항목을 추가하세요.
                 </Text>
               </>
             ) : (
@@ -382,6 +389,13 @@ export function FixedCostTable({
           );
         })}
       </div>
+      <details className="schedule-help">
+        <summary>금액 · 납부일 기준</summary>
+        <Text id={scheduleHelpId} size="xs" c="dimmed" mb="sm">
+          납부일은 실제 청구 기준이며 카드 결제일과 별개입니다. 날짜가 없는 달에는 말일을 적용합니다.
+        </Text>
+        <Text size="xs" c="dimmed">금액은 매 청구 시 실제 결제액입니다. 월 환산은 비교용이며 실제 청구액과 다를 수 있어요.</Text>
+      </details>
     </div>
   );
 }

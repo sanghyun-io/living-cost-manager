@@ -63,11 +63,12 @@ async function fixture(initial, selected, viewport = { width: 390, height: 844 }
     localStorage.setItem('living-cost-manager:server-session:v2', JSON.stringify({ token: 'synthetic-free-session', refreshToken: 'synthetic-free-refresh', user, workspace: selected }));
     localStorage.setItem(keyOne, JSON.stringify(original)); localStorage.setItem(keyTwo, JSON.stringify(second));
   }, { user, selected, original: localSnapshot(100), second: localSnapshot(200), keyOne: key('server:' + user.id), keyTwo: key(profile('two')) });
-  await page.goto(origin); await page.getByRole('button', { name: '템플릿', exact: true }).waitFor();
+  await page.goto(origin); await page.getByRole('button', { name: '도구', exact: true }).waitFor();
   return { page, context, posts, forbidden, errors };
 }
 async function templateFields(page) {
-  await page.getByRole('button', { name: '템플릿', exact: true }).click();
+  await page.getByRole('button', { name: '도구', exact: true }).click();
+  await page.getByRole('menuitem', { name: '템플릿', exact: true }).click();
   const fields = page.getByRole('region', { name: '새 공간에 템플릿 적용' }).locator('input');
   await fields.first().waitFor(); // Wait for the asynchronous template panel before counting/filling fields.
   for (let i = 0; i < await fields.count(); i++) await fields.nth(i).fill(i === 0 ? '1000' : '100');
@@ -115,6 +116,7 @@ try {
     await page.getByText('현재 무료판에서는 새 가계부 추가를 제공하지 않습니다.', { exact: false }).waitFor();
     await page.getByRole('button', { name: '생활비 템플릿 닫기' }).click();
     const amount = page.getByLabel('금액', { exact: true }).first(); await amount.fill('111'); await amount.blur();
+    await page.locator('.workspace-tools > summary').click();
     await page.getByRole('button', { name: '분리된 샘플 체험', exact: true }).click();
     const returnButton = page.getByRole('button', { name: '내 데이터로 시작 / 돌아가기', exact: true });
     await returnButton.waitFor(); await returnButton.focus(); await returnButton.press('Enter');

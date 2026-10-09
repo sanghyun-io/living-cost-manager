@@ -7,11 +7,12 @@ import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
 import { AppHeader } from "./components/AppHeader";
 import { useMarketingConsent } from "./lib/useMarketingConsent";
-import { HeroPanel } from "./components/HeroPanel";
+import { BudgetStrip } from "./components/BudgetStrip";
 import { MetricGrid } from "./components/MetricGrid";
 import { InsightsPanel } from "./components/InsightsPanel";
 import { ChartSection } from "./components/ChartSection";
 import { FixedCostTable } from "./components/FixedCostTable";
+import { UpcomingDues } from "./components/UpcomingDues";
 import { CategoryModal } from "./components/modals/CategoryModal";
 import { CardModal } from "./components/modals/CardModal";
 import { AuthModal } from "./components/modals/AuthModal";
@@ -44,6 +45,7 @@ export default function Home() {
   const ui = useUIState();
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templateError, setTemplateError] = useState("");
+  const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(false);
   const marketingConsent = useMarketingConsent();
   const usersRef = useRef<LocalUsersApi | null>(null);
   const budgetRef = useRef<BudgetDataApi | null>(null);
@@ -159,7 +161,7 @@ export default function Home() {
 
   if (!users.isBootLoaded || !users.isLoaded || (!budget.localScopeKey && !budget.saveError)) {
     return (
-      <main className="page-shell">
+      <main className="page-shell quiet-home">
       {templateError ? <Text role="alert" c="rose" mt="md">{templateError}</Text> : null}
         <section className="login-card">
           <p className="section-label">생활비 관리자</p>
@@ -189,100 +191,117 @@ export default function Home() {
         onOpenTemplates={() => { setTemplateError(""); setTemplatesOpen(true); }}
         onServerLogout={handleExitAccount}
       />
-      <main className="page-shell">
+      <main className="page-shell quiet-home">
       {templateError ? <Text role="alert" aria-live="assertive" c="rose" mb="md">{templateError}</Text> : null}
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
       {CROSS_LEDGER_AGGREGATION_AVAILABLE && ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 가계부를 선택하고 조회하세요. 자동으로 전체 가계부를 선택하지 않습니다.</Text>}</section> : <>
       {viewer ? <Text role="status">보기 전용 가계부입니다. 편집과 업로드는 할 수 없습니다.</Text> : null}
-      <fieldset disabled={!canEdit} className="ledger-edit-region">
-      <HeroPanel
-        // Individual editing is never mounted as aggregate data.
+      <BudgetStrip
         monthlyIncome={budget.monthlyIncome}
-        expenseRate={budget.summary.expenseRate}
-        hasServerWorkspace={Boolean(auth.serverSession?.workspace)}
+        monthlyExpense={budget.summary.monthlyExpense}
+        fixedCosts={budget.fixedCosts}
+        asOf={referenceInstant}
+        canEdit={canEdit}
         onIncomeChange={budget.handleIncomeChange}
       />
-      </fieldset>
-
-      <section className="workspace-note" aria-label="시작 방식">
-        <Text size="sm">{users.isSampleMode ? "샘플 체험 중 · 내 데이터와 분리된 예시입니다." : "내 데이터 · 기준 납부일을 입력하면 다음 30일 예정액을 확인할 수 있습니다."}</Text>
-        <Button ref={element => { focusTargets.current.sample = element; }} variant="default" size="xs" onClick={event => {
-          const done = focusIntent('sample', event.currentTarget);
-          void users.handleChooseDataMode(users.isSampleMode ? "blank" : "sample").then(() => done()).catch(() => {
-            done(false); setTemplateError('가계부 저장에 실패하여 샘플 전환을 중단했습니다. 현재 내용을 백업하세요.');
-          });
-        }}>
-          {users.isSampleMode ? "내 데이터로 시작 / 돌아가기" : "분리된 샘플 체험"}
-        </Button>
-        <Text size="xs" c="dimmed">샘플은 별도 게스트 예시이며 서버로 업로드하지 않습니다. 돌아갈 때 계정과 가계부 권한을 다시 확인합니다.</Text>
-        <Button variant="subtle" color={budget.localRecoveryRequired ? "rose" : "gray"} size="xs" onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? "저장 원본 내보내기" : "최근 교체 전 복구본 내보내기"}</Button>
-        {auth.serverSession && !users.isSampleMode ? <Button variant="subtle" color="gray" size="xs" onClick={budget.handleExportLegacySource}>이전 단일 가계부 원본(JSON) 내보내기</Button> : null}
-      </section>
-
-      <div className="dashboard-overview">
-        <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-        <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
-      </div>
+      {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}
+      {budget.localRecoveryRequired ? <Button color="rose" variant="default" mb="sm" onClick={budget.handleExportRecovery}>저장 원본 내보내기</Button> : null}
 
       <fieldset disabled={!canEdit} className="ledger-edit-region">
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
-        <section className="renewal-queue" aria-label="갱신 검토 작업목록">
-          <Text fw={700}>갱신 검토 작업목록</Text>
-          <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
-          {reviewItems.length === 0 ? <Text size="sm">현재 검토할 작업이 없습니다.</Text> : null}
-          <div className="renewal-actions">
-          {reviewItems.map((item) => <Button key={item.id} variant="subtle" onClick={() => budget.revealItem(item.id)}>
-            {item.name} · {item.renewalStatus === "cancel-planned" ? "해지 예정" : item.renewalStatus === "change-review" ? "변경 검토" : "임박 미검토"} 편집
-          </Button>)}
-          </div>
-        </section>
         {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
-        <FixedCostTable
-          key={budget.localScopeKey}
-          focusItemId={budget.focusItemId}
-          focusRequest={budget.focusRequest}
-          costFilters={budget.costFilters}
-          onCostFilters={budget.setCostFilters}
-          onResetFilters={budget.resetCostFilters}
-          categories={budget.categories}
-          cards={budget.cards}
-          visibleFixedCosts={budget.visibleFixedCosts}
-          visibleFixedCostTotal={budget.visibleFixedCostTotal}
-          categoryFilterId={ui.categoryFilterId}
-          isDeleteMode={ui.isDeleteMode}
-          selectedDeleteIds={ui.selectedDeleteIds}
-          importMessage={ui.importMessage}
-          onItemChange={budget.handleItemChange}
-          onPaymentMethodChange={budget.handlePaymentMethodChange}
-          onPaymentOptionChange={budget.handlePaymentOptionChange}
-          onAddItem={budget.handleAddItem}
-          onDuplicateItem={budget.handleDuplicateItem}
-          onQuickAdd={budget.handleQuickAdd}
-          onEnterDeleteMode={budget.handleEnterDeleteMode}
-          onCancelDeleteMode={budget.handleCancelDeleteMode}
-          onConfirmDeleteItems={budget.handleConfirmDeleteItems}
-          onToggleDeleteSelection={budget.handleToggleDeleteSelection}
-          onFilterChange={ui.handleFilterChange}
-          onOpenCategory={() => ui.setIsCategoryModalOpen(true)}
-          onOpenCard={() => ui.setIsCardModalOpen(true)}
-          onOpenData={() => ui.setIsDataModalOpen(true)}
-        />
 
-        {budget.summary.monthlyExpense > 0 ? <ChartSection
-          chartMode={ui.chartMode}
-          buckets={budget.buckets}
-          pieSegments={budget.pieSegments}
-          monthlyExpense={budget.summary.monthlyExpense}
-          pieBackground={budget.pieBackground}
-          activePieSegment={ui.activePieSegment}
-          pieTooltipPosition={ui.pieTooltipPosition}
-          onChartModeChange={ui.setChartMode}
-          onPieMove={(event) => ui.handlePieMove(event, budget.pieSegments)}
-          onPieLeave={() => ui.setActivePieSegment(null)}
-        /> : null}
+        <div className="editor-layout">
+          <div className="workspace-main">
+            <FixedCostTable
+              key={budget.localScopeKey}
+              focusItemId={budget.focusItemId}
+              focusRequest={budget.focusRequest}
+              costFilters={budget.costFilters}
+              onCostFilters={budget.setCostFilters}
+              onResetFilters={budget.resetCostFilters}
+              categories={budget.categories}
+              cards={budget.cards}
+              visibleFixedCosts={budget.visibleFixedCosts}
+              visibleFixedCostTotal={budget.visibleFixedCostTotal}
+              categoryFilterId={ui.categoryFilterId}
+              isDeleteMode={ui.isDeleteMode}
+              selectedDeleteIds={ui.selectedDeleteIds}
+              importMessage={ui.importMessage}
+              onItemChange={budget.handleItemChange}
+              onPaymentMethodChange={budget.handlePaymentMethodChange}
+              onPaymentOptionChange={budget.handlePaymentOptionChange}
+              onAddItem={budget.handleAddItem}
+              onDuplicateItem={budget.handleDuplicateItem}
+              onQuickAdd={budget.handleQuickAdd}
+              onEnterDeleteMode={budget.handleEnterDeleteMode}
+              onCancelDeleteMode={budget.handleCancelDeleteMode}
+              onConfirmDeleteItems={budget.handleConfirmDeleteItems}
+              onToggleDeleteSelection={budget.handleToggleDeleteSelection}
+              onFilterChange={ui.handleFilterChange}
+              onOpenCategory={() => ui.setIsCategoryModalOpen(true)}
+              onOpenCard={() => ui.setIsCardModalOpen(true)}
+              onOpenData={() => ui.setIsDataModalOpen(true)}
+            />
+          </div>
+
+          <aside className="workspace-sidebar">
+            <UpcomingDues fixedCosts={budget.fixedCosts} asOf={referenceInstant} />
+          </aside>
+        </div>
+        {reviewItems.length > 0 ? <details className="quiet-disclosure renewal-queue" aria-label="갱신 검토 작업목록">
+          <summary>갱신 검토 · {reviewItems.length}건</summary>
+          <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
+          <div className="renewal-actions">
+            {reviewItems.map(item => <Button key={item.id} variant="subtle" onClick={() => budget.revealItem(item.id)}>
+              {item.name} · {item.renewalStatus === 'cancel-planned' ? '해지 예정' : item.renewalStatus === 'change-review' ? '변경 검토' : '임박 미검토'} 편집
+            </Button>)}
+          </div>
+        </details> : null}
+        <details className="quiet-disclosure">
+          <summary>지출 분석</summary>
+          <div className="dashboard-overview">
+            <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
+            <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
+          </div>
+          {budget.summary.monthlyExpense > 0 && (
+              <details className="quiet-charts">
+                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '12px 16px', border: '1px solid var(--line)', borderRadius: 'var(--radius)', background: 'var(--surface)' }}>
+                  카테고리별 비중
+                </summary>
+                <div style={{ padding: '16px', border: '1px solid var(--line)', borderTop: 0, borderRadius: '0 0 var(--radius) var(--radius)', background: 'var(--surface)' }}>
+                  <ChartSection
+                    chartMode={ui.chartMode}
+                    buckets={budget.buckets}
+                    pieSegments={budget.pieSegments}
+                    monthlyExpense={budget.summary.monthlyExpense}
+                    pieBackground={budget.pieBackground}
+                    activePieSegment={ui.activePieSegment}
+                    pieTooltipPosition={ui.pieTooltipPosition}
+                    onChartModeChange={ui.setChartMode}
+                    onPieMove={(event) => ui.handlePieMove(event, budget.pieSegments)}
+                    onPieLeave={() => ui.setActivePieSegment(null)}
+                  />
+                </div>
+              </details>
+            )}
+        </details>
       </section>
 
-      </fieldset></>}
+      </fieldset>
+      <details className="quiet-disclosure workspace-tools" open={workspaceToolsOpen} onToggle={event => setWorkspaceToolsOpen(event.currentTarget.open)}>
+        <summary>샘플 및 복구 도구</summary>
+        <Text size="sm" c="dimmed">샘플은 내 데이터와 분리되며 서버로 업로드하지 않습니다.</Text>
+        <Button ref={element => { focusTargets.current.sample = element; }} variant="default" onClick={event => {
+          const done = focusIntent('sample', event.currentTarget);
+          void users.handleChooseDataMode(users.isSampleMode ? 'blank' : 'sample').then(() => done()).catch(() => {
+            done(false); setTemplateError('가계부 저장에 실패하여 샘플 전환을 중단했습니다. 현재 내용을 백업하세요.');
+          });
+        }}>{users.isSampleMode ? '내 데이터로 시작 / 돌아가기' : '분리된 샘플 체험'}</Button>
+        <Button variant="subtle" color={budget.localRecoveryRequired ? 'rose' : 'gray'} onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? '저장 원본 내보내기' : '최근 교체 전 복구본 내보내기'}</Button>
+        {auth.serverSession && !users.isSampleMode ? <Button variant="subtle" color="gray" onClick={budget.handleExportLegacySource}>이전 단일 가계부 원본(JSON) 내보내기</Button> : null}
+      </details>
+      </>}
       <TemplateModal key={auth.serverSession ? auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id : users.currentUser?.id} opened={templatesOpen} onOpen={() => setTemplatesOpen(true)} onClose={() => setTemplatesOpen(false)} session={auth.serverSession}
         onLogin={() => { setTemplatesOpen(false); ui.setIsAuthModalOpen(true); }} canApply={users.isLoaded && !budget.saveError && !budget.localRecoveryRequired}
         accountCanCreate={ledgers.canCreate} creationUnavailableMessage={ledgers.creationUnavailableMessage}

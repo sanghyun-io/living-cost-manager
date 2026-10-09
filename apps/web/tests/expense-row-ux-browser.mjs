@@ -131,6 +131,7 @@ try {
       assert.deepEqual(fields, Object.fromEntries(Object.entries(snapshot.fixedCosts[0]).filter(([key]) => !['id', 'name'].includes(key))));
       assert.equal(fields.billingAnchorDate, '2026-10-17');
       await page.reload(); await copied.waitFor();
+      await page.locator('.editor-tools > summary').click();
       await page.getByRole('button', { name: '삭제 모드', exact: true }).click();
       assert.equal(await page.getByRole('button', { name: /더보기$/ }).count(), 0);
       await copied.getByRole('checkbox', { name: '삭제 선택', exact: true }).check();
@@ -139,6 +140,7 @@ try {
       page.once('dialog', dialog => dialog.accept());
       await page.getByRole('button', { name: '선택 삭제', exact: true }).click(); await copied.waitFor({ state: 'hidden' });
       await page.getByRole('button', { name: '테스트 지출 1 더보기', exact: true }).click(); await clone.waitFor();
+      await page.locator('.workspace-tools > summary').click();
       await page.getByRole('button', { name: '분리된 샘플 체험', exact: true }).click(); await clone.waitFor({ state: 'hidden' });
       await page.getByRole('button', { name: '내 데이터로 시작 / 돌아가기', exact: true }).click(); await first.waitFor();
       assert.equal(await page.getByRole('menu').count(), 0);
