@@ -36,6 +36,8 @@ import { LedgerControls } from './components/LedgerControls';
 import { LedgerSummary } from './components/LedgerSummary';
 import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
 import { CROSS_LEDGER_AGGREGATION_AVAILABLE } from './lib/publicRelease';
+import { useProductTour } from './lib/useProductTour';
+import { ProductTour } from './components/ProductTour';
 
 export default function Home() {
   // Hook creation order respects render-time data flow:
@@ -72,6 +74,13 @@ export default function Home() {
   const syncAvailable = !!budget.localScopeKey && !budget.saveError && !users.isSampleMode && !ledgers.mutationPending;
   const focusReady = users.isBootLoaded && users.isLoaded && (!!budget.localScopeKey || !!budget.saveError);
   const focusScope = JSON.stringify([auth.serverSession?.user.id ?? null, auth.serverSession?.workspace?.id ?? null, users.isSampleMode]);
+  const tour = useProductTour({
+    ready: focusReady && !auth.isServerBusy,
+    scope: users.isSampleMode ? 'sample:' + (users.currentUser?.id ?? 'guest') : auth.serverSession ? 'account:' + auth.serverSession.user.id : 'local:' + (users.currentUser?.id ?? 'guest'),
+    transition: focusScope + ':' + budget.localScopeKey,
+    account: !users.isSampleMode && auth.serverSession && auth.serverApi ? { id: auth.serverSession.user.id, token: auth.serverSession.token, baseUrl: auth.serverApi.baseUrl } : null
+  });
+  const tourPaused = templatesOpen || ui.isDataModalOpen || ui.isAuthModalOpen || ui.isDeleteAccountModalOpen || ui.isCategoryModalOpen || ui.isCardModalOpen || coach.isCoachModalOpen || auth.resetToken !== null || auth.verifyNoticeEmail !== null;
   const [, notifyFocus] = useState(0);
   const focusController = useRef<ReturnType<typeof createFocusIntentController> | null>(null);
   if (!focusController.current) focusController.current = createFocusIntentController(() => notifyFocus(value => value + 1));
@@ -189,9 +198,11 @@ export default function Home() {
         onOpenAuth={() => ui.setIsAuthModalOpen(true)}
         onOpenCoach={coach.openCoachModal}
         onOpenTemplates={() => { setTemplateError(""); setTemplatesOpen(true); }}
+        onOpenTour={() => tour.start(document.querySelector<HTMLElement>('[data-product-tour-opener]') ?? undefined)}
         onServerLogout={handleExitAccount}
       />
       <main className="page-shell quiet-home">
+      <ProductTour tour={tour} signedIn={!!auth.serverSession && !users.isSampleMode} paused={tourPaused} readOnly={viewer} />
       {templateError ? <Text role="alert" aria-live="assertive" c="rose" mb="md">{templateError}</Text> : null}
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
       {CROSS_LEDGER_AGGREGATION_AVAILABLE && ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 가계부를 선택하고 조회하세요. 자동으로 전체 가계부를 선택하지 않습니다.</Text>}</section> : <>

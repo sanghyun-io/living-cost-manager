@@ -46,6 +46,7 @@ async function fixture(count, viewport, serverLedger = false) {
       const user = { id: 'row-server-fixture', name: '테스트 사용자', email: 'row@synthetic.invalid', emailVerified: true };
       let body;
       if (path === '/me') body = { user };
+      else if (path === '/onboarding/product-tour') body = { version: 1, status: 'completed', updatedAt: '2026-10-10T00:00:00.000Z' };
       else if (path === '/workspaces') body = ['one', 'two'].map(id => ({ id, name: `테스트 공간 ${id}`, role: 'owner' }));
       else if (/\/snapshot$/.test(path)) {
         const id = path.split('/')[2];
@@ -74,6 +75,7 @@ async function fixture(count, viewport, serverLedger = false) {
   }, { storageKey, fixedCosts: costs(count), serverLedger });
   await page.goto(origin);
   await page.waitForFunction(count => document.querySelectorAll('.table-row:not(.table-head)').length === count, count);
+  if (!serverLedger && !before) await page.getByRole('region', { name: '선택형 둘러보기' }).getByRole('button', { name: '건너뛰기' }).click();
   return { page, context, forbidden, errors };
 }
 try {
@@ -120,7 +122,10 @@ try {
       await first.evaluate(node => { node.closest('fieldset').disabled = false; });
       await page.getByRole('heading', { name: '고정비 항목', exact: true }).click();
       await clone.waitFor({ state: 'hidden' });
-      await more.focus(); await more.press('Enter'); await clone.waitFor(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+      await more.focus(); await more.press('Enter'); await clone.waitFor(); await page.keyboard.press('ArrowDown');
+      await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '테스트 지출 1 복제');
+      assert.equal(await clone.evaluate(node => node === document.activeElement), true);
+      await page.keyboard.press('Enter');
       const copied = page.getByRole('group', { name: '테스트 지출 1 (복사)', exact: true });
       await copied.waitFor();
       await page.waitForFunction(() => document.activeElement?.value === '테스트 지출 1 (복사)');

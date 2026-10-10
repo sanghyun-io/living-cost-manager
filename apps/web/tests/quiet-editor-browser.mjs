@@ -47,6 +47,7 @@ async function fixture(count, width, scheme = 'light', serverRole = null) {
       let body;
       if (route.request().method() === 'GET') {
         if (path === '/me') body = { user };
+        else if (path === '/onboarding/product-tour') body = { version: 1, status: 'completed', updatedAt: '2026-10-10T00:00:00.000Z' };
         else if (path === '/workspaces') body = [{ id: 'one', name: '보기 전용 테스트', role: serverRole }];
         else if (path === '/workspaces/one/snapshot') body = { workspaceId: 'one', syncVersion: 1, monthlyIncome: 3000000,
           categories: [{ id: 'other', label: '기타', workspaceId: 'one' }], cards: [],
@@ -80,6 +81,9 @@ async function fixture(count, width, scheme = 'light', serverRole = null) {
   await page.locator('.cost-list').waitFor();
   await page.waitForFunction(count => document.querySelectorAll('.table-row:not(.table-head)').length === count, count);
   await page.evaluate(() => document.fonts.ready);
+  if (!serverRole && !before) {
+    await page.getByRole('region', { name: '선택형 둘러보기' }).getByRole('button', { name: '건너뛰기' }).click();
+  }
   return { context, page, forbidden, errors };
 }
 async function snapshot(f, count, width, scheme) {

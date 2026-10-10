@@ -810,3 +810,18 @@ body {
   .quiet-home .table-row { gap: 12px; }
   .forecast-help[open] > p { width: min(280px, calc(100vw - 40px)); }
 }
+/* Optional product-tour portal: only the compact card receives pointer events. */
+.product-tour-layer { position: fixed; inset: 0; z-index: 190; pointer-events: none; }
+.product-tour-highlight { position: fixed; outline: 3px solid var(--mantine-color-blue-6); outline-offset: 3px; border-radius: 4px; pointer-events: none; }
+.product-tour-card { position: fixed; box-sizing: border-box; padding: 12px; border: 1px solid var(--mantine-color-default-border); border-radius: 8px; background: var(--mantine-color-body); color: var(--mantine-color-text); box-shadow: 0 3px 12px #0002; pointer-events: auto; overflow: auto; font-size: 14px; line-height: 1.55; }
+.product-tour-heading, .product-tour-actions, .product-tour-invitation { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.product-tour-heading { justify-content: space-between; }
+.product-tour-card p { margin: 8px 0; }
+.product-tour-card:not(.product-tour-invitation) { display: flex; flex-direction: column; }
+.product-tour-card:not(.product-tour-invitation) p { overflow-y: auto; min-height: 0; }
+.product-tour-heading, .product-tour-actions { flex-shrink: 0; }
+.product-tour-actions { justify-content: flex-end; }
+.product-tour-card button { min-width: 44px; min-height: 44px; padding: 8px; border: 1px solid var(--mantine-color-default-border); border-radius: 4px; background: var(--mantine-color-default); color: inherit; font: inherit; cursor: pointer; }
+.product-tour-card button:focus-visible { outline: 3px solid var(--mantine-color-blue-6); outline-offset: 2px; }
+.product-tour-card button:disabled { cursor: default; opacity: .5; }
+@media (forced-colors: active) { .product-tour-highlight { outline-color: Highlight; } .product-tour-card, .product-tour-card button { border-color: CanvasText; } }

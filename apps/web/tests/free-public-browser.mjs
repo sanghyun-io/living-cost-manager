@@ -37,6 +37,7 @@ async function fixture(initial, selected, viewport = { width: 390, height: 844 }
     if (req.method() === 'OPTIONS') { await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, PUT, PATCH, OPTIONS', 'access-control-allow-headers': '*' } }); return; }
     let body;
     if (path === '/me') body = { user };
+    else if (path === '/onboarding/product-tour') body = { version: 1, status: 'completed', updatedAt: '2026-10-10T00:00:00.000Z' };
     else if (path === '/workspaces' && req.method() === 'GET') {
       if (failList) { await route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, body: '{}' }); return; }
       body = workspaces;
@@ -64,6 +65,7 @@ async function fixture(initial, selected, viewport = { width: 390, height: 844 }
     localStorage.setItem(keyOne, JSON.stringify(original)); localStorage.setItem(keyTwo, JSON.stringify(second));
   }, { user, selected, original: localSnapshot(100), second: localSnapshot(200), keyOne: key('server:' + user.id), keyTwo: key(profile('two')) });
   await page.goto(origin); await page.getByRole('button', { name: '도구', exact: true }).waitFor();
+  if (selected === undefined) await page.getByRole('region', { name: '선택형 둘러보기' }).getByRole('button', { name: '건너뛰기' }).click();
   return { page, context, posts, forbidden, errors };
 }
 async function templateFields(page) {

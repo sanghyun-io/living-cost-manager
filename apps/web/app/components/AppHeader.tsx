@@ -17,6 +17,7 @@ interface AppHeaderProps {
   onOpenAuth: () => void;
   onOpenCoach: () => void;
   onOpenTemplates: () => void;
+  onOpenTour?: () => void;
   /** Combines server logout + local logout (wrapped in page). */
   onServerLogout: () => void;
 }
@@ -34,6 +35,7 @@ export function AppHeader({
   onOpenAuth,
   onOpenCoach,
   onOpenTemplates,
+  onOpenTour,
   onServerLogout
 }: AppHeaderProps) {
   const saveLabel = saveError || (lastSavedAt ? "이 브라우저에 저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
@@ -48,15 +50,16 @@ export function AppHeader({
           {saveLabel}
         </Text> : null}
         {serverSession ? (
-          <Button variant="default" onClick={onOpenData}>
+          <Button data-product-tour="data" variant="default" onClick={onOpenData}>
             동기화 관리
           </Button>
         ) : (
           <>
-            <Button variant="default" onClick={onOpenData}>
+            <Button data-product-tour="data" variant="default" onClick={onOpenData}>
               데이터 관리
             </Button>
             <Button
+              data-product-tour="login"
               variant="subtle"
               onClick={onOpenAuth}
             >
@@ -65,12 +68,13 @@ export function AppHeader({
           </>
         )}
         <Menu position="bottom-end" withinPortal>
-          <Menu.Target><Button variant="subtle" color="gray">도구</Button></Menu.Target>
+          <Menu.Target><Button data-product-tour-opener variant="subtle" color="gray">도구</Button></Menu.Target>
           <Menu.Dropdown>
             <Menu.Label>{serverSession?.workspace?.name ?? currentUserName ?? LOCAL_USER_NAME}</Menu.Label>
             <Menu.Item onClick={onOpenTemplates}>템플릿</Menu.Item>
             <Menu.Item onClick={onOpenCoach}>지출 코치</Menu.Item>
             <Menu.Item component="a" href="/guide/">사용 안내</Menu.Item>
+            {onOpenTour ? <Menu.Item onClick={onOpenTour}>둘러보기</Menu.Item> : null}
             <Menu.Item onClick={() => setColorScheme(computed === 'dark' ? 'light' : 'dark')}>색상 모드 전환</Menu.Item>
             {serverSession ? <Menu.Item onClick={onServerLogout}>서버 로그아웃</Menu.Item> : null}
           </Menu.Dropdown>

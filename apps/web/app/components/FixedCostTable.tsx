@@ -129,7 +129,7 @@ export function FixedCostTable({
             </Button>
             </div>
             </details>
-            <Button onClick={onAddItem}>항목 추가</Button>
+            <Button data-product-tour="add" onClick={onAddItem}>항목 추가</Button>
           </Group>
         )}
       </div>
@@ -290,7 +290,8 @@ export function FixedCostTable({
                     id={`${scheduleHelpId}-${item.id}`}
                     // Input's automatic ARIA would overwrite the shared help reference.
                     withAria={false}
-                    aria-label={`${item.name} 기준 납부일`}
+                     data-product-tour="due"
+                     aria-label={`${item.name} 기준 납부일`}
                     aria-describedby={scheduleHelpId}
                     size="xs"
                     value={item.billingAnchorDate ?? ""}
@@ -390,7 +391,7 @@ export function FixedCostTable({
         })}
       </div>
       <details className="schedule-help">
-        <summary>금액 · 납부일 기준</summary>
+        <summary data-product-tour="due-help">금액 · 납부일 기준</summary>
         <Text id={scheduleHelpId} size="xs" c="dimmed" mb="sm">
           납부일은 실제 청구 기준이며 카드 결제일과 별개입니다. 날짜가 없는 달에는 말일을 적용합니다.
         </Text>
