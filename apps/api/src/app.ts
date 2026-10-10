@@ -17,6 +17,7 @@ import { invitationRoutes } from "./routes/invitations.js";
 import { marketingRoutes } from "./routes/marketing.js";
 import { memberRoutes } from "./routes/members.js";
 import { pushRoutes } from "./routes/push.js";
+import { productTourRoutes } from "./routes/product-tour.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { templateRoutes } from "./routes/templates.js";
@@ -126,6 +127,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const registerApiRoutes = async (api: FastifyInstance) => {
     await api.register(authRoutes);
     await api.register(accountRoutes);
+    await api.register(productTourRoutes);
     await api.register(serviceBillingRoutes, { provider: options.serviceBillingProvider, clock: options.serviceBillingClock });
     await api.register(workspaceRoutes);
     await api.register(templateRoutes);
