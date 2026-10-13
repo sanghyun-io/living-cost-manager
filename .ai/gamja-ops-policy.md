@@ -1,6 +1,6 @@
 <!-- GENERATED FROM sanghyun-io/gamja-ops. DO NOT EDIT MANUALLY. -->
 <!-- Source file: policies/agent-infra-registry-policy.md -->
-<!-- Source commit: 0a6ec99f0b53b3cbe6eb300396aa9f8528b945d8 -->
+<!-- Source commit: dca49b3be89181c7f833883785f1484d1d16bd0a -->
 
 # Gamja Ops Infrastructure Registry Policy
 
@@ -42,25 +42,42 @@ deployment, routing, data ownership, secrets, backups, or provider configuration
 
 ## OCI Management Access
 
-The routine OCI management path is private SSH through NordVPN Meshnet:
+The routine OCI management path is direct SSH through Tailscale:
 
 ```bash
 ssh gamja-oci
 ```
 
-`ssh gamja-oci-bastion` is the OCI Bastion break-glass path and is used only
-when Meshnet is unavailable. Do not add Meshnet addresses from `100.64.0.0/10`
-to the Bastion client-CIDR allowlist: that allowlist accepts the connecting
-client's actual public egress `/32`. Do not open public TCP/22 as an
-alternative.
+This uses ordinary key-authenticated SSH over Tailscale, not the separate
+Tailscale SSH feature. The OCI node is `100.74.150.0`; the Mac mini node is
+`100.100.104.90`. The host guard allows only the Mac mini's IPv4/IPv6 TCP/22
+traffic on `tailscale0`, drops other overlay input and blocks overlay forwarding
+to Docker services. Keep that guard and its fail-closed service dependencies.
+Tailscale can use direct peer transport or a relay; do not assume direct peer
+transport or automatic bypass of firewall rules is guaranteed.
 
-`nordvpn status` reporting `Disconnected` means the commercial VPN tunnel is
-not connected; it does not prove that Meshnet is disabled. Check Meshnet
-settings, peer state, and an actual SSH connection together.
+`ssh gamja-oci-bastion` remains the break-glass path when Tailscale is unavailable.
+Do not open public TCP/22 as an alternative. Do not add Tailscale CGNAT addresses
+from `100.64.0.0/10` to the Bastion client-CIDR allowlist: Bastion requires the
+connecting client's actual public egress `/32`.
+
+Verify the selected route and an actual SSH connection, not merely a status label:
+
+```bash
+ssh -G gamja-oci | grep '^hostname '
+ssh gamja-oci hostname
+```
+
+Do not print node authentication URLs, private state files, full credential
+environments or unfiltered status JSON. Node expiry and physical reboot recovery
+require separate verification; a successful connection does not guarantee uptime.
 
 Connectivity does not authorize infrastructure mutations. Obtain the required
-approval before changing OCI resources, network rules, services, or data. The
-central procedure is the [OCI management access runbook](https://github.com/sanghyun-io/gamja-ops/blob/main/runbooks/oci-bastion-access.md).
+approval before changing OCI resources, network rules, services, or data.
+
+**Runbooks:**
+- Primary: [OCI Tailscale Access](https://github.com/sanghyun-io/gamja-ops/blob/main/runbooks/oci-tailscale-access.md)
+- Fallback: [OCI Bastion Access](https://github.com/sanghyun-io/gamja-ops/blob/main/runbooks/oci-bastion-access.md)
 
 ## Files To Update In `gamja-ops`
 
