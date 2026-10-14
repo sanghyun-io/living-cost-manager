@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { clampToOneSentence, selectCoachSegments, type CoachInput } from "../app/lib/coach";
+import { COACH_MODEL_APPROX_MB, COACH_MODEL_VRAM_MB, COACH_MODEL_ID } from "../app/lib/coachModel";
 
 // 조각 선정은 순수 함수다(LLM·WebGPU 불필요). coach.ts 상단은 `import type` 으로만
 // web-llm 을 참조하므로 이 테스트가 런타임 모델을 로드하지 않는다.
@@ -204,5 +205,20 @@ describe("clampToOneSentence", () => {
 
   test("물음표·느낌표도 문장 끝으로 인식", () => {
     expect(clampToOneSentence("괜찮으세요? 다음 문장.")).toBe("괜찮으세요?");
+  });
+});
+
+// CRITICAL: 다운로드 동의 정책 테스트
+describe("coach download consent policy", () => {
+  test("COACH_MODEL_APPROX_MB는 안내용 다운로드 크기 (약 500MB)", () => {
+    expect(COACH_MODEL_APPROX_MB).toBe(500);
+  });
+
+  test("COACH_MODEL_VRAM_MB는 GPU 메모리 요구량 (약 945MB)", () => {
+    expect(COACH_MODEL_VRAM_MB).toBe(945);
+  });
+
+  test("모델 ID는 WebLLM prebuilt Qwen2.5-0.5B", () => {
+    expect(COACH_MODEL_ID).toBe("Qwen2.5-0.5B-Instruct-q4f16_1-MLC");
   });
 });

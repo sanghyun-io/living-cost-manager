@@ -184,22 +184,58 @@ function buildSegmentMessages(segment: CoachSegment) {
 
 // ── 엔진 로드 (lazy, 싱글톤) ─────────────────────────────────────────────────
 let enginePromise: Promise<MLCEngineInterface> | null = null;
+let engineReady = false; // 엔진이 로드 완료되어 재사용 가능한지 추적
 
 export type LoadProgress = { progress: number; text: string };
 
 /**
- * WebLLM 엔진을 lazy 로드한다. 최초 1회만 가중치를 내려받고(진행률 콜백),
- * 이후엔 Cache/IndexedDB 에서 즉시 로드된다. R2 베이스 URL 이 설정돼 있으면
- * 그 URL 에서 가중치를 받는다(없으면 WebLLM 기본 CDN).
+ * CRITICAL: 엔진 상태 확인 (초기화하지 않음)
+ * - 메모리에 준비된 엔진이 있는지 확인
+ * - 콜드 스타트가 필요한지 판단
+ * - UI에서 동의 필요 여부 결정에 사용
+ */
+export function getCoachEngineStatus(): "none" | "loading" | "ready" {
+  if (engineReady && enginePromise) {
+    return "ready";
+  }
+  if (enginePromise) {
+    return "loading";
+  }
+  return "none";
+}
+
+/**
+ * WebLLM 엔진을 lazy 로드한다.
+ *
+ * CRITICAL CONSENT POLICY:
+ * - 콜드 스타트(엔진이 메모리에 없음) → 반드시 explicit consent 필요
+ * - 이미 메모리에 엔진이 있음 → consent 불필요 (이미 로드됨)
+ * - consent 없이 콜드 시작하면 에러 발생
+ *
+ * @param onProgress 진행률 콜백 (다운로드/초기화)
+ * @param consent 콜드 스타트에 대한 명시적 사용자 동의 (REQUIRED for cold start)
  */
 export async function getCoachEngine(
-  onProgress?: (p: LoadProgress) => void
+  onProgress?: (p: LoadProgress) => void,
+  consent?: { explicitDownloadConsent: boolean }
 ): Promise<MLCEngineInterface> {
   if (!isWebGpuAvailable()) {
     throw new Error("WEBGPU_UNAVAILABLE");
   }
+
+  // 이미 준비된 엔진이 있으면 재사용 (동의 불필요)
+  if (engineReady && enginePromise) {
+    return enginePromise;
+  }
+
+  // 로딩 중인 엔진이 있으면 대기 (이미 동의된 것)
   if (enginePromise) {
     return enginePromise;
+  }
+
+  // 콜드 스타트 - 명시적 동의 필수
+  if (!consent?.explicitDownloadConsent) {
+    throw new Error("EXPLICIT_CONSENT_REQUIRED");
   }
 
   enginePromise = (async () => {
@@ -213,12 +249,16 @@ export async function getCoachEngine(
       ? overrideModelUrl(webllm.prebuiltAppConfig, COACH_MODEL_ID, baseUrl)
       : undefined;
 
-    return CreateMLCEngine(COACH_MODEL_ID, {
+    const engine = await CreateMLCEngine(COACH_MODEL_ID, {
       appConfig,
       initProgressCallback: (report: InitProgressReport) => {
         onProgress?.({ progress: report.progress, text: report.text });
       }
     });
+
+    // 로드 완료 - 재사용 가능
+    engineReady = true;
+    return engine;
   })();
 
   try {
@@ -226,6 +266,7 @@ export async function getCoachEngine(
   } catch (error) {
     // 실패 시 다음 시도에서 재로드 가능하도록 캐시를 비운다.
     enginePromise = null;
+    engineReady = false;
     throw error;
   }
 }

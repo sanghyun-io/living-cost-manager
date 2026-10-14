@@ -1,11 +1,12 @@
 // 온디바이스 LLM 코치 — 모델 설정 + opt-in 상태.
 //
 // 런타임: WebLLM(MLC) + WebGPU. 모델은 사용자 브라우저에서 직접 추론하므로
-// 서빙 비용·외부 API 호출이 없다(완전 무료·오프라인·프라이버시). 가중치는
-// 최초 1회만 내려받아 Cache API/IndexedDB 에 영구 저장된다.
+// 추론은 기기에서 실행되며 지출 정보를 외부 AI 분석 API로 보내지 않는다.
+// Cache API/IndexedDB 에 저장되며, 브라우저 캐시 정책에 따라 삭제될 수 있다.
 //
-// 모델: Qwen2.5-0.5B-Instruct (q4f16) — WebLLM prebuilt. Qwen 계열이라 한국어가
-// 양호하고, ~0.5GB 라 iOS origin 캐시 한도(~1GB)도 통과한다.
+// 모델: Qwen2.5-0.5B-Instruct (q4f16) — WebLLM prebuilt. Qwen 계열이라 한국어가 양호하다.
+// VRAM 필요량: 약 945MB (모델 설정 기준)
+// 다운로드 크기: 약 500MB
 
 // WebLLM prebuilt 모델 ID. prebuildAppConfig 에 포함돼 있어 model_lib(.wasm)은
 // MLC CDN 에서 자동 로드된다.
@@ -28,8 +29,12 @@ export function getCoachModelBaseUrl(
 // 사용자가 한 번 받아야 하는 대략적인 다운로드 크기(안내 문구용).
 export const COACH_MODEL_APPROX_MB = 500;
 
-// ── opt-in 상태 (localStorage) ──────────────────────────────────────────────
-// 코치는 명시적 opt-in 기능이다. 큰 1회 다운로드가 따르므로 사용자가 직접 켠다.
+// 모델 로드에 필요한 GPU VRAM (MB) - WebLLM model_lib 기준.
+export const COACH_MODEL_VRAM_MB = 945;
+
+// ── 기능 opt-in 상태 (localStorage) ─────────────────────────────────────────
+// 코치 기능 활성화 여부. 사용자가 기능을 켰는지 기억한다.
+// 이것은 기능 선호도일 뿐, 다운로드 동의를 의미하지 않는다.
 const COACH_OPT_IN_KEY = "living-cost-manager:coach-opt-in:v1";
 
 export function isCoachOptedIn(): boolean {
@@ -54,3 +59,18 @@ export function setCoachOptIn(value: boolean): void {
 export function isWebGpuAvailable(): boolean {
   return typeof navigator !== "undefined" && "gpu" in navigator;
 }
+
+// ── 중요: 다운로드 동의는 attempt-scoped (시도별) ────────────────────────────
+//
+// CRITICAL: 모델 다운로드는 반드시 사용자의 명시적 동의가 필요하다.
+// 이 동의는 localStorage에 영구 저장되지 않으며, 각 시도마다 새로 얻어야 한다.
+//
+// 동의 원칙:
+// 1. 콜드 스타트(엔진이 메모리에 없음) → 반드시 동의 필요
+// 2. 이미 메모리에 엔진이 있음 → 동의 불필요 (이미 로드됨)
+// 3. 캐시 확인만으로는 동의를 대체할 수 없음 (캐시는 불완전하거나 evict될 수 있음)
+//
+// 구현 참고:
+// - useCoach.ts의 coachAttemptConsent 상태로 관리
+// - 모달이 닫히면 동의는 무효화됨
+// - getCoachEngine 호출 전 반드시 동의 확인

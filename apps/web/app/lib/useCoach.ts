@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildInsuranceCheck, buildMonthlyReport, buildSavingsInsights, getUpcomingDues, type MonthlyReport } from "@living-cost-manager/shared";
-import { getCoachEngine, streamCoaching, type CoachInput } from "./coach";
-import { isCoachOptedIn, isWebGpuAvailable, setCoachOptIn } from "./coachModel";
+import { getCoachEngine, getCoachEngineStatus, streamCoaching, type CoachInput } from "./coach";
+import { isCoachOptedIn, isWebGpuAvailable, setCoachOptIn, COACH_MODEL_APPROX_MB, COACH_MODEL_VRAM_MB } from "./coachModel";
 import { track } from "./analytics";
 import type { CoachStatus } from "../components/modals/CoachModal";
 import type { ServerSession, ServerApiClient } from "./serverApi";
@@ -15,10 +15,15 @@ interface UseCoachOptions {
 }
 
 /**
- * On-device AI coach (opt-in, WebGPU). Also owns the monthly trend report
- * computed from server sync history — a best-effort input for coaching — and
- * the trust-boundary guards (generation + scope) that keep a switched
- * user/workspace's stale responses out of the current coach input.
+ * On-device AI coach (opt-in, WebGPU).
+ *
+ * CRITICAL PRIVACY/DOWNLOAD POLICY:
+ * - EVERY cold getCoachEngine() call MUST be gated on explicit user consent
+ * - Attempt-scoped consent: each modal session requires new consent
+ * - In-memory engine reuse is allowed without additional consent
+ * - NO automatic model download without positive click
+ * - Cache existence does NOT authorize download (cache may be partial/evicted)
+ * - Data scope changes (user/workspace switch) invalidate previous coaching
  */
 export function useCoach({ budget, serverApi }: UseCoachOptions) {
   const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
@@ -27,24 +32,32 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
   const [coachProgressText, setCoachProgressText] = useState("");
   const [coachingText, setCoachingText] = useState("");
   const [coachError, setCoachError] = useState("");
-  // 서버 동기화 히스토리로 계산한 월간 추세(지난달 대비). 코치의 추세 조각 입력.
-  // 동기화 검사 시 best-effort 로 채우며, 히스토리가 없으면 null 로 둔다.
+  // 서버 동기화 히스토리로 계산한 월간 추세
   const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
 
-  // monthlyReport 요청 세대. 로그아웃·세션 무효화·워크스페이스 전환 시 증가시켜
-  // 진행 중인 fire-and-forget 히스토리 응답을 무효화한다(stale 결과가 다음
-  // 사용자/워크스페이스의 코치 입력으로 새어 들어가는 것을 막는다).
+  // CRITICAL: Attempt-scoped download consent
+  // 이 동의는 모달이 열릴 때마다 초기화되며, 메모리에만 존재한다.
+  // useRef를 사용하여 동기적으로 접근 (React state의 비동기 문제 해결)
+  const coachAttemptConsentRef = useRef(false);
+
+  // Generation tracking: 현재 실행 중인 코칭 생성을 식별
+  // scope/input 변경 시 이전 생성을 무효화하기 위해 사용
+  const currentGenerationRef = useRef(0);
+
+  // monthlyReport 요청 세대
   const monthlyReportGenRef = useRef(0);
-  // 현재 활성 "사용자|워크스페이스" 식별자. refreshMonthlyReport 가 응답을 커밋하기
-  // 전에 이 값과 대조한다. 세대(숫자)만으로는, caller 가 첫 await 동안 전환이 일어나
-  // 세대가 이미 올라간 뒤 stale 한 refresh 를 새로 시작하면 새 세대를 캡처해 가드를
-  // 통과하는 경로가 남는다(red-review R2). identity 대조로 그 경로까지 막는다.
   const activeReportScopeRef = useRef<string | null>(null);
+  // 실행 중 방지
+  const isRunningRef = useRef(false);
 
-  const { fixedCosts, monthlyIncome, summary } = budget;
+  const { fixedCosts, monthlyIncome, summary, localScopeKey } = budget;
 
-  // AI 코치 입력 — 결정적 요약(현재 고정비 · 절감 인사이트 · 임박 납부)을 묶는다.
-  // 월간 추세(지난달 대비)는 서버 동기화 히스토리(monthlyReport)가 있을 때만 채운다.
+  // Scope fingerprint: localScopeKey가 변경되면 이전 코칭 무효화
+  const scopeFingerprint = useMemo(() => ({
+    localScopeKey,
+    profileName: budget.profileName
+  }), [localScopeKey, budget.profileName]);
+
   const coachInput = useMemo<CoachInput>(() => {
     const now = new Date();
     const savings = buildSavingsInsights(fixedCosts).map((s) => ({
@@ -55,8 +68,7 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
       .slice(0, 5)
       .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
     const insurance = buildInsuranceCheck(fixedCosts, monthlyIncome);
-    // 추세는 직전 달이 있을 때만 의미가 있다(첫 달은 previous 가 null).
-    const hasTrend = monthlyReport?.previous != null && monthlyReport.deltaAmount != null;
+    const hasTrend = monthlyReport?.previous != null && monthlyReport?.deltaAmount != null;
     return {
       monthlyTotal: summary.monthlyExpense,
       previousMonthlyTotal: hasTrend ? monthlyReport!.previous!.fixedCostMonthlyTotal : null,
@@ -70,7 +82,16 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
     };
   }, [fixedCosts, monthlyIncome, summary.monthlyExpense, monthlyReport]);
 
-  // 규칙 기반 폴백 한 줄(WebGPU 미지원/에러 시 보조 표시).
+  // Input fingerprint: 코칭 입력이 변경되면 이전 결과 무효화
+  const inputFingerprint = useMemo(() => JSON.stringify({
+    monthlyTotal: coachInput.monthlyTotal,
+    previousMonthlyTotal: coachInput.previousMonthlyTotal,
+    fixedCostCount: coachInput.fixedCostCount,
+    savingsCount: coachInput.savings.length,
+    upcomingCount: coachInput.upcoming.length,
+    insuranceHigh: coachInput.insuranceHigh
+  }), [coachInput]);
+
   const coachFallbackHeadline = useMemo(() => {
     const rate =
       monthlyIncome > 0 ? Math.round((summary.monthlyExpense / monthlyIncome) * 1000) / 10 : null;
@@ -80,66 +101,208 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
 
   const coachHasData = fixedCosts.length > 0;
 
-  // 코칭 생성: 엔진을 (필요시) 로드한 뒤 스트리밍으로 멘트를 만든다.
+  // CRITICAL: Scope/Input 변경 시 이전 코칭 결과 무효화
+  useEffect(() => {
+    // 세대 증가: 이전 실행 중인 코칭이 있으면 무시됨
+    currentGenerationRef.current += 1;
+    // 이전 결과 클리어
+    setCoachingText("");
+    setCoachError("");
+    // 실행 중 락 해제
+    isRunningRef.current = false;
+  }, [scopeFingerprint, inputFingerprint]);
+
+  // Scope 변경 시 상태 리셋
+  useEffect(() => {
+    // 다른 사용자/워크스페이스로 전환 시 완전 초기화
+    currentGenerationRef.current += 1;
+    setCoachingText("");
+    setCoachError("");
+    setCoachStatus("idle");
+    coachAttemptConsentRef.current = false;
+    isRunningRef.current = false;
+  }, [scopeFingerprint]);
+
+  /**
+   * CRITICAL: 코칭 실행 전 동의 확인
+   * - 콜드 스타트(엔진 없음)에만 동의 필요
+   * - READY/LOADING 엔진은 동의 없이 재사용 가능
+   * - 세대 토큰으로 scope/input 변경 시 무효화 처리
+   */
   async function runCoaching() {
-    // 요청 자체가 이벤트(결과/실패 여부는 추적하지 않는다 — 온디바이스 지표용).
-    track({ type: "coach.request", timestamp: Date.now(), data: {} });
-    if (!isWebGpuAvailable()) {
-      setCoachStatus("error");
-      setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
+    if (isRunningRef.current) {
       return;
     }
-    setCoachError("");
-    setCoachingText("");
+
+    const generation = currentGenerationRef.current;
+    isRunningRef.current = true;
+
     try {
-      setCoachStatus("loading");
-      const engine = await getCoachEngine((p) => {
-        setCoachProgress(p.progress);
-        setCoachProgressText(p.text);
-      });
-      // 한 번 켜면 opt-in 으로 기억(다음엔 즉시 캐시 로드).
-      setCoachOptIn(true);
-      setCoachStatus("generating");
-      await streamCoaching(engine, coachInput, (full) => setCoachingText(full));
-      setCoachStatus("ready");
-    } catch (error) {
-      setCoachStatus("error");
-      const message = error instanceof Error ? error.message : String(error);
-      setCoachError(
-        message === "WEBGPU_UNAVAILABLE"
-          ? "이 브라우저는 WebGPU를 지원하지 않습니다."
-          : "AI 모델을 불러오지 못했어요. 네트워크를 확인하고 다시 시도해 주세요."
-      );
+      track({ type: "coach.request", timestamp: Date.now(), data: {} });
+
+      if (!isWebGpuAvailable()) {
+        setCoachStatus("error");
+        setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
+        return;
+      }
+
+      // CRITICAL: 엔진 상태 확인
+      const engineStatus = getCoachEngineStatus();
+
+      // 콜드 스타트인지 확인
+      const isColdStart = engineStatus === "none";
+
+      // CRITICAL: 콜드 스타트에만 동의 필요
+      if (isColdStart && !coachAttemptConsentRef.current) {
+        // 동의 대기 상태 - UI가 동의 화면을 표시
+        setCoachStatus("idle");
+        return;
+      }
+
+      // READY/LOADING은 동의 없이 진행 가능
+      // 동의됨 - 실제 실행
+      await executeCoaching(generation);
+    } finally {
+      // 현재 세대만 락 해제
+      if (currentGenerationRef.current === generation) {
+        isRunningRef.current = false;
+      }
     }
   }
 
-  // AppHeader 의 코치 버튼: 켜기 + (opt-in & 준비된 경우) 자동 실행.
+  /**
+   * 실제 코칭 실행 (동의 후에만 호출)
+   * @param generation 호출 시점의 세대 토큰
+   */
+  async function executeCoaching(generation: number) {
+    setCoachError("");
+    setCoachingText("");
+
+    try {
+      setCoachStatus("loading");
+
+      // CRITICAL: 엔진 상태 확인
+      const engineStatus = getCoachEngineStatus();
+
+      // 콜드 스타트인지 확인 (이미 동의된 것은 consent 불필요)
+      const isColdStart = engineStatus === "none";
+
+      // 콜드 스타트면 동의 전달 (ref 사용)
+      const consent = isColdStart ? { explicitDownloadConsent: coachAttemptConsentRef.current } : undefined;
+
+      // CRITICAL: 이 시점에서만 getCoachEngine 호출 (네트워크 요청)
+      const engine = await getCoachEngine((p) => {
+        // 현재 세대만 상태 업데이트
+        if (currentGenerationRef.current === generation) {
+          setCoachProgress(p.progress);
+          setCoachProgressText(p.text);
+        }
+      }, consent);
+
+      // 세대 확인: 엔진 로드 중에 scope/input이 변경되었으면 중단
+      if (currentGenerationRef.current !== generation) {
+        return; // 이전 세대의 실행, 무시
+      }
+
+      // 성공 - 기능 opt-in 설정
+      setCoachOptIn(true);
+
+      setCoachStatus("generating");
+      await streamCoaching(engine, coachInput, (full) => {
+        // 현재 세대만 상태 업데이트
+        if (currentGenerationRef.current === generation) {
+          setCoachingText(full);
+        }
+      });
+
+      // 세대 확인: 스트리밍 중에 scope/input이 변경되었으면 중단
+      if (currentGenerationRef.current !== generation) {
+        return;
+      }
+
+      setCoachStatus("ready");
+    } catch (error) {
+      // 현재 세대만 에러 처리
+      if (currentGenerationRef.current !== generation) {
+        return;
+      }
+
+      // CRITICAL: 초기화 실패 시 동의 무효화
+      // 다음 재시도에서 다시 동의 요청
+      coachAttemptConsentRef.current = false;
+
+      setCoachStatus("error");
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message === "WEBGPU_UNAVAILABLE") {
+        setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
+      } else if (message === "EXPLICIT_CONSENT_REQUIRED") {
+        // 동의 없이 콜드 스타트 시도 - 이 상태는 발생하지 않아야 함
+        setCoachError("모델 다운로드에 동의가 필요합니다.");
+      } else {
+        setCoachError("AI 모델을 불러오지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.");
+      }
+    }
+  }
+
+  /**
+   * 동의 확정 후 실행
+   * CRITICAL: useRef를 사용하여 동의를 동기적으로 설정
+   */
+  function confirmConsentAndRun() {
+    // 동의 설정 (동기적)
+    coachAttemptConsentRef.current = true;
+    // 동의 후 즉시 실행
+    void runCoaching();
+  }
+
+  /**
+   * 동의 거부
+   * CRITICAL: 모달을 완전히 닫아야 함
+   */
+  function declineConsent() {
+    coachAttemptConsentRef.current = false;
+    setCoachStatus("idle");
+    // CRITICAL: 모달 닫기
+    closeCoachModal();
+  }
+
+  /**
+   * 코치 모달 열기
+   * CRITICAL: 열 때마다 동의 상태 초기화
+   */
   function openCoachModal() {
     setIsCoachModalOpen(true);
     setCoachError("");
-    // 이미 한 번 켰고(opt-in) 아직 코칭 전이면, 열자마자 자동 실행.
-    if (isCoachOptedIn() && isWebGpuAvailable() && coachHasData && coachStatus === "idle") {
-      void runCoaching();
+    // CRITICAL: 새 모달 세션 시작 - 동의 초기화
+    coachAttemptConsentRef.current = false;
+    // 기존 생성 결과는 유지 (재생성이 아니면 보여줌)
+  }
+
+  /**
+   * 코치 모달 닫기
+   * CRITICAL: 닫을 때 동의 무효화 + 실행 락 해제
+   */
+  function closeCoachModal() {
+    setIsCoachModalOpen(false);
+    // CRITICAL: 모달 닫으면 동의 무효화 (다음 열기 때 다시 물어야 함)
+    coachAttemptConsentRef.current = false;
+    // 세대 증가: 로딩 중인 작업 무시
+    currentGenerationRef.current += 1;
+    // CRITICAL: 실행 락 해제
+    isRunningRef.current = false;
+    // 로딩 중이었다면 상태 초기화
+    if (coachStatus === "loading" || coachStatus === "generating") {
+      setCoachStatus("idle");
+      setCoachProgress(0);
+      setCoachProgressText("");
     }
   }
 
-  // 이 세션이 속한 "사용자|워크스페이스" 식별자. monthlyReport 가 어느 컨텍스트
-  // 것인지 표시하는 scope 키다(계정 전환·워크스페이스 전환 모두 구분).
   function reportScopeOf(session: ServerSession): string | null {
     return session.workspace ? `${session.user.id}|${session.workspace.id}` : null;
   }
 
-  // 동기화 히스토리로 월간 추세를 best-effort 로 갱신한다. 히스토리 조회는
-  // 동기화 본류가 아니므로(코치 추세 조각 입력용) 실패해도 조용히 무시한다.
-  //
-  // ⚠️ fire-and-forget 이라 응답이 늦게 도착하는 사이 로그아웃·계정/워크스페이스
-  // 전환이 일어날 수 있다. 그러면 이전 사용자의 추세가 다음 사용자의 코치 입력으로
-  // 새어 들어간다(프라이버시 경계 위반). 두 가드로 막는다:
-  //  (1) 세대(gen): getSnapshotHistory await 중에 경계 전환이 일어나면 결과 폐기.
-  //  (2) scope(identity): 이 요청이 가져온 데이터가 "지금 활성" 사용자·워크스페이스
-  //      것일 때만 커밋. caller 가 자기 첫 await(스냅샷 조회 등) 동안 전환이 일어나
-  //      세대가 이미 올라간 뒤 refresh 를 새로 시작해 새 세대를 캡처하더라도,
-  //      session 의 scope 가 활성 scope 와 다르면 차단된다(red-review R2 갭).
   async function refreshMonthlyReport(session: ServerSession) {
     if (!serverApi || !session.workspace) {
       return;
@@ -149,26 +312,27 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
     const gen = monthlyReportGenRef.current;
     try {
       const entries = await serverApi.getSnapshotHistory(workspaceId, session.token, 24);
-      // 응답이 도착하는 사이 신뢰 경계를 넘었으면(세대 변경 또는 활성 scope 불일치)
-      // 결과를 버린다. scope 대조가 "stale caller 가 새 세대 캡처" 경로까지 막는다.
       if (monthlyReportGenRef.current !== gen || activeReportScopeRef.current !== scope) {
         return;
       }
       setMonthlyReport(buildMonthlyReport(entries));
     } catch {
-      // 히스토리 조회 실패는 무시 — 추세 조각만 빠지고 나머지 코칭은 정상 동작.
+      // 무시
     }
   }
 
-  // monthlyReport 를 즉시 비우고 진행 중인 모든 히스토리 응답을 무효화한다.
-  // 신뢰 경계 전환(로그아웃·세션무효화·워크스페이스전환) 시점에 호출한다.
-  // nextSession 을 주면 이후 그 세션의 응답만 커밋되도록 활성 scope 를 갱신한다
-  // (전환 후 새로 시작하는 refresh 는 이 scope 와 일치해야 통과).
   function invalidateMonthlyReport(nextSession: ServerSession | null = null) {
     monthlyReportGenRef.current += 1;
     activeReportScopeRef.current = nextSession ? reportScopeOf(nextSession) : null;
     setMonthlyReport(null);
   }
+
+  // UI 표시용 동의 상태 (엔진 상태 기반)
+  const engineStatus = getCoachEngineStatus();
+  const coachAttemptConsent = coachAttemptConsentRef.current;
+
+  // 콜드 스타트 필요 여부 (엔진이 없고 동의도 없음)
+  const awaitingConsent = engineStatus === "none" && !coachAttemptConsent && coachStatus === "idle" && coachHasData && isWebGpuAvailable();
 
   return {
     isCoachModalOpen,
@@ -181,9 +345,16 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
     coachHasData,
     coachInput,
     coachFallbackHeadline,
+    // CRITICAL: 동의 상태 및 상수
+    coachAttemptConsent,
+    COACH_MODEL_APPROX_MB,
+    COACH_MODEL_VRAM_MB,
     monthlyReport,
     runCoaching,
+    confirmConsentAndRun,
+    declineConsent,
     openCoachModal,
+    closeCoachModal,
     refreshMonthlyReport,
     invalidateMonthlyReport
   };

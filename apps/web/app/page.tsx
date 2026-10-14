@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Text } from "@mantine/core";
-import { COACH_MODEL_APPROX_MB, isWebGpuAvailable } from "./lib/coachModel";
+import { COACH_MODEL_APPROX_MB, COACH_MODEL_VRAM_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
 import { AppHeader } from "./components/AppHeader";
@@ -464,15 +464,19 @@ export default function Home() {
           webGpuAvailable={isWebGpuAvailable()}
           hasData={coach.coachHasData}
           approxMb={COACH_MODEL_APPROX_MB}
+          vramMb={COACH_MODEL_VRAM_MB}
           status={coach.coachStatus}
           loadProgress={coach.coachProgress}
           loadText={coach.coachProgressText}
           coaching={coach.coachingText}
           errorMessage={coach.coachError}
           fallbackHeadline={coach.coachFallbackHeadline}
+          awaitingConsent={!coach.coachAttemptConsent && coach.coachStatus === "idle" && coach.coachHasData && isWebGpuAvailable()}
           onStart={() => void coach.runCoaching()}
           onRegenerate={() => void coach.runCoaching()}
-          onClose={() => coach.setIsCoachModalOpen(false)}
+          onClose={coach.closeCoachModal}
+          onConfirmConsent={coach.confirmConsentAndRun}
+          onDeclineConsent={coach.declineConsent}
         />
 
       <CategoryModal
