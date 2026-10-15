@@ -44,9 +44,67 @@ function renderPageConsent() {
 function render() {
   return MarketingConsentControl(renderPageConsent());
 }
+function findCheckboxInTree(tree: any): { checked: boolean; disabled: boolean; onChange: (event: { currentTarget: { checked: boolean } }) => void } | null {
+  // Recursively search for input type="checkbox"
+  if (tree?.props?.type === "checkbox") {
+    return tree.props;
+  }
+  if (tree?.props?.children) {
+    const children = Array.isArray(tree.props.children) ? tree.props.children : [tree.props.children];
+    for (const child of children) {
+      const found = findCheckboxInTree(child);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function checkbox() {
   const tree = render();
-  return tree.props.children[1].props.children[0].props as { checked: boolean; disabled: boolean; onChange: (event: { currentTarget: { checked: boolean } }) => void };
+  const found = findCheckboxInTree(tree);
+  if (!found) throw new Error("Checkbox not found");
+  return found;
+}
+
+function errorMessage() {
+  const tree = render();
+  // Find the element with role="status" that's the consentError (not the browserOptOut message)
+  // browserOptOut message contains "GPC/DNT" and "차단되어"
+  function findError(node: any): any {
+    if (node?.props?.role === "status") {
+      const text = typeof node.props.children === "string" ? node.props.children : "";
+      // The consentError contains "보장할 수 없습니다" but not "차단되어"
+      if (text.includes("보장할 수 없습니다")) {
+        return node;
+      }
+    }
+    if (node?.props?.children) {
+      const children = Array.isArray(node.props.children) ? node.props.children : [node.props.children];
+      for (const child of children) {
+        const found = findError(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return findError(tree);
+}
+
+function getParagraphTexts(tree: any): string[] {
+  const texts: string[] = [];
+  function collectParagraphs(node: any) {
+    if (node?.type === "p" && typeof node.props?.children === "string") {
+      texts.push(node.props.children);
+    }
+    if (node?.props?.children) {
+      const children = Array.isArray(node.props.children) ? node.props.children : [node.props.children];
+      for (const child of children) {
+        collectParagraphs(child);
+      }
+    }
+  }
+  collectParagraphs(tree);
+  return texts;
 }
 test("control starts unchecked, requires explicit toggle, and persists revocation", () => {
   expect(checkbox().checked).toBe(false);
@@ -95,9 +153,9 @@ test("failed write AND removal visibly warn instead of claiming site-wide durabl
   vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw Error("readonly"); });
   vi.spyOn(window.localStorage, "removeItem").mockImplementation(() => { throw Error("readonly"); });
   checkbox().onChange({ currentTarget: { checked: false } });
-  const tree = render();
   expect(checkbox().checked).toBe(false);
-  const warning = tree.props.children[2];
+  const warning = errorMessage();
+  expect(warning).not.toBeNull();
   expect(warning.props.role).toBe("status");
   expect(warning.props.children).toContain("보장할 수 없습니다");
   expect(warning.props.children).toContain("GPC/DNT");
