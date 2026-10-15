@@ -5,6 +5,7 @@
 // 를 부르지 않음) — 테스트 가능성과 결정성을 위해서다.
 
 import { billingDateSchema } from "./billing.js";
+import type { CoachingProtectionOptions } from "./coachingPreferences.js";
 
 /** 예측에 필요한 고정비 최소 필드. */
 export type PredictableFixedCost = {
@@ -187,9 +188,12 @@ export function findDuplicateSubscriptions<T extends PredictableFixedCost>(
 export type SavingsInsight<T extends PredictableFixedCost> = {
   kind: "duplicate" | "largest";
   title: string;
+  /** Hypothetical amount only; never realized savings or a ledger mutation. */
   monthlySavings: number;
   annualSavings: number;
   items: T[];
+  /** Only these IDs are actionable; items retains its existing source-item semantics. */
+  actionableItemIds: string[];
 };
 
 // 구조적으로 줄이기 어려운(필수·계약형) 카테고리. 월세(주거)·보험은 "구독을
@@ -216,17 +220,21 @@ export type InsuranceCheck = {
   monthlyInsuranceTotal: number;
   // 월 수입 대비 비율(0~1). 수입 0이면 null.
   ratioOfIncome: number | null;
-  // 임계 초과로 점검을 권할 만한지.
+  // 전체 보험료 비중의 임계 초과 사실. 권유 UI는 canSuggestReview를 사용한다.
   isHigh: boolean;
+  reviewItemIds: string[];
+  /** Scope any review prompt to reviewItemIds, never all insurance items. */
+  canSuggestReview: boolean;
 };
 
 /**
- * 보험료가 수입 대비 과한지 판정한다(점검 권유 여부).
- * 임계 초과가 아니면 isHigh=false 로, 코치는 보험을 굳이 건드리지 않는다.
+ * 전체 보험료 비중은 그대로 계산하고, 권유 대상만 개인 보호 설정으로 제한한다.
+ * canSuggestReview가 true일 때 reviewItemIds에 한해서만 점검을 권유한다.
  */
 export function buildInsuranceCheck<T extends PredictableFixedCost>(
   items: T[],
-  monthlyIncome: number
+  monthlyIncome: number,
+  options?: CoachingProtectionOptions
 ): InsuranceCheck {
   const monthlyInsuranceTotal = items
     .filter((i) => i.categoryId === "insurance")
@@ -238,7 +246,9 @@ export function buildInsuranceCheck<T extends PredictableFixedCost>(
   const isHigh =
     ratioOfIncome !== null && ratioOfIncome > INSURANCE_RATIO_HIGH_THRESHOLD;
 
-  return { monthlyInsuranceTotal, ratioOfIncome, isHigh };
+  const protectedIds = new Set(options?.protectedFixedCostIds);
+  const reviewItemIds = items.filter(i => i.categoryId === "insurance" && !protectedIds.has(i.id) && monthlyEquivalent(i) > 0).map(i => i.id);
+  return { monthlyInsuranceTotal, ratioOfIncome, isHigh, reviewItemIds, canSuggestReview: isHigh && reviewItemIds.length > 0 };
 }
 
 /**
@@ -248,11 +258,14 @@ export function buildInsuranceCheck<T extends PredictableFixedCost>(
  *     단 주거·보험처럼 줄이기 어려운 카테고리는 후보에서 제외한다.
  */
 export function buildSavingsInsights<T extends PredictableFixedCost>(
-  items: T[]
+  items: T[],
+  options?: CoachingProtectionOptions
 ): SavingsInsight<T>[] {
   const insights: SavingsInsight<T>[] = [];
+  const protectedIds = new Set(options?.protectedFixedCostIds);
+  const candidates = items.filter(item => !protectedIds.has(item.id));
 
-  for (const dup of findDuplicateSubscriptions(items)) {
+  for (const dup of findDuplicateSubscriptions(candidates)) {
     // 하나는 유지한다고 가정 → 가장 비싼 1개를 제외한 나머지가 절감 가능액.
     const sortedDesc = [...dup.items].sort(
       (a, b) => monthlyEquivalent(b) - monthlyEquivalent(a)
@@ -262,16 +275,17 @@ export function buildSavingsInsights<T extends PredictableFixedCost>(
     if (monthly > 0) {
       insights.push({
         kind: "duplicate",
-        title: `"${dup.items[0].name}" 중복 ${dup.items.length}건 — 하나만 남기면 절감`,
+        title: `점검 가능한 "${dup.items[0].name}" ${dup.items.length}건 — 중복 여부 확인 후 하나만 유지할 경우의 예상액`,
         monthlySavings: monthly,
         annualSavings: monthly * 12,
-        items: removable
+        items: removable,
+        actionableItemIds: removable.map(item => item.id)
       });
     }
   }
 
   // 가장 큰 단일 항목 — 단 "줄일 만한"(주거·보험 제외) 항목 중에서만 고른다.
-  const reducible = items.filter((i) => !isHardToReduceCategory(i.categoryId));
+  const reducible = candidates.filter((i) => !isHardToReduceCategory(i.categoryId));
   if (reducible.length > 0) {
     const largest = reducible.reduce((max, i) =>
       monthlyEquivalent(i) > monthlyEquivalent(max) ? i : max
@@ -283,10 +297,11 @@ export function buildSavingsInsights<T extends PredictableFixedCost>(
     if (monthly > 0 && !alreadyInDuplicate) {
       insights.push({
         kind: "largest",
-        title: `가장 큰 고정비 "${largest.name}"`,
+        title: `유지 표시·주거·보험을 제외한 최대 항목 "${largest.name}" — 필요성 점검 (전액 제외 가정의 예상액, 실제 절감 아님)`,
         monthlySavings: monthly,
         annualSavings: monthly * 12,
-        items: [largest]
+        items: [largest],
+        actionableItemIds: [largest.id]
       });
     }
   }

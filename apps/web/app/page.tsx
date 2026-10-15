@@ -38,6 +38,8 @@ import { createFocusIntentController, type FocusDestination, type FocusIntentHan
 import { CROSS_LEDGER_AGGREGATION_AVAILABLE } from './lib/publicRelease';
 import { useProductTour } from './lib/useProductTour';
 import { ProductTour } from './components/ProductTour';
+import { useCoachingPreferences } from "./lib/useCoachingPreferences";
+import { CoachingPreferencesPanel } from "./components/CoachingPreferencesPanel";
 
 export default function Home() {
   // Hook creation order respects render-time data flow:
@@ -65,7 +67,8 @@ export default function Home() {
     getBudget: () => (budgetRef.current as BudgetDataApi).getCurrentBudgetSnapshot()
   });
   const budget = useBudgetData({ users, ui, session: auth.serverSession, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId });
-  const coach = useCoach({ budget, serverApi: auth.serverApi });
+  const coachingPrefs = useCoachingPreferences(budget.fixedCosts, users.currentUser?.id ?? null, auth.serverSession?.workspace?.id ?? null, auth.serverApi, auth.serverSession, users.currentUser?.serverUserId);
+  const coach = useCoach({ budget, serverApi: auth.serverApi, protectedFixedCostIds: coachingPrefs.activeIds, coachingPreferencesReady: coachingPrefs.ready });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: budget.localScopeKey,
     isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
   const ledgers = useLedgers(auth, sync);
@@ -253,6 +256,8 @@ export default function Home() {
               onOpenCategory={() => ui.setIsCategoryModalOpen(true)}
               onOpenCard={() => ui.setIsCardModalOpen(true)}
               onOpenData={() => ui.setIsDataModalOpen(true)}
+              protectedIds={coachingPrefs.activeIds}
+              onToggleProtected={coachingPrefs.ready ? coachingPrefs.toggle : undefined}
             />
           </div>
 
@@ -261,6 +266,7 @@ export default function Home() {
         <aside className="workspace-sidebar">
           <UpcomingDues fixedCosts={budget.fixedCosts} asOf={referenceInstant} />
         </aside>
+      <CoachingPreferencesPanel items={budget.fixedCosts} {...coachingPrefs} canCloudAccess={coachingPrefs.canCloudAccess} />
       <fieldset disabled={!canEdit} className="ledger-edit-region">
         {reviewItems.length > 0 ? <details className="quiet-disclosure renewal-queue" aria-label="갱신 검토 작업목록">
           <summary>갱신 검토 · {reviewItems.length}건</summary>
@@ -275,7 +281,7 @@ export default function Home() {
           <summary>지출 분석</summary>
           <div className="dashboard-overview">
             <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-            <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} />
+            <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} />
           </div>
           {budget.summary.monthlyExpense > 0 && (
               <details className="quiet-charts">
@@ -471,7 +477,7 @@ export default function Home() {
           coaching={coach.coachingText}
           errorMessage={coach.coachError}
           fallbackHeadline={coach.coachFallbackHeadline}
-          awaitingConsent={!coach.coachAttemptConsent && coach.coachStatus === "idle" && coach.coachHasData && isWebGpuAvailable()}
+          awaitingConsent={coach.awaitingConsent}
           onStart={() => void coach.runCoaching()}
           onRegenerate={() => void coach.runCoaching()}
           onClose={coach.closeCoachModal}

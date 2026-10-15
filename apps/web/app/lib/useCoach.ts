@@ -12,7 +12,12 @@ import type { BudgetDataApi } from "./useBudgetData";
 interface UseCoachOptions {
   budget: BudgetDataApi;
   serverApi: ServerApiClient | null;
+  protectedFixedCostIds?: ReadonlySet<string>;
+  coachingPreferencesReady?: boolean;
 }
+
+const EMPTY_PROTECTED_IDS: ReadonlySet<string> = new Set();
+const PREFERENCES_UNAVAILABLE = "코칭 설정을 확인할 수 없어 추천을 보류했습니다. 내 코칭 설정을 확인해 주세요.";
 
 /**
  * On-device AI coach (opt-in, WebGPU).
@@ -25,7 +30,9 @@ interface UseCoachOptions {
  * - Cache existence does NOT authorize download (cache may be partial/evicted)
  * - Data scope changes (user/workspace switch) invalidate previous coaching
  */
-export function useCoach({ budget, serverApi }: UseCoachOptions) {
+export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROTECTED_IDS, coachingPreferencesReady = true }: UseCoachOptions) {
+  const preferencesReadyRef = useRef(coachingPreferencesReady);
+  preferencesReadyRef.current = coachingPreferencesReady;
   const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
   const [coachStatus, setCoachStatus] = useState<CoachStatus>("idle");
   const [coachProgress, setCoachProgress] = useState(0);
@@ -60,14 +67,26 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
 
   const coachInput = useMemo<CoachInput>(() => {
     const now = new Date();
-    const savings = buildSavingsInsights(fixedCosts).map((s) => ({
+    const savings = coachingPreferencesReady ? buildSavingsInsights(fixedCosts, { protectedFixedCostIds }).map((s) => ({
       title: s.title,
-      monthlySavings: s.monthlySavings
-    }));
+      monthlySavings: s.monthlySavings,
+      // CRITICAL: Pass actionable target names for deterministic coach sentences.
+      // insight.items already filtered by protection at shared layer.
+      targetItemNames: s.items.map(item => item.name)
+    })) : [];
     const upcoming = getUpcomingDues(fixedCosts, now, 14)
       .slice(0, 5)
       .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
-    const insurance = buildInsuranceCheck(fixedCosts, monthlyIncome);
+    const insurance = coachingPreferencesReady ? buildInsuranceCheck(fixedCosts, monthlyIncome, { protectedFixedCostIds }) : null;
+
+    // Filter ONLY eligible review items (protected excluded, actually exists in current items)
+    // Review targets exclude protected names; neutral upcoming reminders are unchanged.
+    const eligibleReviewNames = insurance?.canSuggestReview
+      ? fixedCosts
+          .filter(item => insurance.reviewItemIds.includes(item.id))
+          .map(item => item.name)
+      : [];
+
     const hasTrend = monthlyReport?.previous != null && monthlyReport?.deltaAmount != null;
     return {
       monthlyTotal: summary.monthlyExpense,
@@ -78,26 +97,29 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
       fixedCostCount: fixedCosts.length,
       savings,
       upcoming,
-      insuranceHigh: insurance.isHigh
+      insuranceHigh: insurance?.canSuggestReview ?? false,
+      insuranceReviewItemNames: eligibleReviewNames.length > 0 ? eligibleReviewNames : undefined
     };
-  }, [fixedCosts, monthlyIncome, summary.monthlyExpense, monthlyReport]);
+  }, [fixedCosts, monthlyIncome, summary.monthlyExpense, monthlyReport, protectedFixedCostIds, coachingPreferencesReady]);
 
   // Input fingerprint: 코칭 입력이 변경되면 이전 결과 무효화
-  const inputFingerprint = useMemo(() => JSON.stringify({
-    monthlyTotal: coachInput.monthlyTotal,
-    previousMonthlyTotal: coachInput.previousMonthlyTotal,
-    fixedCostCount: coachInput.fixedCostCount,
-    savingsCount: coachInput.savings.length,
-    upcomingCount: coachInput.upcoming.length,
-    insuranceHigh: coachInput.insuranceHigh
-  }), [coachInput]);
+  const inputFingerprint = JSON.stringify([coachingPreferencesReady, coachInput, [...protectedFixedCostIds].sort()]);
+  const liveInputKey = JSON.stringify([scopeFingerprint, inputFingerprint]);
+  const liveInputRef = useRef(liveInputKey);
+  const [outputInputKey, setOutputInputKey] = useState("");
+  // Invalidate during render, before effects: old stream callbacks cannot flash stale advice.
+  if (liveInputRef.current !== liveInputKey) {
+    liveInputRef.current = liveInputKey;
+    currentGenerationRef.current++;
+  }
 
   const coachFallbackHeadline = useMemo(() => {
+    if (!coachingPreferencesReady) return "코칭 설정 확인 전에는 개인화 제안을 보류합니다.";
     const rate =
       monthlyIncome > 0 ? Math.round((summary.monthlyExpense / monthlyIncome) * 1000) / 10 : null;
     const rateText = rate !== null ? ` 수입의 ${rate}%예요.` : "";
     return `이번 달 월 환산 고정비는 ${summary.monthlyExpense.toLocaleString("ko-KR")}원, ${fixedCosts.length}건이에요.${rateText}`;
-  }, [summary.monthlyExpense, monthlyIncome, fixedCosts.length]);
+  }, [summary.monthlyExpense, monthlyIncome, fixedCosts.length, coachingPreferencesReady]);
 
   const coachHasData = fixedCosts.length > 0;
 
@@ -108,9 +130,11 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
     // 이전 결과 클리어
     setCoachingText("");
     setCoachError("");
+    setCoachStatus("idle");
+    if (!coachingPreferencesReady) coachAttemptConsentRef.current = false;
     // 실행 중 락 해제
     isRunningRef.current = false;
-  }, [scopeFingerprint, inputFingerprint]);
+  }, [scopeFingerprint, inputFingerprint, coachingPreferencesReady]);
 
   // Scope 변경 시 상태 리셋
   useEffect(() => {
@@ -129,7 +153,19 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
    * - READY/LOADING 엔진은 동의 없이 재사용 가능
    * - 세대 토큰으로 scope/input 변경 시 무효화 처리
    */
+  function blockUnavailablePreferences() {
+    // Check the live render too: a callback captured before failure is not permission.
+    if (coachingPreferencesReady && preferencesReadyRef.current) return false;
+    coachAttemptConsentRef.current = false;
+    isRunningRef.current = false;
+    setCoachingText("");
+    setCoachStatus("error");
+    setCoachError(PREFERENCES_UNAVAILABLE);
+    return true;
+  }
+
   async function runCoaching() {
+    if (blockUnavailablePreferences()) return;
     if (isRunningRef.current) {
       return;
     }
@@ -175,6 +211,9 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
    * @param generation 호출 시점의 세대 토큰
    */
   async function executeCoaching(generation: number) {
+    if (blockUnavailablePreferences()) return;
+    if (generation !== currentGenerationRef.current) return;
+    setOutputInputKey(liveInputKey);
     setCoachError("");
     setCoachingText("");
 
@@ -213,7 +252,7 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
         if (currentGenerationRef.current === generation) {
           setCoachingText(full);
         }
-      });
+      }, { protectedItemNames: fixedCosts.filter(item => protectedFixedCostIds.has(item.id)).map(item => item.name) });
 
       // 세대 확인: 스트리밍 중에 scope/input이 변경되었으면 중단
       if (currentGenerationRef.current !== generation) {
@@ -250,6 +289,7 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
    * CRITICAL: useRef를 사용하여 동의를 동기적으로 설정
    */
   function confirmConsentAndRun() {
+    if (blockUnavailablePreferences()) return;
     // 동의 설정 (동기적)
     coachAttemptConsentRef.current = true;
     // 동의 후 즉시 실행
@@ -273,6 +313,7 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
    */
   function openCoachModal() {
     setIsCoachModalOpen(true);
+    if (blockUnavailablePreferences()) return;
     setCoachError("");
     // CRITICAL: 새 모달 세션 시작 - 동의 초기화
     coachAttemptConsentRef.current = false;
@@ -332,7 +373,7 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
   const coachAttemptConsent = coachAttemptConsentRef.current;
 
   // 콜드 스타트 필요 여부 (엔진이 없고 동의도 없음)
-  const awaitingConsent = engineStatus === "none" && !coachAttemptConsent && coachStatus === "idle" && coachHasData && isWebGpuAvailable();
+  const awaitingConsent = coachingPreferencesReady && engineStatus === "none" && !coachAttemptConsent && coachStatus === "idle" && coachHasData && isWebGpuAvailable();
 
   return {
     isCoachModalOpen,
@@ -340,13 +381,14 @@ export function useCoach({ budget, serverApi }: UseCoachOptions) {
     coachStatus,
     coachProgress,
     coachProgressText,
-    coachingText,
+    coachingText: outputInputKey === liveInputKey ? coachingText : "",
     coachError,
     coachHasData,
     coachInput,
     coachFallbackHeadline,
     // CRITICAL: 동의 상태 및 상수
     coachAttemptConsent,
+    awaitingConsent,
     COACH_MODEL_APPROX_MB,
     COACH_MODEL_VRAM_MB,
     monthlyReport,

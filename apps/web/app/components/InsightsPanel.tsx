@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Text, Title } from "@mantine/core";
 import {
   buildMonthlyReport,
@@ -8,7 +8,6 @@ import {
   summarizeWorkspaceBudget,
   kstThirtyDayWindow,
   summarizeRenewalSavings,
-  type SavingsInsight,
   type SnapshotHistoryEntry,
   type UpcomingDue
 } from "@living-cost-manager/shared";
@@ -24,11 +23,16 @@ interface InsightsPanelProps {
   monthlyExpense: number;
   topCategoryLabel?: string;
   topCategoryAmount?: number;
+  protectedFixedCostIds?: ReadonlySet<string>;
+  onKeepItem?: (id: string) => void;
+  coachingPreferencesReady?: boolean;
 }
 
 const UPCOMING_WINDOW_DAYS = 29;
 const UPCOMING_MAX = 5;
 const TREND_MAX = 6;
+const EMPTY_PROTECTED_IDS: ReadonlySet<string> = new Set();
+const PREFERENCES_UNAVAILABLE = "내 코칭 설정을 확인할 수 없어 절감 제안을 보류했습니다.";
 
 function dueLabel(daysUntil: number): { text: string; urgent: boolean } {
   if (daysUntil <= 0) {
@@ -53,20 +57,20 @@ export function InsightsPanel({
   monthlyExpense,
   topCategoryLabel,
   topCategoryAmount
+   , protectedFixedCostIds = EMPTY_PROTECTED_IDS, onKeepItem, coachingPreferencesReady = true
 }: InsightsPanelProps) {
   const [upcoming, setUpcoming] = useState<UpcomingDue<FixedCost>[] | null>(null);
-  const [insights, setInsights] = useState<SavingsInsight<FixedCost>[]>([]);
+  const insights = useMemo(() => coachingPreferencesReady ? buildSavingsInsights(fixedCosts, { protectedFixedCostIds }) : [], [fixedCosts, protectedFixedCostIds, coachingPreferencesReady]);
   const [shareStatus, setShareStatus] = useState<string>("");
 
   useEffect(() => {
     const [year, month, day] = kstThirtyDayWindow(asOf ?? new Date()).fromDate.split('-').map(Number);
     const now = new Date(year, month - 1, day);
     setUpcoming(getUpcomingDues(fixedCosts, now, UPCOMING_WINDOW_DAYS).slice(0, UPCOMING_MAX));
-    setInsights(buildSavingsInsights(fixedCosts));
   }, [fixedCosts, asOf]);
 
   if (upcoming === null) {
-    return null;
+    return coachingPreferencesReady ? null : <Text role="status" size="sm">{PREFERENCES_UNAVAILABLE}</Text>;
   }
 
   const trend = (history ?? []).slice(0, TREND_MAX);
@@ -132,9 +136,10 @@ export function InsightsPanel({
         </div>
        ) : <Text size="sm" c="dimmed">{fixedCosts.length === 0 ? "항목과 기준 납부일을 등록하면 예정 결제를 볼 수 있습니다." : dueSummary.thirtyDayDue === null ? "기준 납부일을 입력하면 가까운 결제가 표시됩니다." : "확인된 일정 중 30일 이내 납부가 없습니다."}</Text>}
 
+      {!coachingPreferencesReady ? <Text role="status" size="sm">{PREFERENCES_UNAVAILABLE}</Text> : null}
       <details className="insights-details">
         <summary>절감 검토와 고정비 요약</summary>
-        <Text size="sm" mt="sm">예상 월 절감 {formatWon(savings.potential)} · 완료 후 직접 확인한 월 절감 {formatWon(savings.confirmed)}</Text>
+        {coachingPreferencesReady ? <Text size="sm" mt="sm">예상 월 절감 {formatWon(savings.potential)} · 완료 후 직접 확인한 월 절감 {formatWon(savings.confirmed)}</Text> : null}
       {insights.length > 0 ? (
         <div className="insights-block">
           <Title order={3} mb="sm">아낄 수 있는 곳</Title>
@@ -143,6 +148,10 @@ export function InsightsPanel({
               <li key={`${insight.kind}-${idx}`} className="insights-row insights-row-insight">
                 <span className="insights-row-name">{insight.title}</span>
                 <Text span size="sm" c="dimmed">예상 월 절감 {formatWon(insight.monthlySavings)}</Text>
+                {onKeepItem ? insight.actionableItemIds.map(id => {
+                  const item = fixedCosts.find(candidate => candidate.id === id);
+                  return item && !protectedFixedCostIds.has(id) ? <Button key={id} variant="subtle" size="compact-xs" onClick={() => onKeepItem(id)} aria-label={`${item.name} 유지`}>{item.name} 유지</Button> : null;
+                }) : null}
               </li>
             ))}
           </ul>

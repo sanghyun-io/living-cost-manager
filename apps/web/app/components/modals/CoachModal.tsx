@@ -53,7 +53,7 @@ export function CoachModal({
     <ModalShell opened={opened} sectionLabel="AI 코치" title="이번 달 가계부 코칭" onClose={onClose}>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          기기 안에서 실행되는 AI가 고정비를 분석합니다.
+          설정과 계산으로 검토 대상을 정하고, 기기 안의 AI가 보조 설명을 다듬습니다.
           코칭에 사용하는 지출 정보는 AI 서버로 전송하지 않습니다.
         </Text>
 

@@ -9,6 +9,8 @@ import type { CostFilters } from "../lib/costViews";
 import { previewQuickAdd } from "../lib/quickAdd";
 import { formatWon, getPaymentOptions } from "../lib/formatting";
 
+const EMPTY_PROTECTED_IDS: ReadonlySet<string> = new Set();
+
 interface FixedCostTableProps {
   focusItemId: string | null;
   focusRequest: number;
@@ -37,6 +39,8 @@ interface FixedCostTableProps {
   onOpenCategory: () => void;
   onOpenCard: () => void;
   onOpenData: () => void;
+  protectedIds?: ReadonlySet<string>;
+  onToggleProtected?: (id: string) => void;
 }
 
 function toNumber(value: number | string, fallback: number): number {
@@ -68,7 +72,7 @@ export function FixedCostTable({
   onFilterChange,
   onOpenCategory,
   onOpenCard,
-  onOpenData
+  onOpenData, protectedIds = EMPTY_PROTECTED_IDS, onToggleProtected
 }: FixedCostTableProps) {
   const categoryData = categories.map((c) => ({ value: c.id, label: c.label }));
   const filterData = [{ value: "all", label: "전체" }, ...categoryData];
@@ -384,6 +388,7 @@ export function FixedCostTable({
                   <FixedCostRowActions name={item.name} opened={menuItemId === item.id}
                     onChange={(opened) => setMenuItemId(opened ? item.id : null)}
                     onDuplicate={() => onDuplicateItem(item.id)} />
+                  {onToggleProtected ? <Button variant={protectedIds.has(item.id) ? "light" : "subtle"} size="compact-xs" onClick={() => onToggleProtected(item.id)} aria-label={`${item.name} ${protectedIds.has(item.id) ? "유지 해제" : "유지"}`}>{protectedIds.has(item.id) ? "유지 중" : "유지"}</Button> : null}
                 </span>
               )}
             </div>

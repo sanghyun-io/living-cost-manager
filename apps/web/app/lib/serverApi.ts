@@ -15,6 +15,7 @@ import type {
   WorkspaceSnapshot,
   SnapshotHistoryEntry
 } from "@living-cost-manager/shared";
+import type { CoachingPreferences, PutCoachingPreferences } from "@living-cost-manager/shared";
 
 // Bumped to v2 because the session now stores a refresh token alongside the
 // short-lived access token (`token`). Older v1 sessions are simply ignored.
@@ -55,6 +56,8 @@ export type ServerApiClient = {
   getWorkspaceSnapshot(workspaceId: string, token: string): Promise<WorkspaceSnapshot>;
   putWorkspaceSnapshot(workspaceId: string, snapshot: WorkspaceSnapshot, token: string): Promise<WorkspaceSnapshot>;
   getSnapshotHistory(workspaceId: string, token: string, limit?: number): Promise<SnapshotHistoryEntry[]>;
+  getCoachingPreferences(workspaceId: string, token: string): Promise<CoachingPreferences>;
+  putCoachingPreferences(workspaceId: string, input: PutCoachingPreferences, token: string): Promise<CoachingPreferences>;
   listMembers(workspaceId: string, token: string): Promise<WorkspaceMemberDto[]>;
   createInvitation(workspaceId: string, input: CreateInvitationRequest, token: string): Promise<CreatedInvitation>;
   listInvitations(token: string): Promise<WorkspaceInvitationDto[]>;
@@ -218,6 +221,12 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
         { token }
       );
       return result.entries;
+    },
+    getCoachingPreferences(workspaceId, token) {
+      return request<CoachingPreferences>("/workspaces/" + encodeURIComponent(workspaceId) + "/coaching-preferences", { token });
+    },
+    putCoachingPreferences(workspaceId, input, token) {
+      return request<CoachingPreferences>("/workspaces/" + encodeURIComponent(workspaceId) + "/coaching-preferences", { method: "PUT", token, body: input });
     },
     listMembers(workspaceId, token) {
       return request<WorkspaceMemberDto[]>("/workspaces/" + encodeURIComponent(workspaceId) + "/members", { token });

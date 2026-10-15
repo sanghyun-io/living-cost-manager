@@ -27,11 +27,18 @@ export type CoachInput = {
   monthlyIncome: number;
   fixedCostCount: number;
   // 절감 인사이트(중복 구독·최대 항목 등) 제목 + 월 절감액.
-  savings: Array<{ title: string; monthlySavings: number }>;
+  savings: Array<{
+    title: string;
+    monthlySavings: number;
+    // CRITICAL: 액션 대상 항목명들 (보호 제외, 실제 존재). 모델에 의미 위임 금지.
+    targetItemNames?: string[];
+  }>;
   // 14일 내 임박 납부(이름 + 금액 + N일 후).
   upcoming: Array<{ name: string; amount: number; daysUntil: number }>;
   // 보험료가 수입 대비 과한지(휴리스틱). true 일 때만 코치가 보험 점검을 권한다.
   insuranceHigh: boolean;
+  // 보험 점검 권유 대상 항목명들(보호 제외, 실제 존재). LLM에 안전하게 전달.
+  insuranceReviewItemNames?: string[];
 };
 
 function won(n: number): string {
@@ -119,18 +126,44 @@ export function selectCoachSegments(input: CoachInput): CoachSegment[] {
   }
 
   // 3) 절감 조언 — 코드가 고른 절감 후보가 있을 때만.
+  // CRITICAL: Deterministic sentence with quoted target names. No model paraphrase for meaning.
   if (input.savings.length > 0) {
+    const first = input.savings[0];
+    const names = first.targetItemNames && first.targetItemNames.length > 0 ? first.targetItemNames : null;
+    let message: string;
+    if (names && names.length === 1) {
+      message = `"${names[0]}" 관련 지출의 필요 여부와 이용 조건을 확인해 보세요.`;
+    } else if (names && names.length > 1) {
+      const displayNames = names.slice(0, 2).map(n => `"${n}"`).join(", ");
+      const countSuffix = names.length > 2 ? ` 등 ${names.length}건` : "";
+      message = `${displayNames}${countSuffix} 등 검토 대상으로 남은 항목의 중복 여부를 확인해 보세요.`;
+    } else {
+      // Fallback: no target names provided (old caller or parse failure)
+      const safeTitle = first.title.length <= 30 ? first.title : first.title.slice(0, 30);
+      message = `"${safeTitle}" 관련 지출의 필요 여부와 이용 조건을 확인해 보세요.`;
+    }
     segments.push({
       key: "savings",
-      example: `${input.savings[0].title}은(는) 이번 주에 한번 살펴보시면 매달 조금씩 가볍게 아낄 수 있어요.`
+      example: message
     });
   }
 
   // 4) 보험 점검 — 보험 비중이 높을 때만(휴리스틱).
+  // CRITICAL: Deterministic sentence with quoted eligible names. No model paraphrase for meaning.
+  // Segment targets ONLY eligible items (protected excluded, actually exists).
+  // Protected names are excluded from insurance review targets at the input boundary.
   if (input.insuranceHigh) {
+    const reviewNames = input.insuranceReviewItemNames;
+    let message: string;
+    if (reviewNames && reviewNames.length > 0) {
+      const quotedNames = reviewNames.map(n => `"${n}"`).join(", ");
+      message = `${quotedNames}의 보장 내용을 확인해 보면, 지출 흐름을 더 탄탄히 다질 수 있어요.`;
+    } else {
+      message = "보험료 비중을 살펴보고, 변경 가능한 항목이 있다면 보장 내용을 확인해 볼 수 있어요.";
+    }
     segments.push({
       key: "insurance",
-      example: "보험료 비중이 평균보다 조금 높은 편이라, 지금 보장 내용이 나에게 꼭 맞는지 한번 점검해 보시면 좋겠어요."
+      example: message
     });
   }
 
@@ -320,24 +353,42 @@ async function generateSegment(
  * 코칭을 조각별로 '순차' 생성해 코드로 결합한다. onToken 으로 누적 결과를
  * 흘려보내(한 줄씩 채우기) 순차 대기 체감을 줄인다.
  *
- * WebLLM 은 동시 추론을 지원하지 않으므로 조각은 await 로 하나씩 처리한다.
- * 해당되는 조각만 호출하므로 보통 2~3회(격려 + 1~2개 조언)면 끝난다.
+ * CRITICAL SAFETY DESIGN:
+ * - 'praise' 조각만 모델 패러프레이즈를 거친다 (중립적 표현 다듬기).
+ * - savings/insurance/trend/upcoming 은 코드에서 만든 완성 문장을 그대로 사용한다.
+ *   금액·항목명·방향성·날짜 같은 사실적 정보는 모델이 바꿀 수 없다.
+ * - WebLLM 은 동시 추론을 지원하지 않으므로 조각은 await 로 하나씩 처리한다.
  */
 export async function streamCoaching(
   engine: MLCEngineInterface,
   input: CoachInput,
-  onToken?: (full: string) => void
+  onToken?: (full: string) => void,
+  options?: { protectedItemNames?: readonly string[] }
 ): Promise<string> {
   const segments = selectCoachSegments(input);
   const done: string[] = [];
 
   for (const segment of segments) {
+    // CRITICAL: actionable/factual segments are deterministic — never delegate meaning to model.
+    // Only 'praise' goes through the model for neutral wording polish.
+    if (segment.key !== "praise") {
+      // Direct code output — no engine.create call. Guard still applies for safety.
+      const guard = (text: string) => options?.protectedItemNames?.some(name => name.length > 0 && text.includes(name)) ? segment.example : text;
+      const sentence = guard(segment.example);
+      done.push(sentence);
+      onToken?.(done.join(" "));
+      continue;
+    }
+
+    // Praise: model paraphrase for neutral wording. Local output guard only.
+    // Private protection metadata never enters model messages.
+    const guard = (text: string) => options?.protectedItemNames?.some(name => name.length > 0 && text.includes(name)) ? segment.example : text;
     // 진행 중 조각은 done(확정분) 뒤에 실시간으로 이어 붙여 표시한다.
     const sentence = await generateSegment(engine, segment, (partial) => {
-      onToken?.([...done, partial].filter(Boolean).join(" "));
+      onToken?.([...done, guard(partial)].filter(Boolean).join(" "));
     });
     if (sentence) {
-      done.push(sentence);
+      done.push(guard(sentence));
       onToken?.(done.join(" "));
     }
   }

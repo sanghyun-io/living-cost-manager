@@ -1,0 +1,129 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook } from "@testing-library/react";
+import type { BudgetDataApi } from "./useBudgetData";
+import { useCoach } from "./useCoach";
+import { useCoachingPreferences } from "./useCoachingPreferences";
+
+const mocks = vi.hoisted(() => ({ stream: vi.fn(), engine: vi.fn() }));
+vi.mock("./coach", () => ({ getCoachEngineStatus: () => "ready", getCoachEngine: mocks.engine, streamCoaching: mocks.stream }));
+vi.mock("./coachModel", () => ({ isCoachOptedIn: () => false, isWebGpuAvailable: () => true, setCoachOptIn: vi.fn(), COACH_MODEL_APPROX_MB: 1, COACH_MODEL_VRAM_MB: 1 }));
+vi.mock("./analytics", () => ({ track: vi.fn() }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+function budget() {
+  return { localScopeKey: "synthetic-local/ws", profileName: "Synthetic", monthlyIncome: 1000000, summary: { monthlyExpense: 600000 },
+    fixedCosts: [
+      { id: "a", name: "보호보험", categoryId: "insurance", amount: 300000, periodMonths: 1, billingDay: null },
+      { id: "b", name: "검토보험", categoryId: "insurance", amount: 300000, periodMonths: 1, billingDay: null }
+    ] } as unknown as BudgetDataApi;
+}
+describe("actual useCoach personalization wiring (no model or business API)", () => {
+  it("unknown readiness is idle until explicit request; every request entry point fails closed without engine/stream calls", async () => {
+    const data = budget();
+    const h = renderHook(() => useCoach({ budget: data, serverApi: null, coachingPreferencesReady: false }));
+    expect(h.result.current.coachStatus).toBe("idle");
+    expect(h.result.current.coachError).toBe("");
+    expect(h.result.current.coachInput.savings).toEqual([]);
+    expect(h.result.current.coachInput.insuranceHigh).toBe(false);
+    expect(h.result.current.coachInput.insuranceReviewItemNames).toBeUndefined();
+    expect(h.result.current.coachInput.monthlyTotal).toBe(600000);
+    expect(h.result.current.coachFallbackHeadline).toBe("코칭 설정 확인 전에는 개인화 제안을 보류합니다.");
+    await act(async () => { await h.result.current.runCoaching(); });
+    expect(h.result.current.coachStatus).toBe("error");
+    expect(h.result.current.coachError).toContain("코칭 설정을 확인할 수 없어 추천을 보류");
+    act(() => h.result.current.confirmConsentAndRun());
+    expect(h.result.current.coachAttemptConsent).toBe(false);
+    expect(mocks.engine).not.toHaveBeenCalled(); expect(mocks.stream).not.toHaveBeenCalled();
+  });
+
+  it("actual corrupt storage readiness blocks coaching while preserving raw bytes and budget totals", async () => {
+    const data = budget(); const key = "lcm:coaching:local:ws:anonymous"; const raw = "{ corrupted protection intent";
+    localStorage.setItem(key, raw);
+    const h = renderHook(() => {
+      const prefs = useCoachingPreferences(data.fixedCosts, "local", "ws", null, null);
+      const coach = useCoach({ budget: data, serverApi: null, protectedFixedCostIds: prefs.activeIds, coachingPreferencesReady: prefs.ready });
+      return { prefs, coach };
+    });
+    expect(h.result.current.prefs.ready).toBe(false);
+    await act(async () => { await h.result.current.coach.runCoaching(); });
+    expect(h.result.current.coach.coachInput.monthlyTotal).toBe(600000);
+    expect(h.result.current.coach.coachInput.savings).toEqual([]);
+    expect(h.result.current.coach.coachInput.insuranceHigh).toBe(false);
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(mocks.engine).not.toHaveBeenCalled(); expect(mocks.stream).not.toHaveBeenCalled();
+    localStorage.removeItem(key); // synthetic test fixture only
+  });
+
+  it("readiness loss invalidates previous text before effects and captured run callbacks cannot bypass it; recovery enables explicit fresh coaching", async () => {
+    const data = budget(); mocks.engine.mockResolvedValue({});
+    mocks.stream.mockImplementation(async (_engine, _input, emit) => { emit("새 코칭 결과입니다."); return "새 코칭 결과입니다."; });
+    const renders: { ready: boolean; text: string }[] = [];
+    const h = renderHook(({ ready }) => {
+      const coach = useCoach({ budget: data, serverApi: null, coachingPreferencesReady: ready });
+      renders.push({ ready, text: coach.coachingText }); return coach;
+    }, { initialProps: { ready: true } });
+    await act(async () => { await h.result.current.runCoaching(); });
+    expect(h.result.current.coachingText).toBe("새 코칭 결과입니다.");
+    const capturedRun = h.result.current.runCoaching;
+    const capturedConsent = h.result.current.confirmConsentAndRun;
+    mocks.engine.mockClear(); mocks.stream.mockClear();
+    h.rerender({ ready: false });
+    expect(renders.find(render => !render.ready)?.text).toBe("");
+    await act(async () => { await capturedRun(); capturedConsent(); });
+    expect(mocks.engine).not.toHaveBeenCalled(); expect(mocks.stream).not.toHaveBeenCalled();
+    h.rerender({ ready: true });
+    expect(h.result.current.coachInput.monthlyTotal).toBe(600000);
+    expect(h.result.current.coachInput.insuranceHigh).toBe(true);
+    expect(h.result.current.coachStatus).toBe("idle");
+    expect(mocks.engine).not.toHaveBeenCalled();
+    await act(async () => { await h.result.current.runCoaching(); });
+    expect(mocks.engine).toHaveBeenCalledTimes(1); expect(mocks.stream).toHaveBeenCalledTimes(1);
+    expect(h.result.current.coachingText).toBe("새 코칭 결과입니다.");
+  });
+
+  it("readiness failure during pending engine initialization prevents streaming after late resolution", async () => {
+    const data = budget(); let release!: (engine: object) => void;
+    mocks.engine.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const h = renderHook(({ ready }) => useCoach({ budget: data, serverApi: null, coachingPreferencesReady: ready }), { initialProps: { ready: true } });
+    let request!: Promise<void>;
+    act(() => { request = h.result.current.runCoaching(); });
+    h.rerender({ ready: false });
+    await act(async () => { release({}); await request; });
+    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(h.result.current.coachingText).toBe("");
+    expect(h.result.current.coachStatus).toBe("idle");
+  });
+
+  it("constructs mixed-insurance input with eligible names only, and passes protected names solely to local output guard", async () => {
+    mocks.engine.mockResolvedValue({}); mocks.stream.mockResolvedValue("");
+    const data = budget();
+    const h = renderHook(() => useCoach({ budget: data, serverApi: null, protectedFixedCostIds: new Set(["a"]) }));
+    expect(h.result.current.coachInput.insuranceReviewItemNames).toEqual(["검토보험"]);
+    expect(JSON.stringify(h.result.current.coachInput)).not.toContain("보호보험");
+    expect(JSON.stringify(h.result.current.coachInput)).not.toContain("reason");
+    await act(async () => { await h.result.current.runCoaching(); });
+    expect(mocks.stream.mock.calls[0][3]).toEqual({ protectedItemNames: ["보호보험"] });
+  });
+
+  it("same-count protection swaps invalidate visible advice and reject late streaming output", async () => {
+    mocks.engine.mockResolvedValue({});
+    let emit!: (text: string) => void; let release!: () => void;
+    mocks.stream.mockImplementation((_engine, _input, callback) => { emit = callback; return new Promise<void>(resolve => { release = resolve; }); });
+    const data = budget(); const renders: { ids: string[]; text: string }[] = [];
+    const h = renderHook(({ ids }) => {
+      const coach = useCoach({ budget: data, serverApi: null, protectedFixedCostIds: new Set(ids) });
+      renders.push({ ids, text: coach.coachingText }); return coach;
+    }, { initialProps: { ids: ["a"] } });
+    let call!: Promise<void>;
+    await act(async () => { call = h.result.current.runCoaching(); await Promise.resolve(); });
+    act(() => emit("검토보험 보장 점검을 권해요."));
+    expect(h.result.current.coachingText).toContain("검토보험");
+    h.rerender({ ids: ["b"] });
+    expect(renders.find(r => r.ids[0] === "b")?.text).toBe("");
+    expect(h.result.current.coachInput.insuranceReviewItemNames).toEqual(["보호보험"]);
+    act(() => emit("이전 검토보험 권유가 늦게 도착했어요."));
+    await act(async () => { release(); await call; });
+    expect(h.result.current.coachingText).toBe("");
+  });
+});

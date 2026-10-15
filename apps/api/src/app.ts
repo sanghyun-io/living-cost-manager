@@ -18,6 +18,7 @@ import { marketingRoutes } from "./routes/marketing.js";
 import { memberRoutes } from "./routes/members.js";
 import { pushRoutes } from "./routes/push.js";
 import { productTourRoutes } from "./routes/product-tour.js";
+import { coachingPreferenceRoutes } from "./routes/coaching-preferences.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { templateRoutes } from "./routes/templates.js";
@@ -65,7 +66,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     // 기록하지 않는다(IP/UA 가 로그에 남지 않도록). 다른 라우트의 보안 로그는
     // 그대로 유지된다 — predicate 가 해당 경로만 선별한다.
     disableRequestLogging: candidate => shouldDisableRequestLogging(candidate) || isTemplateRequest(candidate) ||
-      (candidate.url ?? "").split("?")[0]!.split("/").includes("service-billing")
+      (candidate.url ?? "").split("?")[0]!.split("/").some(segment => segment === "service-billing" || segment === "coaching-preferences")
   });
 
   app.decorate("prisma", prisma);
@@ -128,6 +129,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(authRoutes);
     await api.register(accountRoutes);
     await api.register(productTourRoutes);
+    await api.register(coachingPreferenceRoutes);
     await api.register(serviceBillingRoutes, { provider: options.serviceBillingProvider, clock: options.serviceBillingClock });
     await api.register(workspaceRoutes);
     await api.register(templateRoutes);
