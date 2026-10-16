@@ -6,13 +6,18 @@ name: Deploy Pages (production)
 # 백엔드 OCI 이미지 빌드/전환은 이 워크플로 범위가 아니며 기존 운영자 승인 절차를
 # 따른다(FE/BE 승인은 짝을 맞춰야 하므로 수동 게이트를 유지한다).
 #
-# CI-success gate (2026-10-16 재작성):
-#   - verify-ci job: 게이트 스크립트 scripts/ci/release-gate.mjs가 GitHub API
-#     응답 JSON을 실제 파싱해 (a) 워크플로 이름, (b) event=push, (c)
-#     head_branch=main, (d) head_sha==배포 대상 SHA, (e) status=completed,
-#     (f) conclusion=success, (g) run별 최신 attempt만 인정 — 모든 run id의
-#     최신 attempt이 성공인 경우에만 통과. runId/runAttempt을 후속 job에
-#     출력으로 전달.
+# CI-success gate (2026-10-17 리뷰 후 hardened):
+#   - verify-ci job: 워크플로 id를 **고정 경로 API** GET
+#     `/actions/workflows/ci.yml`로만 발견(meta.path===".github/workflows/ci.yml"
+#     를 게이트 코드가 강제)하고, run 목록도 해당 workflow id 스코프 엔드포인트로
+#     조회. 게이트 스크립트 scripts/ci/release-gate.mjs가 GitHub API 응답 JSON을
+#     실제 파싱해 (a) workflow_id==meta.id, (b) 워크플로 표시 이름, (c)
+#     event=push, (d) head_branch=main, (e) head_sha==배포 대상 SHA,
+#     (f) status=completed, (g) conclusion=success, (h) run별 최신 attempt만
+#     인정 — 모든 run id의 최신 attempt이 성공인 경우에만 통과(더 새로운
+#     재실패가 이전 성공을 무효화). runId/runAttempt을 후속 job에 출력으로 전달.
+#     표시 이름만 같은 다른 워크플로 파일의 성공 run은 gates를 통과하지 못한다
+#     (동명 다른-id/다른-path fixture 테스트로 고정).
 #   - 아티팩트 핸드오프: 배포는 CI run의 아티팩트(lcm-release-<sha>)를
 #     다운로드해 build-info.json + content digest를 재계산 검증하고 그대로
 #     배포한다. 승인 후 재빌드 없음 — 테스트된 것과 배포되는 것이 byte 단위로
@@ -91,18 +96,25 @@ jobs:
           fi
           echo "✓ repository and ref verified"
 
-      - name: Gate on exact-SHA CI success (parsed JSON, not string match)
+      - name: Gate on exact-SHA CI success (parsed JSON + workflow id/path binding)
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           TARGET_SHA="${{ github.sha }}"
+          META_JSON="$(mktemp)"
           RUNS_JSON="$(mktemp)"
-          trap 'rm -f "$RUNS_JSON"' EXIT
-          gh api "repos/sanghyun-io/living-cost-manager/actions/runs?event=push&head_sha=${TARGET_SHA}&per_page=100" \
-            > "$RUNS_JSON"
-          SELECTED="$(node scripts/ci/release-gate.mjs gate --target-sha "$TARGET_SHA" --runs "$RUNS_JSON")"
+          trap 'rm -f "$META_JSON" "$RUNS_JSON"' EXIT
+          # Workflow identity is discovered ONLY from the fixed source-path
+          # route — no arbitrary id parameter: any other workflow file with a
+          # spoofed display name fails the gate below.
+          gh api "repos/sanghyun-io/living-cost-manager/actions/workflows/ci.yml" > "$META_JSON"
+          WF_ID="$(node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);if(!Number.isInteger(j.id))process.exit(1);console.log(j.id)})' < "$META_JSON")"
+          # runs are queried scoped to that workflow id, for this exact SHA,
+          # push events only (helper still re-checks every field):
+          gh api "repos/sanghyun-io/living-cost-manager/actions/workflows/${WF_ID}/runs?event=push&head_sha=${TARGET_SHA}&per_page=100" > "$RUNS_JSON"
+          SELECTED="$(node scripts/ci/release-gate.mjs gate --target-sha "$TARGET_SHA" --runs "$RUNS_JSON" --workflow-meta "$META_JSON")"
           echo "eligible CI run selected: $SELECTED"
           echo "ci_run_id=$(printf '%s' "$SELECTED" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).runId))')" >> "$GITHUB_OUTPUT"
           echo "ci_run_attempt=$(printf '%s' "$SELECTED" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).runAttempt))')" >> "$GITHUB_OUTPUT"
@@ -184,13 +196,19 @@ jobs:
           path: release
 
       - name: Verify artifact identity + content digest (no unresolved rebuild)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          META_JSON="$(mktemp)"
+          trap 'rm -f "$META_JSON"' EXIT
+          gh api "repos/sanghyun-io/living-cost-manager/actions/workflows/ci.yml" > "$META_JSON"
           node scripts/ci/release-gate.mjs verify \
             --dir release \
             --sha "${{ github.sha }}" \
             --run-id "${{ needs.verify-ci.outputs.ci-run-id }}" \
-            --attempt "${{ needs.verify-ci.outputs.ci-run-attempt }}"
+            --attempt "${{ needs.verify-ci.outputs.ci-run-attempt }}" \
+            --workflow-meta "$META_JSON"
 
       - name: Deploy to Cloudflare Pages (token/Account via env only)
         env:

@@ -40,7 +40,7 @@ if [ -d "$PARENT" ] && [ ! -L "$PARENT" ]; then
     [ -f "$PARENT/$f" ] && [ ! -L "$PARENT/$f" ] \
       && echo "  $(stat -f '%Sp %Su %N' "$PARENT/$f")" || echo "  MISSING: $f"
   done
-  echo "ACL check: $(ls -ld "$PARENT" | awk '{print $1}')"
+  if expect_acl_safe "$PARENT"; then echo "ACL on parent: SAFE (none/deny-only)"; else echo "ACL on parent: UNSAFE (allow/unparseable ACE) — investigate"; fi
   if [ -f "$PARENT/manifest.txt" ]; then
     echo "manifest pin: $(grep -m1 '^# git:' "$PARENT/manifest.txt" || true)"
     echo "public file hash verification:"

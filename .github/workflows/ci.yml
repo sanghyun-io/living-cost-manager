@@ -97,7 +97,11 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
-      actions: write  # artifact upload for the deploy handoff only
+      # NOTE(리뷰 P2): actions/upload-artifact 시크릿 업로드는 저장소 REST
+      # `actions: write` 스코프가 아니라 Actions 런타임의 artifact service
+      # 어서셔로 동작한다 — 빌드 잡에 API 쓰기 권한을 주지 않는다. 첫 실런에서
+      # 업로드 권한 오류가 실증되면(오류 본문 근거)에만 최소 `actions: write`를
+      # 이 job에 재선언하고 근거를 문서에 남긴다.
     steps:
       - name: Checkout exact event SHA (no credentials persisted)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,9 +169,13 @@ jobs:
           node scripts/write-release-meta.mjs "$GITHUB_SHA"
           mkdir -p dist-release
           cp -R apps/web/out dist-release/out
+          # workflow identity: display name is forgeable — bind the SOURCE
+          # FILE PATH (exact constant) into build-info; the numeric workflow
+          # id is enforced by the deploy gate against the fixed-path metadata.
           node scripts/ci/release-gate.mjs write \
             --out-dir dist-release/out \
-            --info dist-release/build-info.json
+            --info dist-release/build-info.json \
+            --workflow-path .github/workflows/ci.yml
 
       - name: Upload release artifact (name pins the exact SHA)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

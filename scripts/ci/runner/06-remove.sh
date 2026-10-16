@@ -60,9 +60,13 @@ fi
 CI_UID="$(id -u "$LCM_CI_ACCOUNT")"
 reject_symlink_components "$PARENT" || { echo "error: symlink in parent path — refusing" >&2; exit 1; }
 expect_dir_owner_uid "$PARENT" 0 || { echo "error: parent not root-owned — refusing" >&2; exit 1; }
+expect_acl_safe "$PARENT" || { echo "error: $PARENT carries allow/unparseable ACL — refusing to trust parent contents" >&2; exit 1; }
 [ -x "$PARENT/deregister.sh" ] && [ ! -L "$PARENT/deregister.sh" ] && [ "$(stat -f '%u' "$PARENT/deregister.sh")" = 0 ] || {
   echo "error: root-owned deregister.sh missing — refusing" >&2; exit 1; }
 [ -x "$PARENT/runner-status.sh" ] || { echo "error: runner-status.sh missing — refusing" >&2; exit 1; }
+expect_acl_safe "$PARENT/deregister.sh" || { echo "error: deregister.sh ACL unsafe — refusing" >&2; exit 1; }
+expect_acl_safe "$PARENT/runner-status.sh" || { echo "error: runner-status.sh ACL unsafe — refusing" >&2; exit 1; }
+expect_acl_safe /Library/LaunchDaemons || { echo "error: /Library/LaunchDaemons ACL unsafe — refusing" >&2; exit 1; }
 
 PLIST_PRESENT=0
 if [ -e "$PLIST" ]; then

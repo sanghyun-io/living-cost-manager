@@ -32,6 +32,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const EXPECTED = {
   repo: "sanghyun-io/living-cost-manager",
   workflowName: "CI (Mac Mini self-hosted)",
+  workflowPath: ".github/workflows/ci.yml",
   event: "push",
   branch: "main",
 };
@@ -77,20 +78,22 @@ export function digestDir(dir) {
   return { digest: outer.digest("hex"), fileCount: files.length };
 }
 
-function readRuns(arg) {
-  const raw = arg === "-" ? readFileSync(0, "utf8") : readFileSync(arg, "utf8");
-  const parsed = JSON.parse(raw);
-  const runs = Array.isArray(parsed) ? parsed : parsed?.workflow_runs;
-  if (!Array.isArray(runs)) fail("runs input is not a JSON array or {workflow_runs:[...]}");
-  return runs;
-}
-
-export function selectCiRun(runs, targetSha, expected = EXPECTED) {
+export function selectCiRun(runs, targetSha, meta, expected = EXPECTED) {
   if (!SHA_RE.test(targetSha)) throw new Error(`target sha is not 40 hex: ${targetSha}`);
+  // Workflow identity is bound in code, not left to the caller:
+  //  * meta must be the real GET /repos/{o}/{r}/actions/workflows/ci.yml body
+  //    (fetched from the FIXED path route inside the workflow step),
+  //  * meta.path must equal the expected workflow file exactly,
+  //  * every run entry must carry workflow_id === meta.id — display `name`
+  //    alone is attacker-influenceable (another workflow file with the same
+  //    displayed name must NOT satisfy the gate).
+  if (!meta || typeof meta !== "object") throw new Error("workflow metadata object required (--workflow-meta)");
+  if (meta.path !== expected.workflowPath) throw new Error(`workflow metadata path ${JSON.stringify(meta.path)} != ${expected.workflowPath}`);
+  if (!Number.isInteger(meta.id) || meta.id <= 0) throw new Error(`workflow metadata id invalid: ${meta.id}`);
   const matching = runs.filter((r) =>
-    r && r.name === expected.workflowName && r.event === expected.event &&
-    r.head_branch === expected.branch && r.head_sha === targetSha);
-  if (matching.length === 0) throw new Error(`no workflow run for repo-scoped CI on ${expected.branch}@${targetSha}`);
+    r && r.workflow_id === meta.id && r.name === expected.workflowName &&
+    r.event === expected.event && r.head_branch === expected.branch && r.head_sha === targetSha);
+  if (matching.length === 0) throw new Error(`no workflow run for ${expected.workflowPath} (id ${meta.id}) on ${expected.branch}@${targetSha}`);
   const byRun = new Map();
   for (const r of matching) {
     const id = r.run_id ?? r.id;
@@ -108,15 +111,32 @@ export function selectCiRun(runs, targetSha, expected = EXPECTED) {
   return { runId: newest[0], runAttempt: newest[1].run_attempt ?? 1, headSha: newest[1].head_sha };
 }
 
+function readJsonFile(arg, what) {
+  const raw = arg === "-" ? readFileSync(0, "utf8") : readFileSync(arg, "utf8");
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    fail(`${what} is not valid JSON: ${e.message}`);
+  }
+}
+
 function cmdWrite(a) {
   const outDir = resolve(a["out-dir"] ?? fail("--out-dir required"));
   const info = resolve(a.info ?? fail("--info required"));
   const sha = a.sha ?? process.env.GITHUB_SHA ?? fail("no sha (arg or GITHUB_SHA)");
   const runId = Number(a["run-id"] ?? process.env.GITHUB_RUN_ID ?? fail("no run-id"));
   const attempt = Number(a.attempt ?? process.env.GITHUB_RUN_ATTEMPT ?? fail("no attempt"));
+  const wfPath = a["workflow-path"] ?? fail("--workflow-path required (fixed source path of the CI workflow)");
+  const wfIdRaw = a["workflow-id"];
+  let wfId = null;
+  if (wfIdRaw !== undefined && wfIdRaw !== "") {
+    wfId = Number(wfIdRaw);
+    if (!Number.isInteger(wfId) || wfId <= 0) fail(`bad workflow id ${wfIdRaw}`);
+  }
   if (!SHA_RE.test(sha)) fail(`sha is not 40 hex: ${sha}`);
   if (!Number.isInteger(runId) || runId <= 0) fail(`bad run id ${runId}`);
   if (!Number.isInteger(attempt) || attempt <= 0) fail(`bad run attempt ${attempt}`);
+  if (wfPath !== EXPECTED.workflowPath) fail(`workflow path ${wfPath} != ${EXPECTED.workflowPath}`);
   const { digest, fileCount } = digestDir(outDir);
   const buildInfo = {
     schema: "lcm-release-build-info/v1",
@@ -124,6 +144,8 @@ function cmdWrite(a) {
     runId,
     runAttempt: attempt,
     workflow: EXPECTED.workflowName,
+    workflowId: wfId,
+    workflowPath: wfPath,
     event: EXPECTED.event,
     branch: EXPECTED.branch,
     repo: EXPECTED.repo,
@@ -139,14 +161,18 @@ function cmdWrite(a) {
 
 function cmdGate(a) {
   const sha = a["target-sha"] ?? fail("--target-sha required");
-  const runs = readRuns(a.runs ?? "-");
+  const runs = readJsonFile(a.runs ?? fail("--runs required"), "runs input");
+  const runList = Array.isArray(runs) ? runs : runs?.workflow_runs;
+  if (!Array.isArray(runList)) fail("runs input is not a JSON array or {workflow_runs:[...]}");
+  if (!a["workflow-meta"]) fail("--workflow-meta required (GET /repos/{o}/{r}/actions/workflows/ci.yml body)");
+  const meta = readJsonFile(a["workflow-meta"], "workflow meta input");
   let selected;
   try {
-    selected = selectCiRun(runs, sha);
+    selected = selectCiRun(runList, sha, meta);
   } catch (e) {
     fail(e.message);
   }
-  process.stdout.write(JSON.stringify(selected) + "\n");
+  process.stdout.write(JSON.stringify({ ...selected, workflowId: meta.id }) + "\n");
 }
 
 function cmdVerify(a) {
@@ -154,6 +180,9 @@ function cmdVerify(a) {
   const sha = a.sha ?? fail("--sha required");
   const runId = Number(a["run-id"] ?? fail("--run-id required"));
   const attempt = Number(a.attempt ?? fail("--attempt required"));
+  const meta = readJsonFile(a["workflow-meta"] ?? fail("--workflow-meta required"), "workflow meta input");
+  if (!meta || typeof meta !== "object" || meta.path !== EXPECTED.workflowPath) fail("workflow metadata path mismatch");
+  if (!Number.isInteger(meta.id) || meta.id <= 0) fail(`workflow metadata id invalid: ${meta.id}`);
   const infoPath = join(dir, "build-info.json");
   let info;
   try {
@@ -164,6 +193,12 @@ function cmdVerify(a) {
   if (info.schema !== "lcm-release-build-info/v1") fail(`unexpected schema ${info.schema}`);
   if (info.repo !== EXPECTED.repo) fail(`build-info repo mismatch: ${info.repo}`);
   if (info.workflow !== EXPECTED.workflowName) fail(`build-info workflow mismatch: ${info.workflow}`);
+  if (info.workflowPath !== EXPECTED.workflowPath) fail(`build-info workflowPath mismatch: ${info.workflowPath}`);
+  // workflowId cross-check when CI recorded one (CI cannot always know its
+  // numeric workflow id; the gate step above is the mandatory id enforcement)
+  if (info.workflowId !== null && info.workflowId !== undefined && info.workflowId !== meta.id) {
+    fail(`build-info workflowId ${info.workflowId} != metadata ${meta.id}`);
+  }
   if (info.event !== EXPECTED.event) fail(`build-info event mismatch: ${info.event}`);
   if (info.branch !== EXPECTED.branch) fail(`build-info branch mismatch: ${info.branch}`);
   if (info.commitSha !== sha) fail(`build-info SHA ${info.commitSha} != deploy SHA ${sha}`);

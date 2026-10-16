@@ -38,9 +38,10 @@ if [ ! -e "$LCM_CI_APP_ROOT/.credentials" ] || [ ! -e "$LCM_CI_APP_ROOT/.runner"
   echo "error: no completed registration in the app root (nothing to deconfigure; if partial, tear down manually)" >&2
   exit 1
 fi
-RUNNER_JSON="$(cat "$LCM_CI_APP_ROOT/.runner")"
-runner_identity_matches "$RUNNER_JSON" "$LCM_CI_RUNNER_NAME" || {
-  echo "error: .runner agentName does not match expected $LCM_CI_RUNNER_NAME — refusing" >&2
+# plutil-based strict JSON parse of the two fixed fields; file path (opened by
+# this CI-uid process), values compared to constants only — never used as paths.
+runner_identity_matches "$LCM_CI_APP_ROOT/.runner" "$LCM_CI_RUNNER_NAME" || {
+  echo "error: .runner agentName/agentId invalid or does not match expected identity — refusing" >&2
   exit 1
 }
 

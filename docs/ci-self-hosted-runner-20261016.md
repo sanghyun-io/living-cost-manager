@@ -19,7 +19,7 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
 | runner 키트·워크플로·테스트 | `feat/ci-runner-a98c952d` 브랜치 **로컬 커밋** (미푸시·미공개) |
 | 아키텍처 | 공식 runner 단일 appRoot 설계로 전면 재작성 (§2) |
 | 공식 패키지 실측 검증 | v2.338.0 osx-arm64 tarball SHA-256 일치, 일반 사용자 임시 디렉터리에서 `bin/Runner.Listener --help` 정상(exit 0), config.sh/run.sh가 자기 디렉터리를 appRoot로 self-locate함을 소스로 확인 (§3) |
-| kit 테스트 | **43 passed** (security.test.ts 26 + release-gate.test.ts 17, 픽스처 트리에서 실제 bash/node 실행 — regex 존재 검사 아님) |
+| kit 테스트 | **48 passed** (security.test.ts + release-gate.test.ts, 픽스처 트리에서 실제 bash/plutil/node 실행 — regex 존재 검사 아님; 2차 리뷰 6건 회귀 테스트 포함) |
 | shellcheck / `bash -n` / `node --check` / `plutil -lint` / YAML parse | 전부 통과·valid |
 | OS 계정·LaunchDaemon | **미존재·미설치** — root 실행은 리뷰 통과 후 Owner 터미널 전용 (§6) |
 | runner 등록 | **미 수행** — registration token 발급 자체가 아직 없음(의도) |
@@ -54,7 +54,8 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
   app/                                                        ← LEAF = 공식 appRoot 그대로
                                                                 (lcm-ci 소유 0700, tarball 원본
                                                                  mode 보존: bin/config.sh/run.sh/externals…)
-/var/log/gamja-ci/lcm-production/                             ← 0700 root, 파일은 root가 사전 생성
+/private/var/log/gamja-ci/lcm-production/                      ← canonical(/var은 macOS symlink);
+                                                                  0700 root, 파일은 root가 사전 생성
   launchd.out.log launchd.err.log                               0640 root:wheel, **ACL 일체 없음**
                                                                 (launchd가 root로 fd를 열어 uid
                                                                 강등 자식에게 상속 — CI는 경로
@@ -126,14 +127,20 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
   가짜 PR 강제 없음). fork는 main push 불가, ci.yml은 push:[main] 전용이라
   비신뢰 PR/dispatch가 runner에 도달하는 경로 없음.
 - **GITHUB_TOKEN**: 저장소 기본 `default_workflow_permissions=read` 유지.
-  ci.yml upload job `actions: write`(아티팩트 업로드 용도만), deploy의
-  verify-ci·deploy job `actions: read`(게이트 조회·아티팩트 다운로드).
-- **CI-success gate**: deploy-pages.yml의 verify-ci가
-  `scripts/ci/release-gate.mjs gate`로 API JSON을 실제 파싱 — 워크플로명/
-  event=push/head_branch=main/head_sha exact/status=completed/conclusion=success +
-  run별 최신 attempt만 인정(이전 attempt 성공 후 재실패하면 무효화). 통과 시
-  runId·runAttempt를 출력하고 deploy의 아티팩트 검증(build-info + content
-  digest 재계산 + attempt 대조)에 바인딩 — 승인 후 재빌드 없음.
+  ci.yml build-test는 `contents: read`만 (upload-artifact은 Actions 런타임 artifact
+  service 어서셔 — repo API `actions: write` 불요, 2차 리뷰 후 제거; 첫 실런에서
+  권한 오류가 실증되면 근거와 함께 최소 재선언), deploy의 verify-ci·deploy job만
+  `actions: read`(게이트 조회·아티팩트 다운로드).
+- **CI-success gate**(2차 리뷰 후 hardened): verify-ci가 워크플로 id를 **고정
+  경로 API** GET `/actions/workflows/ci.yml`로만 발견하고 run 조회도
+  `/actions/workflows/{id}/runs` 스코프 엔드포인트 사용 → release-gate.mjs gate가
+  API JSON 파싱 시 **workflow_id==meta.id + meta.path===".github/workflows/ci.yml"
+  (검증기 코드 상수 강제, 호출자 임의 id 파라미터 경로 없음)** + event=push/
+  head_branch=main/head_sha exact/status=completed/conclusion=success + run별 최신
+  attempt만 인정(동일 표시 이름의 다른 워크플로 파일 성공run 거부 — REPRO 회귀
+  테스트). 통과 시 runId·runAttempt·workflowId를 출력하고 deploy 아티팩트 검증
+  (build-info workflowPath + content digest 재계산 + attempt/workflow-meta 대조)
+  에 바인딩 — 승인 후 재빌드 없음.
 
 ## 5. 워크플로 키트/인터페이스
 
@@ -190,3 +197,42 @@ pnpm test:marketing          # 무변경 통과
 
 (공식 패키지 proof 테스트는 보호 캐시 tarball이 있는 머신에서만 실행되고
 CI에서는 자동 skip. CI 네트워크·근무 계정 홈에 바이너리를 받지 않는다.)
+
+## 9. 2차 독립 리뷰 FAIL(1387814) → 6건 수정 (2026-10-17)
+
+독립 리뷰 ses_ebaa9ac3…가 43 pass에도 실제 버그 6건을 지적, 모두 수정 후
+**48 passed**로 재커밋. 회귀 테스트를 각 항목에 신설했고(가능 항목은 이전
+소스에서 실패했어야 할 케이스 명시):
+
+1. **P1 ACL 미검사**: POSIX owner/mode만 보면 allow·inherited ACE가 root 0755
+   부모/공개파에서도 다른 주체 write/delete 가능. lib `expect_acl_safe` 신설 —
+   ACE 0건 또는 엄격 deny-only만 허용, 임의 allow(read전용 포함)·unparseable
+   줄은 fail-closed. 적용 지점: 01(/Users, 미래 경로 체인, 생성 후 홈),
+   02(앵커→부모 전 component·생성 직후 재검사·로그 체인·공개 파일·사전 로그
+   파일, 모든 변경/핸드오프 이전), 03·04(부모+공개파일+LaunchDaemons),
+   06(precondition). **ACL 추가/삭제/변경 없음** — 합법 시스템 deny-only는
+   통과, blocker성 allow ACE는 조사 후 Owner 결정(문서화 차단).
+2. **P2 01 lib 미import**: `reject_symlink_components` 호출하나 source 없어
+   command-not-found로 전체 불능 → 정상 source + 프리플라이트 재편. 정적
+   가드 테스트(헬퍼 사용 스크립트 전수 source 검사).
+3. **P2 mkdir birth mode**: `umask 077` + `mkdir -m`로 0755 기본 창 제거.
+4. **P2 /var symlink + 부분 실패 순서**: 로그 기본 경로 canonical
+   `/private/var/log/...` 통일(env·문서), 02를 페이즈화해 실패 가능 검증과
+   root 소유 산출물 생성을 모두 끝난 뒤 **CI 소유권 핸드오프(chown→rename)
+   를 최후 변경**으로 이동. 핸드오프 전 실패 시 leaf·control 파일·manifest·
+   로그 잔존 0(테스트 단언). 핸드오프 후 예외 시 root-private staging이라
+   trap 정리 외 자동조치 없음, 재실행 거부+PARTIAL 보고(위험 재시도·자동
+   삭제 없음).
+5. **P2 .runner 파서**: 실제 upstream은 pretty-printed JSON — sed 근사가
+   정당 runner를 거부. `/usr/bin/plutil -extract … raw`(JSON 지원, 실측)로
+   표준 파싱, agentId 숫자·agentName 상수 exact, malformed/type 오류
+   fail-closed, 파싱은 CI-uid 스크립트만 파일 경로로 수행(root은 exitcode와
+   단순 필드만). 공식 바이너리 문자열 실증: `.runner` 키는 agentId/agentName/
+   clientId — 저장소 URL 필드 없음. 저장소 바인딩은 registration token 자체의
+   repo scope + 운영자 gh API(05-verify·06 사전 조회)로 확인(문서 정정).
+6. **P2 gate 신원 + 권한**: 표시 이름만 검사는 REPRO(동명 `not-ci.yml` 성공run)
+   통과 — workflow_id==meta.id + meta.path 상수 강제 + id 스코프 엔드포인트로
+   수정. build-test `actions: write` 제거(upload-artifact는 런타임 artifact
+   service 어서셔; 게이트 job만 actions: read 유지).
+
+root 실행·등록·푸시는 여전히 0회(리뷰 대기 상태 유지).

@@ -102,7 +102,16 @@ function makeFixture(opts: { configStub?: string; runnerStub?: boolean } = {}) {
 }
 
 function cleanup(base: string) {
-  fs.rmSync(base, { recursive: true, force: true });
+  // macOS temp cleanup can race (ENOTEMPTY/EACCES with inherited ACEs);
+  // retrying is safe here because these are our own fixture trees.
+  for (let i = 0; i < 3; i++) {
+    try {
+      fs.rmSync(base, { recursive: true, force: true, maxRetries: 3 });
+      return;
+    } catch {
+      /* keep trying; leftover fixtures live under the system tmpdir */
+    }
+  }
 }
 
 const FIXTURES: string[] = [];
@@ -183,18 +192,79 @@ describe("lib/lib-runner.sh validation helpers (executed for real)", () => {
     }
   });
 
-  it("runner identity parsing compares simple fields only (fail-closed on crafted dupes)", () => {
-    const good = '{"agentId":123,"agentName":"lcm-prod-macmini-01","clientId":"abc"}';
-    const bad = '{"agentId":123,"agentName":"other-runner","clientId":"abc"}';
-    const dup = '{"agentName":"lcm-prod-macmini-01","agentName":"evil","agentId":1}';
-    const check = (json: string, name: string, id?: string) =>
-      bash(`${src}; runner_identity_matches "$J" "$N" "${id ?? ""}" && echo Y || echo N`, { J: json, N: name });
-    expect(check(good, TEST_NAME).stdout).toContain("Y");
-    expect(check(bad, TEST_NAME).stdout).toContain("N");
-    // duplicate field: greedy match takes the LAST value → mismatch → refuse
-    expect(check(dup, TEST_NAME).stdout).toContain("N");
-    expect(check(good, TEST_NAME, "123").stdout).toContain("Y");
-    expect(check(good, TEST_NAME, "999").stdout).toContain("N");
+  it("runner identity parsing via real plutil accepts pretty + minified, rejects bad (file-path API)", () => {
+    const base = tmpBase();
+    FIXTURES.push(base);
+    const mk = (name: string, body: string) => {
+      const ff = path.join(base, name);
+      fs.writeFileSync(ff, body);
+      return ff;
+    };
+    // Actual upstream .runner files are PRETTY-PRINTED JSON ("agentId": 42
+    // with a space, multi-line). The old sed parser rejected those, which
+    // would have blocked legitimate removal — regression guard (review P2).
+    const pretty = mk("pretty.runner", `{\n  "agentId": 42,\n  "agentName": "${TEST_NAME}",\n  "clientId": "00000000-0000-0000-0000-000000000000"\n}\n`);
+    const minified = mk("min.runner", `{"agentId":42,"agentName":"${TEST_NAME}"}`);
+    const wrong = mk("wrong.runner", `{"agentId": 42, "agentName": "other-runner"}`);
+    const malformed = mk("bad.runner", "not json at all");
+    const idString = mk("idstr.runner", `{"agentId": "abc", "agentName": "${TEST_NAME}"}`);
+    const nameObj = mk("obj.runner", `{"agentId": 42, "agentName": {"nested": "${TEST_NAME}"}}`);
+    const missing = mk("miss.runner", `{"clientId": "x"}`);
+    const check = (ff: string, name: string, id?: string) =>
+      bash(`${src}; runner_identity_matches "${ff}" "$N" "${id ?? ""}" && echo Y || echo N`, { N: name });
+    expect(bash("test -x /usr/bin/plutil").status, "plutil required on macOS host").toBe(0);
+    expect(check(pretty, TEST_NAME).stdout, "pretty-printed valid .runner must match").toContain("Y");
+    expect(check(minified, TEST_NAME).stdout).toContain("Y");
+    expect(check(pretty, TEST_NAME, "42").stdout).toContain("Y");
+    expect(check(pretty, TEST_NAME, "99").stdout).toContain("N");
+    expect(check(wrong, TEST_NAME).stdout).toContain("N");
+    expect(check(malformed, TEST_NAME).stdout, "malformed JSON fails closed").toContain("N");
+    expect(check(idString, TEST_NAME).stdout, "non-numeric agentId fails closed").toContain("N");
+    expect(check(nameObj, TEST_NAME).stdout, "object-typed agentName must not match").toContain("N");
+    expect(check(missing, TEST_NAME).stdout).toContain("N");
+    const extract = bash(`${src}; runner_json_field "${pretty}" agentName`);
+    expect(extract.stdout.trim()).toBe(TEST_NAME);
+  });
+
+  it("expect_acl_safe: none/deny-only pass; allow, mixed, inherited, unparseable fail closed", () => {
+    const base = tmpBase();
+    FIXTURES.push(base);
+    const dir = path.join(base, "aclcheck");
+    fs.mkdirSync(dir);
+    const U = os.userInfo().username;
+    const res = (p: string) => bash(`${src}; expect_acl_safe "${p}" && echo SAFE || echo REJECT`).stdout.trim();
+    expect(res(dir), "clean dir").toBe("SAFE");
+    // explicit deny ACE (macOS ships deny-delete style ACEs on system paths)
+    const a1 = bash(`chmod +a "group:admin deny delete" "${dir}"`);
+    if (a1.status === 0) expect(res(dir), "deny-only ACE").toBe("SAFE");
+    // allow write ACE fails even with perfect POSIX mode
+    const a2 = bash(`chmod +a "user:${U} allow write,append" "${dir}"`);
+    if (a2.status === 0) expect(res(dir), "allow ACE").toBe("REJECT");
+    bash(`chmod -a "user:${U} allow write,append" "${dir}"`);
+    // allow read-only ACE also fails (conservative policy)
+    bash(`chmod +a "user:${U} allow readattr" "${dir}"`);
+    if (a2.status === 0) expect(res(dir), "read-only allow ACE").toBe("REJECT");
+    bash(`chmod -a "user:${U} allow readattr" "${dir}"`);
+    // inherited allow ACE lands on FRESH children — post-creation recheck is
+    // mandatory, not just preflight of existing components
+    const parent = path.join(base, "parent");
+    fs.mkdirSync(parent);
+    const a3 = bash(`chmod +a "user:${U} allow write inherit(file_inherit,directory_inherit)" "${parent}"`);
+    if (a3.status === 0) {
+      const child = path.join(parent, "fresh-child");
+      fs.mkdirSync(child);
+      expect(res(child), "fresh mkdir under inherited allow ACE").toBe("REJECT");
+    }
+    // unparseable extra lines fail closed (stubbed ls)
+    const stub = path.join(base, "bin");
+    fs.mkdirSync(stub);
+    fs.writeFileSync(
+      path.join(stub, "ls"),
+      "#!/bin/bash\nif printf '%s' \"$*\" | /usr/bin/grep -q 'lde'; then printf -- '-drwxr-xr-x  1 root wheel 0 1 Jan 1 x\n 0: ???garbage???\n'; exit 0; fi\nexec /bin/ls \"$@\"\n"
+    );
+    fs.chmodSync(path.join(stub, "ls"), 0o755);
+    const g = bash(`PATH="${stub}:$PATH"; source "${KIT}/lib/lib-runner.sh"; expect_acl_safe "${dir}" && echo SAFE || echo REJECT`);
+    expect(g.stdout.trim(), "unparseable ACE line").toBe("REJECT");
   });
 });
 
@@ -359,6 +429,7 @@ describe("02-install-bundle.sh real logic in fixture mode (no root/network)", ()
       LCM_CI_PARENT: path.join(anchor, "Application Support/GamjaWorld/CI/lcm-production"),
       LCM_CI_APP_ROOT: path.join(anchor, "Application Support/GamjaWorld/CI/lcm-production/app"),
       LCM_CI_LOG_DIR: path.join(base, "varlog/lcm-production"),
+      LCM_CI_LOG_ANCHOR: path.join(base, "varlog"),
       LCM_CI_ACCOUNT: os.userInfo().username,
     };
     const r = bash(`bash "${KIT}/02-install-bundle.sh"`, env);
@@ -410,6 +481,38 @@ describe("02-install-bundle.sh real logic in fixture mode (no root/network)", ()
     expect(tampered.status).not.toBe(0);
   }, 240_000);
 
+  it("refuses when the bundle parent carries an (inherited) allow-write ACL, without mutation", () => {
+    const base = tmpBase();
+    FIXTURES.push(base);
+    const anchor = path.join(base, "Library");
+    fs.mkdirSync(anchor, { recursive: true });
+    const env = {
+      LCM_CI_TEST_MODE: "1",
+      LCM_CI_PKG: officialPkg,
+      LCM_CI_INSTALL_ANCHOR: anchor,
+      LCM_CI_GAMJAWORLD_DIR: path.join(anchor, "Application Support/GamjaWorld"),
+      LCM_CI_CI_BASE: path.join(anchor, "Application Support/GamjaWorld/CI"),
+      LCM_CI_PARENT: path.join(anchor, "Application Support/GamjaWorld/CI/lcm-production"),
+      LCM_CI_APP_ROOT: path.join(anchor, "Application Support/GamjaWorld/CI/lcm-production/app"),
+      LCM_CI_LOG_DIR: path.join(base, "varlog/lcm-production"),
+      LCM_CI_LOG_ANCHOR: path.join(base, "varlog"),
+      LCM_CI_ACCOUNT: os.userInfo().username,
+    };
+    // pre-create the CI base with an inherited allow-write ACE for a
+    // (hypothetical) second user class: emulate the CI principal as self
+    const pre = path.join(anchor, "Application Support/GamjaWorld/CI");
+    fs.mkdirSync(pre, { recursive: true });
+    const U = os.userInfo().username;
+    const setAcl = bash(`chmod +a "user:${U} allow write,append,delete_child inherit(file_inherit,directory_inherit)" "${pre}"`);
+    if (setAcl.status !== 0) return; // ACL capability absent in odd envs — skip quietly
+    const r = bash(`bash "${KIT}/02-install-bundle.sh"`, env);
+    expect(r.status, "must refuse parent with allow ACE").not.toBe(0);
+    expect((r.stderr + r.stdout).toLowerCase()).toContain("acl");
+    // no leaf, no public files — refused at preflight/creation validation
+    expect(existsSync(env.LCM_CI_APP_ROOT)).toBe(false);
+    expect(existsSync(path.join(env.LCM_CI_PARENT, "manifest.txt"))).toBe(false);
+  });
+
   it("refuses a wrong-sha package before touching the leaf", () => {
     const base = tmpBase();
     FIXTURES.push(base);
@@ -430,12 +533,19 @@ describe("02-install-bundle.sh real logic in fixture mode (no root/network)", ()
       LCM_CI_PARENT: path.join(anchor, "Application Support/GamjaWorld/CI/lcm-production"),
       LCM_CI_APP_ROOT: path.join(anchor, "Application Support/GamjaWorld/CI/lcm-production/app"),
       LCM_CI_LOG_DIR: path.join(base, "varlog/lcm-production"),
+      LCM_CI_LOG_ANCHOR: path.join(base, "varlog"),
       LCM_CI_ACCOUNT: os.userInfo().username,
     };
     const r = bash(`bash "${KIT}/02-install-bundle.sh"`, env);
     expect(r.status).not.toBe(0);
-    // FAILED must not leave a leaf behind (staging cleaned)
+    // FAILED before the ownership handoff must leave: no leaf, no public
+    // control files, no manifest, no log files (all abortable checks and the
+    // SHA gate run BEFORE any CI-owned/root-owned artifact is persisted).
     expect(existsSync(env.LCM_CI_APP_ROOT)).toBe(false);
+    for (const pub of ["register.sh", "runner-config.env", "lib.sh", "manifest.txt"]) {
+      expect(existsSync(path.join(env.LCM_CI_PARENT, pub)), pub).toBe(false);
+    }
+    expect(existsSync(path.join(env.LCM_CI_LOG_DIR, "launchd.out.log"))).toBe(false);
   });
 });
 
@@ -573,6 +683,26 @@ describe("workflow + plist specification-level guards", () => {
     expect(execLines.some((l) => /^\s*(sudo\s+)?(rm\s+-rf|pkill|killall)/.test(l) || /^\s*dscl .* -delete/.test(l))).toBe(false);
     expect(s).not.toContain("pkill");
     expect(s).not.toContain("killall");
+  });
+
+  it("every script using lib helpers sources lib-runner.sh (01 command-not-found regression)", () => {
+    const helpers = ["reject_symlink_components", "expect_real_dir", "expect_dir_owner_uid", "expect_dir_mode",
+      "expect_dir_no_group_world_write", "expect_regular_file", "expect_executable_regular_file",
+      "valid_token_shape", "require_not_root", "runner_json_field", "runner_identity_matches",
+      "expect_acl_safe", "expect_no_acl"];
+    const scripts = fs.readdirSync(KIT, { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.endsWith(".sh"))
+      .map((d) => path.join(KIT, d.name))
+      .concat(fs.readdirSync(path.join(KIT, "rootctl")).map((n) => path.join(KIT, "rootctl", n)))
+      .filter((p) => p.endsWith(".sh"));
+    for (const sp of scripts) {
+      const t = fs.readFileSync(sp, "utf8");
+      const used = helpers.filter((h) => new RegExp("^.*[;&|(\\s]" + h + "\\s", "m").test(t) && !t.split("\n").some((l) => l.trim().startsWith(h + "()")));
+      if (used.length > 0) {
+        const sourced = new RegExp("source[^\\n]*(lib-runner[.]sh|lib[.]sh)").test(t);
+        expect(sourced, `${path.basename(sp)} uses ${used.join(",")} but does not source the lib`).toBe(true);
+      }
+    }
   });
 
   it("ephemeral PG harness unchanged: unix socket only, peer auth, no TCP (461-test setup)", () => {

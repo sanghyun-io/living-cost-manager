@@ -61,13 +61,24 @@ fi
 
 [ -d "$LOG_DIR" ] && [ ! -L "$LOG_DIR" ] || { echo "error: log dir missing — run 02 first" >&2; exit 1; }
 expect_dir_owner_uid "$LOG_DIR" 0 || { echo "error: log dir not root-owned" >&2; exit 1; }
+expect_acl_safe "$LOG_DIR" || { echo "error: log dir carries allow/unparseable ACL — refusing" >&2; exit 1; }
 for logfile in launchd.out.log launchd.err.log; do
   LF="$LOG_DIR/$logfile"
   expect_regular_file "$LF" || { echo "error: pre-created log $LF missing" >&2; exit 1; }
   [ "$(stat -f '%u' "$LF")" = 0 ] || { echo "error: log $LF not root-owned" >&2; exit 1; }
-  expect_no_acl "$LF" || { echo "error: log $LF carries ACL entries — unexpected" >&2; exit 1; }
+  expect_acl_safe "$LF" || { echo "error: log $LF carries allow ACL entries — unexpected" >&2; exit 1; }
 done
 expect_no_acl "$LOG_DIR" || { echo "error: log dir carries ACL entries — unexpected" >&2; exit 1; }
+
+# Daemon install target must also be root-trusted (owner + no group/world
+# write + deny-only-or-no ACL). We verify, never mutate.
+expect_dir_owner_uid /Library 0 || { echo "error: /Library not root-owned" >&2; exit 1; }
+expect_dir_owner_uid /Library/LaunchDaemons 0 || { echo "error: /Library/LaunchDaemons not root-owned" >&2; exit 1; }
+expect_dir_no_group_world_write /Library/LaunchDaemons || { echo "error: /Library/LaunchDaemons group/world writable" >&2; exit 1; }
+expect_acl_safe /Library/LaunchDaemons || { echo "error: /Library/LaunchDaemons carries allow/unparseable ACL — investigate first" >&2; exit 1; }
+for f in run-runner.sh register.sh deregister.sh runner-status.sh lib.sh runner-config.env manifest.txt; do
+  expect_acl_safe "$PARENT/$f" || { echo "error: $PARENT/$f carries allow/unparseable ACL — refusing" >&2; exit 1; }
+done
 
 if [ -e "$PLIST_PATH" ] || [ -L "$PLIST_PATH" ]; then
   echo "error: $PLIST_PATH already exists — refusing to overwrite another install" >&2

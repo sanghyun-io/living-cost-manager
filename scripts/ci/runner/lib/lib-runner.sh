@@ -72,6 +72,50 @@ expect_regular_file() {
   [ -f "$p" ] && [ ! -L "$p" ]
 }
 
+# POSIX checks alone are insufficient on APFS: an ACL entry (possibly
+# inherited) can grant another principal write/delete even while the mode is
+# 0755 root-owned. Every root-trusted path therefore passes BOTH the POSIX
+# owner/mode checks and this ACL check, before any mutation or ownership
+# handoff.
+#
+# Policy (conservative; we verify, never mutate ACLs):
+#   * zero ACL entries                -> accept (standard state of /Library,
+#                                       /Users, /private/var/log on this host)
+#   * every entry is a strict deny    -> accept (macOS ships deny-delete and
+#                                       similar deny ACEs on system paths)
+#   * ANY allow entry (even read)     -> REJECT
+#   * ANY unparseable line            -> REJECT (fail closed)
+# A rejection means a human investigates; this kit never clears or rewrites
+# ACLs on paths it did not create (no permission weakening, no auto-delete).
+expect_acl_safe() {
+  local p="$1" out n line
+  out="$(LC_ALL=C ls -lde "$p" 2>&1)" || return 1
+  n="$(printf '%s\n' "$out" | wc -l | tr -d '[:space:]')"
+  [ "$n" -le 1 ] && return 0
+  while IFS= read -r line; do
+    # any allow ACE fails
+    case "$line" in
+      *" allow "*) return 1 ;;
+    esac
+    # strict deny-ACE shape only; anything else fails closed
+    printf '%s\n' "$line" | LC_ALL=C grep -Eq \
+      '^[[:space:]]*[0-9]+:[[:space:]]+(user|group|everyone)[:.][^[:space:]]*[[:space:]]+deny[[:space:]]+[A-Za-z0-9_.,-]+([[:space:]]+\([A-Za-z0-9_.,-]+\))?[[:space:]]*$' \
+      || return 1
+  done <<EOF
+$(printf '%s\n' "$out" | LC_ALL=C tail -n +2)
+EOF
+  return 0
+}
+
+# Stricter variant used on artifacts THIS script created (fresh files should
+# carry no ACL at all; deny-only is still tolerated to survive inherited deny
+# ACEs on some hosts).
+expect_no_acl() {
+  local p="$1" lines
+  lines="$(LC_ALL=C ls -lde "$p" 2>/dev/null | wc -l | tr -d '[:space:]')" || return 1
+  [ "$lines" = "1" ] || expect_acl_safe "$p"
+}
+
 expect_executable_regular_file() {
   local p="$1"
   [ -f "$p" ] && [ ! -L "$p" ] && [ -x "$p" ]
@@ -98,34 +142,35 @@ require_not_root() {
   return 0
 }
 
-# Parse ONLY simple identity fields from the official .runner JSON. Content is
-# CI-owned and therefore untrusted: callers must compare extracted values
-# against fixed constants and must never use them as paths.
+# Parse ONLY simple identity fields from the official .runner JSON, via the
+# system JSON-capable parser /usr/bin/plutil (never sed approximations).
+# Real Runner.Listener writes .runner PRETTY-PRINTED (multi-line, space after
+# colon); sed regexes that require `"field":"value"` reject valid runners.
+# Content is CI-owned and therefore untrusted: callers must compare extracted
+# values against fixed constants/types and must never use them as paths.
+# plutil supports JSON input for -extract (verified on this host 2026-10-17
+# against pretty, minified and malformed fixtures). Missing plutil = fail
+# closed — no substitute parser.
 runner_json_field() {
-  # $1 = json text, $2 = field name (fixed literal from our own code)
-  local json="$1" field="$2"
-  printf '%s' "$json" | tr -d '\n' \
-    | sed -n "s/.*\"$field\":\"\{0,1\}\([^,\"}]*\)\"\{0,1\}[,}].*/\1/p" | head -n 1
+  # $1 = .runner FILE PATH (opened by the caller's own uid), $2 = fixed field
+  [ -x /usr/bin/plutil ] || return 1
+  /usr/bin/plutil -extract "$2" raw -o - "$1" 2>/dev/null
 }
 
 runner_identity_matches() {
-  # $1 = .runner json text, $2 = expected agent name, $3 = expected agent id (optional)
-  local json="$1" want_name="$2" want_id="${3:-}" name id
-  name="$(runner_json_field "$json" agentName)"
-  id="$(runner_json_field "$json" agentId)"
+  # $1 = .runner file path, $2 = expected agent name, $3 = expected agent id (optional)
+  local file="$1" want_name="$2" want_id="${3:-}" name id
+  [ -n "$want_name" ] || return 1
+  name="$(runner_json_field "$file" agentName)" || true
+  id="$(runner_json_field "$file" agentId)" || true
+  # exact string comparison against fixed constants; object/array/other JSON
+  # types would surface as raw JSON text here and cannot equal the constants
+  [ -n "$name" ] || return 1
   [ "$name" = "$want_name" ] || return 1
+  [ -n "$id" ] || return 1
+  case "$id" in ''|*[!0-9]*) return 1 ;; esac   # agentId must be numeric
   if [ -n "$want_id" ]; then
     [ "$id" = "$want_id" ] || return 1
   fi
   return 0
-}
-
-# Verify a path carries NO POSIX ACL entries. On macOS the ls mode column
-# never shows '+': `ls -lde` prints extra numbered lines for each ACL entry,
-# so a clean file/dir produces exactly one line. (The '@' xattr marker, e.g.
-# com.apple.provenance on fresh files, is NOT an ACL and is fine here.)
-expect_no_acl() {
-  local p="$1" lines
-  lines="$(ls -lde "$p" 2>/dev/null | wc -l | tr -d '[:space:]')" || return 1
-  [ "$lines" = "1" ]
 }

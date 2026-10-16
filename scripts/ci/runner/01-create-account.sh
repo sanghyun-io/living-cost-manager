@@ -15,6 +15,13 @@
 # "repair" path — re-creating or re-chowning an existing identity is exactly
 # the TOCTOU/repair hazard this kit avoids. 06-remove.sh preserves the
 # account; full teardown is a separate manual, approved step.
+#
+# ALL future install paths (bundle parent/leaf, log dir, plist) are validated
+# for absence, symlink-free canonical form, POSIX ownership AND effective ACLs
+# (see lib/lib-runner.sh policy: any allow ACE or unparseable entry = reject,
+# deny-only tolerated) BEFORE any dscl/mkdir mutation happens. An inherited
+# ACL on /Users or the bundle ancestors blocks provisioning here instead of
+# becoming a privilege escape later.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -25,7 +32,10 @@ fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/runner-version.env"
+# shellcheck disable=SC1091
+source "$HERE/lib/lib-runner.sh"
 
+# Fresh-install-only: identity + every future path must be absent.
 if dscl . -read "/Users/$LCM_CI_ACCOUNT" >/dev/null 2>&1; then
   echo "error: account $LCM_CI_ACCOUNT already exists — refusing (fresh-install-only, no re-configuration)" >&2
   exit 1
@@ -38,16 +48,43 @@ if [ -e "/Users/$LCM_CI_ACCOUNT" ] || [ -L "/Users/$LCM_CI_ACCOUNT" ]; then
   echo "error: /Users/$LCM_CI_ACCOUNT already exists — refusing (unexpected state, no mutation)" >&2
   exit 1
 fi
-# Unexpected pre-existing install paths mean a previous (partial) install.
-for p in "$LCM_CI_APP_ROOT" "$LCM_CI_PARENT/runner-config.env" "$LCM_CI_LOG_DIR/launchd.out.log"; do
+for p in "$LCM_CI_APP_ROOT" "$LCM_CI_PARENT/runner-config.env" "$LCM_CI_LOG_DIR/launchd.out.log" \
+         "/Library/LaunchDaemons/$LCM_CI_LAUNCHD_LABEL.plist"; do
   if [ -e "$p" ] || [ -L "$p" ]; then
     echo "error: $p already exists — refusing account creation on top of a partial install" >&2
     exit 1
   fi
 done
 
-# /Users itself must be the root-owned real directory (it is on macOS).
-reject_symlink_components "/Users" || { echo "error: symlink in /Users path" >&2; exit 1; }
+# Path preflight (canonical, symlink-free, ownership + mode + ACL) for the
+# components that already exist. Missing bundle/log components are fine here;
+# 02 creates them fresh and re-validates after creation (inherited ACEs).
+reject_symlink_components "/Users" || { echo "error: symlink component in /Users path" >&2; exit 1; }
+expect_dir_owner_uid "/Users" 0 || { echo "error: /Users not root-owned" >&2; exit 1; }
+expect_dir_no_group_world_write "/Users" || { echo "error: /Users group/world writable" >&2; exit 1; }
+expect_acl_safe "/Users" || {
+  echo "error: /Users carries an allow/unparseable ACL entry — refusing; investigate before provisioning (this kit never modifies ACLs)" >&2
+  exit 1; }
+
+# Canonical bundle/log path components (validate existing ones only).
+for chain in "$LCM_CI_GAMJAWORLD_DIR" "$LCM_CI_LOG_DIR"; do
+  probe=""
+  IFS='/'
+  for seg in $chain; do
+    [ -n "$seg" ] || { probe=""; continue; }
+    probe="$probe/$seg"
+    if [ -L "$probe" ]; then
+      echo "error: symlink component at $probe — refusing (use canonical /private/... paths)" >&2
+      exit 1
+    fi
+    if [ -d "$probe" ]; then
+      expect_dir_owner_uid "$probe" 0 || { echo "error: $probe not root-owned" >&2; exit 1; }
+      expect_dir_no_group_world_write "$probe" || { echo "error: $probe group/world writable" >&2; exit 1; }
+      expect_acl_safe "$probe" || { echo "error: $probe carries allow/unparseable ACL — refusing" >&2; exit 1; }
+    fi
+  done
+  unset IFS
+done
 
 free_gid() {
   local candidate=550
@@ -78,19 +115,25 @@ dscl . -create "/Users/$LCM_CI_ACCOUNT" NFSHomeDirectory "/Users/$LCM_CI_ACCOUNT
 dscl . -create "/Users/$LCM_CI_ACCOUNT" UserShell /usr/bin/false
 dscl . -create "/Users/$LCM_CI_ACCOUNT" Hidden 1
 
-mkdir "/Users/$LCM_CI_ACCOUNT"
+# Home directory: birth mode 0700 directly (no 0755 window), umask guards
+# the implicit file creations inside dscl paths (none expected).
+umask 077
+mkdir -m 0700 "/Users/$LCM_CI_ACCOUNT"
 chown "$LCM_CI_ACCOUNT:$LCM_CI_ACCOUNT" "/Users/$LCM_CI_ACCOUNT"
-chmod 700 "/Users/$LCM_CI_ACCOUNT"
 
 # Post-conditions (fail loudly if directory services did not apply).
 id "$LCM_CI_ACCOUNT" >/dev/null
 [ "$(stat -f '%u' "/Users/$LCM_CI_ACCOUNT")" = "$UID_N" ]
 [ "$(stat -f '%A' "/Users/$LCM_CI_ACCOUNT")" = "700" ]
+expect_acl_safe "/Users/$LCM_CI_ACCOUNT" || {
+  echo "PARTIAL-STATE ERROR: home created but inherited an allow/unparseable ACL." >&2
+  echo "STOP: do not re-run; investigate the ACE source (no auto-delete performed)." >&2
+  exit 1; }
 if dscl . -read /Groups/admin GroupMembership 2>/dev/null | tr ' ' '\n' | grep -qx "$LCM_CI_ACCOUNT"; then
-  echo "error: account landed in admin group — deleting nothing, STOP and investigate" >&2
+  echo "PARTIAL-STATE ERROR: account landed in admin group — investigate, this kit does not auto-repair" >&2
   exit 1
 fi
 
-echo "created non-admin account $LCM_CI_ACCOUNT (uid $UID_N, gid $GID, no password record, shell /usr/bin/false, home 0700)"
+echo "created non-admin account $LCM_CI_ACCOUNT (uid $UID_N, gid $GID, no password record, shell /usr/bin/false, home 0700 birth-mode)"
 echo "verify: id $LCM_CI_ACCOUNT"
 echo "next: sudo scripts/ci/runner/02-install-bundle.sh"

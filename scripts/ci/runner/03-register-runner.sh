@@ -49,6 +49,14 @@ reject_symlink_components "$PARENT" || {
 expect_dir_owner_uid "$PARENT" 0 || { echo "error: parent not root-owned" >&2; exit 1; }
 expect_dir_no_group_world_write "$PARENT" || {
   echo "error: parent writable by group/world" >&2; exit 1; }
+# Effective ACL check (POSIX mode alone can miss inherited/allow ACEs that
+# would let another principal swap parent files): deny-only or none.
+expect_acl_safe "$PARENT" || {
+  echo "error: $PARENT carries allow/unparseable ACL — bundle integrity unverified; investigate before registering" >&2; exit 1; }
+for f in register.sh runner-config.env lib.sh run-runner.sh; do
+  expect_acl_safe "$PARENT/$f" || {
+    echo "error: $PARENT/$f carries allow/unparseable ACL — refusing" >&2; exit 1; }
+done
 # Leaf identity (stat of the leaf entry under a root-owned parent is safe:
 # CI cannot rename/replace it there).
 reject_symlink_components "$LCM_CI_APP_ROOT" || {

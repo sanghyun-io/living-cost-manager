@@ -34,7 +34,7 @@ LaunchDaemon 설치는 sudo가 필요한 일회성 OS 변경이라 실행 에이
   run-runner.sh manifest.txt                          ← root 소유 공개 파일(시크릿 없음)
   app/                                                ← 공식 runner appRoot (lcm-ci 0700)
       (bin/ config.sh run.sh env.sh externals/ .credentials .env .runner _work _diag …)
-/var/log/gamja-ci/lcm-production/                     root:wheel 0700
+/private/var/log/gamja-ci/lcm-production/             root:wheel 0700  ← canonical(/var은 symlink)
   launchd.out.log launchd.err.log                     사전 생성 0640 root:wheel, ACL 없음
 /Users/lcm-ci/                                        0700 (provisioning 시 1회 생성, 이후 root 무관여)
 /Library/LaunchDaemons/com.gamjaworld.lcm-ci-actions-runner.plist   root 0644
@@ -97,13 +97,22 @@ world-readable 경로만 사용한다. 첫 job 실행 후 05-verify로 uid 경�
 ## 테스트/검증 (실행 에이전트 가능 범위 — root·네트워크·등록 없음)
 
 ```bash
-(cd apps/web && pnpm exec vitest run --root ../../scripts/ci/runner)   # 43 passed
+(cd apps/web && pnpm exec vitest run --root ../../scripts/ci/runner)   # 48 passed
 shellcheck -S warning scripts/ci/runner/*.sh scripts/ci/runner/rootctl/*.sh scripts/ci/runner/lib/*.sh
 node --check scripts/ci/release-gate.mjs
 ```
 
-security.test.ts는 실제 bash를 픽스처 트리에서 실행한다: symlink leaf 거부,
+security.test.ts는 실제 bash/plutil을 픽스처 트리에서 실행한다: symlink leaf 거부,
 mode 700 가드, 토큰 shape·stdin 전용·env-to-config·argv 무노출 입증,
 rerun 거부(무변경), 공식 tarball mode 보존(fixture-mode 설치), Runner.Listener
---help(비등록), gate 무결성. `docs/ci-self-hosted-runner-20261016.md` §7에
-이전(폐기된) 분리형 아키텍처 주장 정정표.
+--help(비등록), **ACL 검증(allow/inherited/unparseable 거부·deny-only 통과)**, **.runner
+pretty-printed 파싱(plutil)**, **gate workflow_id/path(동명 다른 파일 REPRO 거부)**.
+2차 리뷰 6건 수정 대조는 docs §9, 폐기된 분리형 아키텍처 정정표는 docs §7.
+
+신원·ACL 경계 요약: root-trusted 경로(앵커~부모, 공개 control 파일, 로그 체인,
+LaunchDaemons)는 POSIX owner/mode+writable 검사에 더해 **ACL(0건 또는 deny-only
+만 허용)**을 모든 변경 전과 생성 직후 재검사한다. ACL을 임의로 추가/삭제하지
+않고 걸리면 조사에 넘긴다. `.runner` 파싱은 CI uid에서만 plutil로 수행되며(root는
+exit status와 단순 필드만), agentId/agentName·상수 대조 실패는 제거 절차를
+중단한다. 등록 runner 목록(GitHub API)과 workflow_id 바인딩이 저장소 범위
+신원의 2차 확인축이다.

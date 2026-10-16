@@ -37,13 +37,16 @@ case "${1:-}" in
       echo "configured=no (no .runner)"
       exit 1
     fi
-    json="$(cat "$LCM_CI_APP_ROOT/.runner")"
-    agent_id="$(runner_json_field "$json" agentId)"
-    agent_name="$(runner_json_field "$json" agentName)"
+    # strict JSON parse via /usr/bin/plutil (pretty or minified upstream
+    # formats both accepted; malformed/wrong-type fail closed)
+    agent_id="$(runner_json_field "$LCM_CI_APP_ROOT/.runner" agentId)" || true
+    agent_name="$(runner_json_field "$LCM_CI_APP_ROOT/.runner" agentName)" || true
+    [ -n "$agent_id" ] || { echo "error: .runner agentId missing or unparsable" >&2; exit 1; }
+    case "$agent_id" in ''|*[!0-9]*) echo "error: .runner agentId not numeric" >&2; exit 1 ;; esac
     # Never print other fields: .runner can embed the (already expired)
     # registration token and client identifiers.
-    echo "agentId=${agent_id:-unknown} agentName=${agent_name:-unknown}"
-    runner_identity_matches "$json" "$want_name" || {
+    echo "agentId=${agent_id} agentName=${agent_name:-unknown}"
+    runner_identity_matches "$LCM_CI_APP_ROOT/.runner" "$want_name" || {
       echo "identity mismatch: expected agentName=$want_name" >&2
       exit 1
     }
