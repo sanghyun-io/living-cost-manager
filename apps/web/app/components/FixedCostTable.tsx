@@ -3,6 +3,7 @@ import { Alert, Button, Checkbox, Group, Input, NumberInput, Select, Text, TextI
 import { suggestCategoryId, billingDateSchema } from "@living-cost-manager/shared";
 import { getScheduleStatus } from "./FixedCostSchedule";
 import { FixedCostRowActions } from "./FixedCostRowActions";
+import { FixedCostNameInput } from "./FixedCostNameInput";
 import { getMonthlyEquivalentAmount, PAYMENT_METHODS, type Category, type FixedCost } from "../lib/budget";
 import type { PaymentCard } from "../lib/cards";
 import type { CostFilters } from "../lib/costViews";
@@ -230,13 +231,13 @@ export function FixedCostTable({
           return (
             <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="group" aria-label={item.name} key={item.id}>
               <span>
-                <TextInput
+                <FixedCostNameInput
                   aria-label="항목명"
                   ref={item.id === focusItemId ? focusInput : undefined}
                   label="항목명" classNames={{ label: "stacked-field-label" }}
                   size="xs"
                   value={item.name}
-                  onChange={(event) => onItemChange(item.id, { name: event.currentTarget.value })}
+                  onNameChange={(name) => onItemChange(item.id, { name })}
                 />
               </span>
               <span>

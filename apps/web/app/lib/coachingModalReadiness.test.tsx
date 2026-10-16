@@ -8,7 +8,15 @@ const mocks = vi.hoisted(() => ({ engine: vi.fn(), stream: vi.fn() }));
 // A genuine cold-start state is important: "ready" would hide a missing
 // readiness check in awaitingConsent even before the page-wiring fix.
 vi.mock("./coach", () => ({ getCoachEngineStatus: () => "none", getCoachEngine: mocks.engine, streamCoaching: mocks.stream }));
-vi.mock("./coachModel", () => ({ isCoachOptedIn: () => false, isWebGpuAvailable: () => true, setCoachOptIn: vi.fn(), COACH_MODEL_APPROX_MB: 1, COACH_MODEL_VRAM_MB: 1 }));
+vi.mock("./coachModel", () => ({
+  isCoachOptedIn: () => false,
+  isWebGpuAvailable: () => true,
+  setCoachOptIn: vi.fn(),
+  COACH_MODEL_APPROX_MB: 1,
+  COACH_MODEL_VRAM_MB: 1,
+  COACH_MODEL_ID: "Qwen3.5-0.8B-q4f16_1-MLC",
+  COACH_MODEL_ENABLE_THINKING: false
+}));
 vi.mock("./analytics", () => ({ track: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 

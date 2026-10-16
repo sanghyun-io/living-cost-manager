@@ -12,3 +12,7 @@ tmp-debug/
 .playwright-mcp/
 # Operator-only source exports, research notes and generated evidence packs.
 marketing-private/
+# Auto-generated worker bundle and manifest (regenerated on build)
+apps/web/public/_coachWorker.*.js
+apps/web/public/_coachWorker.manifest.json
+apps/web/app/lib/coachEngine/workerManifest.generated.ts

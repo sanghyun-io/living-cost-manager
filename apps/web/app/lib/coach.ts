@@ -13,9 +13,16 @@ import type {
 
 import {
   COACH_MODEL_ID,
+  COACH_MODEL_GENERATION,
+  COACH_MODEL_ENABLE_THINKING,
   getCoachModelBaseUrl,
   isWebGpuAvailable
 } from "./coachModel";
+
+import {
+  looksLikeUnfinishedThink,
+  stripQwenThink
+} from "./coachEngine/thinkPrefix";
 
 // 코치에게 넘기는 요약 입력. page 에서 shared 함수로 계산해 전달한다.
 export type CoachInput = {
@@ -227,6 +234,7 @@ export type LoadProgress = { progress: number; text: string };
  * - 콜드 스타트가 필요한지 판단
  * - UI에서 동의 필요 여부 결정에 사용
  */
+/** @deprecated Legacy non-UI loader. Production coaching uses pageManager's worker. */
 export function getCoachEngineStatus(): "none" | "loading" | "ready" {
   if (engineReady && enginePromise) {
     return "ready";
@@ -248,6 +256,7 @@ export function getCoachEngineStatus(): "none" | "loading" | "ready" {
  * @param onProgress 진행률 콜백 (다운로드/초기화)
  * @param consent 콜드 스타트에 대한 명시적 사용자 동의 (REQUIRED for cold start)
  */
+/** @deprecated Legacy loader kept for compatibility tests; do not call from UI. */
 export async function getCoachEngine(
   onProgress?: (p: LoadProgress) => void,
   consent?: { explicitDownloadConsent: boolean }
@@ -327,12 +336,18 @@ async function generateSegment(
   const chunks = await engine.chat.completions.create({
     messages: buildSegmentMessages(segment),
     // 패러프레이즈 작업이라 temp 를 아주 낮춰(0.2) 원문에 바싹 붙인다.
-    temperature: 0.2,
-    top_p: 0.9,
-    frequency_penalty: 0.4,
-    presence_penalty: 0.2,
+    temperature: COACH_MODEL_GENERATION.temperature,
+    top_p: COACH_MODEL_GENERATION.top_p,
+    frequency_penalty: COACH_MODEL_GENERATION.frequency_penalty,
+    presence_penalty: COACH_MODEL_GENERATION.presence_penalty,
     // 한 문장이라 토큰 상한을 짧게 둬 군더더기를 원천 차단.
-    max_tokens: 70,
+    max_tokens: COACH_MODEL_GENERATION.max_tokens,
+    // CRITICAL — Qwen3.5 는 본문 앞에 <think>...</think> 블록을 끼울 수 있다.
+    // SDK 의 chat completion 에는 extra_body.enable_thinking 플래그가 있어
+    // false 로 두면 그 블록이 응답에 들어가지 않는다. UI 사고 차단.
+    ...(COACH_MODEL_ENABLE_THINKING === false
+      ? { extra_body: { enable_thinking: false } }
+      : {}),
     stream: true
   });
 
@@ -341,10 +356,19 @@ async function generateSegment(
     const delta = chunk.choices[0]?.delta?.content ?? "";
     if (delta) {
       raw += delta;
-      onPartial?.(clampToOneSentence(raw) || segment.example);
+      // 누적 단계에서도 think 흔적이 보이면 잘라내고 보정.
+      const cleaned = clampToOneSentence(stripQwenThink(raw)) || segment.example;
+      onPartial?.(cleaned);
     }
   }
-  const result = clampToOneSentence(raw);
+  // 최종 단계에서도 같은 정리.
+  const cleaned = stripQwenThink(raw);
+  const result = clampToOneSentence(cleaned);
+  // 잘려서 닫히지 않은 think 블록이 남아있으면 패러프레이즈 실패로 보고 원문
+  // 폴백. 사고 방지.
+  if (looksLikeUnfinishedThink(result)) {
+    return segment.example;
+  }
   // 모델 출력이 비었거나 비정상으로 짧으면(패러프레이즈 실패) 원문 폴백.
   return result.length >= 6 ? result : segment.example;
 }

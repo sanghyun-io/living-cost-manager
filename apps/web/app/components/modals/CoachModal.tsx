@@ -7,9 +7,11 @@ export type CoachStatus = "idle" | "loading" | "generating" | "ready" | "error";
 interface CoachModalProps {
   opened: boolean;
   webGpuAvailable: boolean;
+  preferencesReady?: boolean;
   hasData: boolean;
   approxMb: number;
   vramMb: number;
+  modelName: string;
   status: CoachStatus;
   // 0..1 다운로드/초기화 진행률.
   loadProgress: number;
@@ -20,20 +22,28 @@ interface CoachModalProps {
   fallbackHeadline: string;
   // 동의 대기 중 여부 (idle 상태에서 동의 필요)
   awaitingConsent: boolean;
+  // 외부 store 의 준비 상태.
+  preparationState: "idle" | "preparing" | "ready" | "cancelled" | "error";
   onStart: () => void;
   onRegenerate: () => void;
   onClose: () => void;
-  // 동의 관련 콜백
+  // 동의 / 시작 / 취소 / 재시도 콜백
   onConfirmConsent?: () => void;
-  onDeclineConsent?: () => void;
+  onContinueWithoutPreparation: () => void;
+  onCancelPreparation?: () => void;
+  onRetryPreparation?: () => void;
+  // 준비 완료 후 모달 안에서 명시적으로 코칭을 생성.
+  onGenerateCoaching?: () => void;
 }
 
 export function CoachModal({
   opened,
   webGpuAvailable,
+  preferencesReady = true,
   hasData,
   approxMb,
   vramMb,
+  modelName,
   status,
   loadProgress,
   loadText,
@@ -41,11 +51,15 @@ export function CoachModal({
   errorMessage,
   fallbackHeadline,
   awaitingConsent,
+  preparationState,
   onStart,
   onRegenerate,
   onClose,
   onConfirmConsent,
-  onDeclineConsent
+  onContinueWithoutPreparation,
+  onCancelPreparation,
+  onRetryPreparation,
+  onGenerateCoaching
 }: CoachModalProps) {
   const busy = status === "loading" || status === "generating";
 
@@ -73,9 +87,9 @@ export function CoachModal({
           </Alert>
         ) : (
           <>
-            {/* 동의 대기 화면 - CRITICAL: 이 화면에서만 다운로드 가능 */}
-            {awaitingConsent && status === "idle" ? (
-              <Alert variant="light" color="blue" title="로컬 AI 시작">
+            {/* 동의 대기 화면 — 모달 본문에서 다운로드 가능함을 마지막으로 한 번 더 안내. */}
+            {preferencesReady && awaitingConsent && preparationState === "idle" ? (
+              <Alert variant="light" color="blue" title={`${modelName} 시작`}>
                 <Stack gap="sm">
                   <Text size="sm">
                     지출 요약과 절감 제안에 사용할 로컬 AI를 시작할까요?
@@ -87,6 +101,9 @@ export function CoachModal({
                   </Text>
 
                   <Stack gap="xs">
+                    <Text size="sm">
+                      • <strong>모델:</strong> {modelName}
+                    </Text>
                     <Text size="sm">
                       • <strong>다운로드·저장 공간:</strong> 약 {approxMb}MB 예상
                     </Text>
@@ -105,7 +122,7 @@ export function CoachModal({
                   </Stack>
 
                   <Text size="xs" c="dimmed">
-                    다운로드 시작 뒤 모달을 닫아도 계속될 수 있습니다.
+                    이 창을 닫고 다른 작업을 할 수 있어요. 탭을 닫으면 준비가 중단될 수 있어요.
                   </Text>
 
                   <Text size="xs" c="dimmed">
@@ -115,24 +132,29 @@ export function CoachModal({
               </Alert>
             ) : null}
 
-            {/* 일반 안내 (동의 완료 또는 기존 결과 있음) */}
-            {!awaitingConsent && status === "idle" ? (
+            {/* 일반 안내 (준비 완료 / 데이터만 있는 경우) */}
+            {preferencesReady && preparationState === "ready" && status !== "generating" && !coaching ? (
               <Alert variant="light" color="teal" title="AI 코치 준비 완료">
-                <Text size="sm">
-                  로컬 AI가 준비되어 있습니다. 코칭을 받아보세요.
-                </Text>
+                <Stack gap="xs">
+                  <Text size="sm">
+                    로컬 AI가 준비되었습니다. 아래 버튼으로 이번 달 코칭을 받아보세요.
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    보호로 표시한 이름은 코치에게 전달되지 않아요.
+                  </Text>
+                </Stack>
               </Alert>
             ) : null}
 
-            {status === "loading" ? (
-              <Stack gap={6}>
+            {preparationState === "preparing" ? (
+              <Stack gap={6} role="status" aria-live="polite">
                 <Text size="sm">설치 중입니다. Wi-Fi 사용 권장</Text>
                 <Progress value={Math.round(loadProgress * 100)} color="teal" radius="xl" striped animated />
                 <Text size="xs" c="dimmed">
                   {loadText || `${Math.round(loadProgress * 100)}%`}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  다운로드 시작 뒤 모달을 닫아도 계속될 수 있습니다.
+                  이 창을 닫고 다른 작업을 할 수 있어요. 탭을 닫으면 준비가 중단될 수 있어요.
                 </Text>
               </Stack>
             ) : null}
@@ -146,7 +168,7 @@ export function CoachModal({
               </Alert>
             ) : null}
 
-            {status === "error" ? (
+            {status === "error" || preparationState === "error" ? (
               <Alert variant="light" color="rose" title="코칭을 불러오지 못했어요">
                 {errorMessage || "잠시 후 다시 시도해 주세요."}
                 {fallbackHeadline ? (
@@ -157,36 +179,51 @@ export function CoachModal({
               </Alert>
             ) : null}
 
-            <Group justify="flex-end" gap="sm">
-              {/* 동의 대기 상태 버튼 */}
-              {awaitingConsent && status === "idle" ? (
-                <>
-                  <Button variant="default" radius="xl" onClick={onDeclineConsent || onClose}>
-                    취소
+            <Group justify="space-between" gap="sm">
+              {/* 좌측: 보조 액션 (취소 / 다른 작업 계속 / 다시 시도) */}
+              <Group gap="sm">
+                {preparationState === "preparing" && onCancelPreparation ? (
+                  <Button variant="default" radius="xl" onClick={onCancelPreparation}>
+                    준비 취소
                   </Button>
-                  <Button
-                    color="teal"
-                    radius="xl"
-                    onClick={onConfirmConsent || onStart}
-                  >
-                    동의하고 시작하기
+                ) : null}
+                {preparationState === "ready" && status !== "generating" && !coaching ? (
+                  <Button variant="default" radius="xl" onClick={onClose}>
+                    닫기
                   </Button>
-                </>
-              ) : status === "ready" ? (
-                <Button variant="default" radius="xl" onClick={onRegenerate} disabled={busy}>
-                  다시 코칭받기
-                </Button>
-              ) : (
-                <Button
-                  color="teal"
-                  radius="xl"
-                  onClick={onStart}
-                  loading={busy}
-                  disabled={busy}
-                >
-                  {status === "idle" ? "코칭받기" : status === "error" ? "다시 시도" : "준비 중…"}
-                </Button>
-              )}
+                ) : null}
+                {(preparationState === "cancelled" || preparationState === "error") && onRetryPreparation ? (
+                  <Button variant="default" radius="xl" onClick={onRetryPreparation}>
+                    다시 시도
+                  </Button>
+                ) : null}
+              </Group>
+
+              {/* 우측: 주요 액션 */}
+              <Group gap="sm">
+                {preparationState === "preparing" ? (
+                  <Button variant="default" radius="xl" onClick={onContinueWithoutPreparation}>
+                    다른 작업 계속하기
+                  </Button>
+                ) : preferencesReady && awaitingConsent && preparationState === "idle" ? (
+                  <>
+                    <Button variant="default" radius="xl" onClick={onContinueWithoutPreparation}>
+                      다른 작업 계속하기
+                    </Button>
+                    <Button color="teal" radius="xl" onClick={onConfirmConsent || onStart}>
+                      동의하고 AI 준비
+                    </Button>
+                  </>
+                ) : preferencesReady && preparationState === "ready" && status !== "generating" && !coaching && onGenerateCoaching ? (
+                  <Button color="teal" radius="xl" onClick={onGenerateCoaching}>
+                    코칭 보기
+                  </Button>
+                ) : preferencesReady && status === "ready" && coaching ? (
+                  <Button variant="default" radius="xl" onClick={onRegenerate} disabled={busy}>
+                    다시 코칭받기
+                  </Button>
+                ) : null}
+              </Group>
             </Group>
           </>
         )}

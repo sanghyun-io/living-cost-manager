@@ -210,15 +210,15 @@ describe("clampToOneSentence", () => {
 
 // CRITICAL: 다운로드 동의 정책 테스트
 describe("coach download consent policy", () => {
-  test("COACH_MODEL_APPROX_MB는 안내용 다운로드 크기 (약 500MB)", () => {
-    expect(COACH_MODEL_APPROX_MB).toBe(500);
+  test("COACH_MODEL_APPROX_MB는 안내용 다운로드 크기 (약 453MB)", () => {
+    expect(COACH_MODEL_APPROX_MB).toBe(453);
   });
 
-  test("COACH_MODEL_VRAM_MB는 GPU 메모리 요구량 (약 945MB)", () => {
-    expect(COACH_MODEL_VRAM_MB).toBe(945);
+  test("COACH_MODEL_VRAM_MB는 GPU 메모리 요구량 (약 1629MB)", () => {
+    expect(COACH_MODEL_VRAM_MB).toBe(1629.49);
   });
 
-  test("모델 ID는 WebLLM prebuilt Qwen2.5-0.5B", () => {
-    expect(COACH_MODEL_ID).toBe("Qwen2.5-0.5B-Instruct-q4f16_1-MLC");
+  test("모델 ID는 WebLLM prebuilt Qwen3.5-0.8B", () => {
+    expect(COACH_MODEL_ID).toBe("Qwen3.5-0.8B-q4f16_1-MLC");
   });
 });

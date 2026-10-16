@@ -1,13 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { buildInsuranceCheck, buildMonthlyReport, buildSavingsInsights, getUpcomingDues, type MonthlyReport } from "@living-cost-manager/shared";
-import { getCoachEngine, getCoachEngineStatus, streamCoaching, type CoachInput } from "./coach";
-import { isCoachOptedIn, isWebGpuAvailable, setCoachOptIn, COACH_MODEL_APPROX_MB, COACH_MODEL_VRAM_MB } from "./coachModel";
-import { track } from "./analytics";
+import {
+  COACH_MODEL_APPROX_MB,
+  COACH_MODEL_ENABLE_THINKING,
+  COACH_MODEL_ID,
+  COACH_MODEL_VRAM_MB,
+  isWebGpuAvailable,
+  setCoachOptIn
+} from "./coachModel";
+import { streamCoaching, type CoachInput } from "./coach";
 import type { CoachStatus } from "../components/modals/CoachModal";
 import type { ServerSession, ServerApiClient } from "./serverApi";
 import type { BudgetDataApi } from "./useBudgetData";
+import { getPageStore, getPageFactory, runExclusiveInference } from "./coachEngine/pageManager";
+import { sanitizeCoachError } from "./coachEngine/coachErrors";
+import {
+  createWorkerCoachEngineFactory,
+  type WorkerCoachEngineFactory
+} from "./coachEngine/createWebWorkerClient";
 
 interface UseCoachOptions {
   budget: BudgetDataApi;
@@ -19,16 +31,42 @@ interface UseCoachOptions {
 const EMPTY_PROTECTED_IDS: ReadonlySet<string> = new Set();
 const PREFERENCES_UNAVAILABLE = "코칭 설정을 확인할 수 없어 추천을 보류했습니다. 내 코칭 설정을 확인해 주세요.";
 
+// CRITICAL: 코치 준비/추론은 페이지 단위 store 에서 단일 모델을 단일 잡으로 관리한다.
+// - useSyncExternalStore + 외부 store 로 모달 리마운트와 무관하게 상태가 유지된다.
+// - 같은 페이지에서 prepareCoach() 를 동시에 두 번 불러도 single-flight 된다.
+// - 모달이 닫혀도 in-flight 작업은 살아있고 header 의 discreet 버튼에 그대로
+//   진행률/완료가 반영된다.
+//
+// CRITICAL — 모듈 상태:
+// 페이지 단위 store/factory 는 모듈 레벨에서 관리되지만, 테스트 격리를 위한
+// export 는 제거되었다. 테스트는 vi.mock 으로 coachEngine 모듈을 mock 한다.
+
+// prepare factory wrapper. default SDK + worker 생성.
+export function createProvisionFactory(): WorkerCoachEngineFactory {
+  // enable_thinking 은 chatOpts(ChatConfig) 가 아닌 chat completion 요청의
+  // extra_body 로 전달된다 (ChatOptions 타입에는 없는 GenerationConfig 필드).
+  // 따라서 chatOpts 는 두지 않고 generateSegment 의 chat.completions.create
+  // 호출 시점에 extra_body 로 같이 보낸다.
+  return createWorkerCoachEngineFactory({
+    modelId: COACH_MODEL_ID,
+    enableThinking: COACH_MODEL_ENABLE_THINKING
+  });
+}
+
 /**
- * On-device AI coach (opt-in, WebGPU).
+ * On-device AI coach — PREPARATION (background) + COACHING (explicit).
  *
- * CRITICAL PRIVACY/DOWNLOAD POLICY:
- * - EVERY cold getCoachEngine() call MUST be gated on explicit user consent
- * - Attempt-scoped consent: each modal session requires new consent
- * - In-memory engine reuse is allowed without additional consent
- * - NO automatic model download without positive click
- * - Cache existence does NOT authorize download (cache may be partial/evicted)
- * - Data scope changes (user/workspace switch) invalidate previous coaching
+ * CRITICAL POLICY:
+ * - PREPARATION: 모달 '동의하고 AI 준비' 버튼으로 시작, 그 뒤 모달 닫아도 계속.
+ *         같은 모델 ID / window 가 살아있는 동안 결과는 store 에 유지되어 헤더
+ *         버튼 / 모달 재오픈에서 다시 보여진다. 실패/워커사망/취소 시
+ *         store 가 권한을 리셋 → 다음 시작은 새 동의가 필요하다.
+ * - COACHING: 준비 완료 후 모달 '코칭 보기' (헤더 버튼은 모달만 열어주며
+ *         자동 시작 금지. 모달에서만 명시적 클릭). 실행 중 모달 닫으면
+ *         출력을 폐기하지만 워커는 죽이지 않는다.
+ * - PROTECTED: 보호 항목(절대 건드리면 안되는 항목명/사유/원본 예산 텍스트) 는
+ *         엔진에 절대 전달되지 않는다. 격려 패러프레이즈에 필요한 정보만
+ *         mainthread 의 selectCoachSegments 결과로 만들어진다.
  */
 export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROTECTED_IDS, coachingPreferencesReady = true }: UseCoachOptions) {
   const preferencesReadyRef = useRef(coachingPreferencesReady);
@@ -42,24 +80,46 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
   // 서버 동기화 히스토리로 계산한 월간 추세
   const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
 
-  // CRITICAL: Attempt-scoped download consent
-  // 이 동의는 모달이 열릴 때마다 초기화되며, 메모리에만 존재한다.
-  // useRef를 사용하여 동기적으로 접근 (React state의 비동기 문제 해결)
+  // attempt-scoped consent: 모달을 열 때마다 초기화. 콜드 스타트 download 의
+  // 호출 권한만 의미한다.
   const coachAttemptConsentRef = useRef(false);
 
-  // Generation tracking: 현재 실행 중인 코칭 생성을 식별
-  // scope/input 변경 시 이전 생성을 무효화하기 위해 사용
+  // generation tracking: 현재 실행 중인 코칭을 식별
   const currentGenerationRef = useRef(0);
-
-  // monthlyReport 요청 세대
   const monthlyReportGenRef = useRef(0);
   const activeReportScopeRef = useRef<string | null>(null);
-  // 실행 중 방지
+
+  // CRITICAL — Inference serialization:
+  // isRunningRef 는 현재 추론이 진행 중인지 추적하지만, old stream 이 unwinding
+  // 중인 동안에는 false 로 설정되지 않는다. requestIdentity 로 각 추론 요청을
+  // 식별하고, finally 블록에서 현재 요청의 identity 와 일치할 때만 정리한다.
   const isRunningRef = useRef(false);
+  const currentRequestIdentityRef = useRef<symbol | null>(null);
+  const pendingGenerationsRef = useRef(new Set<number>());
+
+  // 현재 추론 중인 엔진 참조. 모달이 닫혀도 워커는 유지하고 interruptGenerate
+  // 만 호출해서 토큰 생성을 멈춘다. 다음 추론은 같은 워커에서 이어갈 수 있다.
+  const activeEngineRef = useRef<{ interruptGenerate?: () => void } | null>(null);
+  useEffect(() => () => {
+    currentGenerationRef.current++;
+    activeEngineRef.current?.interruptGenerate?.();
+  }, []);
+
+  // 외부 store 구독 (모달/헤더가 같은 상태를 본다).
+  const store = getPageStore();
+  const idleFallback = useMemo(
+    () => ({ state: "idle" as const, modelId: null, jobId: 0, progress: 0, progressText: "", error: null }),
+    []
+  );
+  const prep = useSyncExternalStore(
+    store.subscribe.bind(store),
+    store.getSnapshot.bind(store),
+    () => idleFallback
+  );
 
   const { fixedCosts, monthlyIncome, summary, localScopeKey } = budget;
 
-  // Scope fingerprint: localScopeKey가 변경되면 이전 코칭 무효화
+  // Scope changes invalidate advice, never the already-approved artifact job.
   const scopeFingerprint = useMemo(() => ({
     localScopeKey,
     profileName: budget.profileName
@@ -70,8 +130,6 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
     const savings = coachingPreferencesReady ? buildSavingsInsights(fixedCosts, { protectedFixedCostIds }).map((s) => ({
       title: s.title,
       monthlySavings: s.monthlySavings,
-      // CRITICAL: Pass actionable target names for deterministic coach sentences.
-      // insight.items already filtered by protection at shared layer.
       targetItemNames: s.items.map(item => item.name)
     })) : [];
     const upcoming = getUpcomingDues(fixedCosts, now, 14)
@@ -79,8 +137,6 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
       .map((u) => ({ name: u.item.name, amount: u.item.amount, daysUntil: u.daysUntil }));
     const insurance = coachingPreferencesReady ? buildInsuranceCheck(fixedCosts, monthlyIncome, { protectedFixedCostIds }) : null;
 
-    // Filter ONLY eligible review items (protected excluded, actually exists in current items)
-    // Review targets exclude protected names; neutral upcoming reminders are unchanged.
     const eligibleReviewNames = insurance?.canSuggestReview
       ? fixedCosts
           .filter(item => insurance.reviewItemIds.includes(item.id))
@@ -102,12 +158,10 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
     };
   }, [fixedCosts, monthlyIncome, summary.monthlyExpense, monthlyReport, protectedFixedCostIds, coachingPreferencesReady]);
 
-  // Input fingerprint: 코칭 입력이 변경되면 이전 결과 무효화
   const inputFingerprint = JSON.stringify([coachingPreferencesReady, coachInput, [...protectedFixedCostIds].sort()]);
   const liveInputKey = JSON.stringify([scopeFingerprint, inputFingerprint]);
   const liveInputRef = useRef(liveInputKey);
   const [outputInputKey, setOutputInputKey] = useState("");
-  // Invalidate during render, before effects: old stream callbacks cannot flash stale advice.
   if (liveInputRef.current !== liveInputKey) {
     liveInputRef.current = liveInputKey;
     currentGenerationRef.current++;
@@ -123,222 +177,281 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
 
   const coachHasData = fixedCosts.length > 0;
 
-  // CRITICAL: Scope/Input 변경 시 이전 코칭 결과 무효화
+  // CRITICAL — Scope/input 변경 시 코칭 결과만 무효화하고, 준비 작업은 유지한다.
+  // input/scope 가 바뀌면 현재 진행 중인 코칭 텍스트만 클리어한다.
+  // 준비 작업(모델 다운로드)은 계속 진행되어 재사용 가능하다.
+  // 사용자가 명시적으로 취소하거나 실패하지 않는 한 store.reset() 을 호출하지 않는다.
   useEffect(() => {
-    // 세대 증가: 이전 실행 중인 코칭이 있으면 무시됨
     currentGenerationRef.current += 1;
-    // 이전 결과 클리어
     setCoachingText("");
     setCoachError("");
     setCoachStatus("idle");
+    activeEngineRef.current?.interruptGenerate?.();
     if (!coachingPreferencesReady) coachAttemptConsentRef.current = false;
-    // 실행 중 락 해제
-    isRunningRef.current = false;
+    // CRITICAL: isRunningRef 는 현재 요청의 identity 가 일치할 때만 false 로 설정
+    // (finally 블록에서 처리). 여기서는 즉시 false 로 설정하지 않는다.
+    // CRITICAL: store.reset() 제거 — 입력 변경이 다운로드를 죽이면 안 된다.
   }, [scopeFingerprint, inputFingerprint, coachingPreferencesReady]);
 
-  // Scope 변경 시 상태 리셋
-  useEffect(() => {
-    // 다른 사용자/워크스페이스로 전환 시 완전 초기화
-    currentGenerationRef.current += 1;
-    setCoachingText("");
-    setCoachError("");
-    setCoachStatus("idle");
-    coachAttemptConsentRef.current = false;
-    isRunningRef.current = false;
-  }, [scopeFingerprint]);
-
-  /**
-   * CRITICAL: 코칭 실행 전 동의 확인
-   * - 콜드 스타트(엔진 없음)에만 동의 필요
-   * - READY/LOADING 엔진은 동의 없이 재사용 가능
-   * - 세대 토큰으로 scope/input 변경 시 무효화 처리
-   */
-  function blockUnavailablePreferences() {
-    // Check the live render too: a callback captured before failure is not permission.
+  function blockUnavailablePreferences(): boolean {
     if (coachingPreferencesReady && preferencesReadyRef.current) return false;
     coachAttemptConsentRef.current = false;
-    isRunningRef.current = false;
+    // CRITICAL: isRunningRef 는 현재 요청의 identity 가 일치할 때만 false 로 설정
     setCoachingText("");
     setCoachStatus("error");
     setCoachError(PREFERENCES_UNAVAILABLE);
     return true;
   }
 
-  async function runCoaching() {
-    if (blockUnavailablePreferences()) return;
-    if (isRunningRef.current) {
-      return;
-    }
-
-    const generation = currentGenerationRef.current;
-    isRunningRef.current = true;
-
-    try {
-      track({ type: "coach.request", timestamp: Date.now(), data: {} });
-
-      if (!isWebGpuAvailable()) {
-        setCoachStatus("error");
-        setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
-        return;
-      }
-
-      // CRITICAL: 엔진 상태 확인
-      const engineStatus = getCoachEngineStatus();
-
-      // 콜드 스타트인지 확인
-      const isColdStart = engineStatus === "none";
-
-      // CRITICAL: 콜드 스타트에만 동의 필요
-      if (isColdStart && !coachAttemptConsentRef.current) {
-        // 동의 대기 상태 - UI가 동의 화면을 표시
-        setCoachStatus("idle");
-        return;
-      }
-
-      // READY/LOADING은 동의 없이 진행 가능
-      // 동의됨 - 실제 실행
-      await executeCoaching(generation);
-    } finally {
-      // 현재 세대만 락 해제
-      if (currentGenerationRef.current === generation) {
-        isRunningRef.current = false;
-      }
-    }
-  }
-
-  /**
-   * 실제 코칭 실행 (동의 후에만 호출)
-   * @param generation 호출 시점의 세대 토큰
-   */
-  async function executeCoaching(generation: number) {
-    if (blockUnavailablePreferences()) return;
-    if (generation !== currentGenerationRef.current) return;
-    setOutputInputKey(liveInputKey);
-    setCoachError("");
-    setCoachingText("");
-
-    try {
-      setCoachStatus("loading");
-
-      // CRITICAL: 엔진 상태 확인
-      const engineStatus = getCoachEngineStatus();
-
-      // 콜드 스타트인지 확인 (이미 동의된 것은 consent 불필요)
-      const isColdStart = engineStatus === "none";
-
-      // 콜드 스타트면 동의 전달 (ref 사용)
-      const consent = isColdStart ? { explicitDownloadConsent: coachAttemptConsentRef.current } : undefined;
-
-      // CRITICAL: 이 시점에서만 getCoachEngine 호출 (네트워크 요청)
-      const engine = await getCoachEngine((p) => {
-        // 현재 세대만 상태 업데이트
-        if (currentGenerationRef.current === generation) {
-          setCoachProgress(p.progress);
-          setCoachProgressText(p.text);
-        }
-      }, consent);
-
-      // 세대 확인: 엔진 로드 중에 scope/input이 변경되었으면 중단
-      if (currentGenerationRef.current !== generation) {
-        return; // 이전 세대의 실행, 무시
-      }
-
-      // 성공 - 기능 opt-in 설정
-      setCoachOptIn(true);
-
-      setCoachStatus("generating");
-      await streamCoaching(engine, coachInput, (full) => {
-        // 현재 세대만 상태 업데이트
-        if (currentGenerationRef.current === generation) {
-          setCoachingText(full);
-        }
-      }, { protectedItemNames: fixedCosts.filter(item => protectedFixedCostIds.has(item.id)).map(item => item.name) });
-
-      // 세대 확인: 스트리밍 중에 scope/input이 변경되었으면 중단
-      if (currentGenerationRef.current !== generation) {
-        return;
-      }
-
-      setCoachStatus("ready");
-    } catch (error) {
-      // 현재 세대만 에러 처리
-      if (currentGenerationRef.current !== generation) {
-        return;
-      }
-
-      // CRITICAL: 초기화 실패 시 동의 무효화
-      // 다음 재시도에서 다시 동의 요청
-      coachAttemptConsentRef.current = false;
-
-      setCoachStatus("error");
-      const message = error instanceof Error ? error.message : String(error);
-
-      if (message === "WEBGPU_UNAVAILABLE") {
-        setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
-      } else if (message === "EXPLICIT_CONSENT_REQUIRED") {
-        // 동의 없이 콜드 스타트 시도 - 이 상태는 발생하지 않아야 함
-        setCoachError("모델 다운로드에 동의가 필요합니다.");
-      } else {
-        setCoachError("AI 모델을 불러오지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.");
-      }
-    }
-  }
-
-  /**
-   * 동의 확정 후 실행
-   * CRITICAL: useRef를 사용하여 동의를 동기적으로 설정
-   */
-  function confirmConsentAndRun() {
-    if (blockUnavailablePreferences()) return;
-    // 동의 설정 (동기적)
-    coachAttemptConsentRef.current = true;
-    // 동의 후 즉시 실행
-    void runCoaching();
-  }
-
-  /**
-   * 동의 거부
-   * CRITICAL: 모달을 완전히 닫아야 함
-   */
-  function declineConsent() {
-    coachAttemptConsentRef.current = false;
-    setCoachStatus("idle");
-    // CRITICAL: 모달 닫기
-    closeCoachModal();
-  }
-
-  /**
-   * 코치 모달 열기
-   * CRITICAL: 열 때마다 동의 상태 초기화
-   */
-  function openCoachModal() {
-    setIsCoachModalOpen(true);
-    if (blockUnavailablePreferences()) return;
-    setCoachError("");
-    // CRITICAL: 새 모달 세션 시작 - 동의 초기화
-    coachAttemptConsentRef.current = false;
-    // 기존 생성 결과는 유지 (재생성이 아니면 보여줌)
-  }
-
-  /**
-   * 코치 모달 닫기
-   * CRITICAL: 닫을 때 동의 무효화 + 실행 락 해제
-   */
+  // Modal close 시 in-flight 준비를 취소하지 않는다 — store 의 결과는 그대로.
+  // 단, 코칭 텍스트/에러/세대를 클리어 한다. 진행 중 추론은 interruptGenerate 만
+  // 호출해 토큰 생성을 멈추고, 워커 자체는 종료하지 않는다(다음 추론 재사용).
   function closeCoachModal() {
     setIsCoachModalOpen(false);
-    // CRITICAL: 모달 닫으면 동의 무효화 (다음 열기 때 다시 물어야 함)
     coachAttemptConsentRef.current = false;
-    // 세대 증가: 로딩 중인 작업 무시
     currentGenerationRef.current += 1;
-    // CRITICAL: 실행 락 해제
-    isRunningRef.current = false;
-    // 로딩 중이었다면 상태 초기화
+    // CRITICAL: isRunningRef 는 현재 요청의 identity 가 일치할 때만 false 로 설정
+    // (finally 블록에서 처리). 여기서는 즉시 false 로 설정하지 않는다.
     if (coachStatus === "loading" || coachStatus === "generating") {
+      try {
+        activeEngineRef.current?.interruptGenerate?.();
+      } catch (_err) {
+        // 무시 — interrupt 실패는 다음 추론을 막지 않는다.
+      }
+      activeEngineRef.current = null;
       setCoachStatus("idle");
+      setCoachingText("");
       setCoachProgress(0);
       setCoachProgressText("");
     }
   }
+
+  function openCoachModal() {
+    setIsCoachModalOpen(true);
+    if (blockUnavailablePreferences()) return;
+    setCoachError("");
+    coachAttemptConsentRef.current = false;
+  }
+
+  // 콜드 스타트 동의 화면 = 모델 미준비 + 데이터 있고 + 동의 없음.
+  const awaitingConsent = coachingPreferencesReady
+    && isWebGpuAvailable()
+    && coachHasData
+    && prep.state === "idle"
+    && !coachAttemptConsentRef.current;
+
+  // 백그라운드 준비 시작 (modal '동의하고 AI 준비' 버튼).
+  function confirmConsentAndPrepare() {
+    if (blockUnavailablePreferences()) return;
+    if (!isWebGpuAvailable()) {
+      setCoachStatus("error");
+      setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
+      return;
+    }
+    if (!coachHasData) return;
+    // 이미 살아있는 모델/스냅샷 → 새 콜드 다운로드 없이 ready 유지.
+    if (prep.state === "ready" && prep.modelId === COACH_MODEL_ID) {
+      // 모달은 열어둔 채로 둔다.
+      return;
+    }
+    coachAttemptConsentRef.current = true;
+    void prepareCoachInternal();
+  }
+
+  async function prepareCoachInternal() {
+    if (!coachAttemptConsentRef.current) {
+      setCoachError("모델 다운로드에 동의가 필요합니다.");
+      return;
+    }
+    if (!isWebGpuAvailable()) {
+      setCoachError("이 브라우저는 WebGPU를 지원하지 않습니다.");
+      return;
+    }
+    try {
+      const factory: WorkerCoachEngineFactory = getPageFactory(() => createProvisionFactory());
+      // 모델 ID 가 다르면 store 가 기존 워커를 정리한다.
+      store.beginPreparation({
+        modelId: COACH_MODEL_ID,
+        explicitDownloadConsent: coachAttemptConsentRef.current,
+        factory
+      });
+      setCoachStatus("loading");
+    } catch (err) {
+      // 보안: beginPreparation 내부 코드나 SDK 원시 오류가 화면에 그대로 노출되지
+      // 않도록 고정 한국어 메시지로 변환한다.
+      setCoachError(sanitizeCoachError(err, "prepare"));
+      setCoachStatus("error");
+    }
+  }
+
+  // Modal '다른 작업 계속하기' = 모달만 닫고 준비는 계속.
+  function continueWithoutModal() {
+    setIsCoachModalOpen(false);
+    coachAttemptConsentRef.current = false;
+  }
+
+  // 사용자가 명시적으로 '준비 취소'.
+  function cancelPreparation() {
+    store.cancelPreparation();
+    coachAttemptConsentRef.current = false;
+    setCoachProgress(0);
+    setCoachProgressText("");
+    if (prep.state !== "ready") {
+      setCoachStatus("idle");
+    }
+  }
+
+  // Manual retry: 동의 화면을 다시 보여주도록 store 를 reset 한다.
+  function retryPreparation() {
+    store.reset();
+    coachAttemptConsentRef.current = false;
+    setCoachError("");
+    setCoachProgress(0);
+    setCoachProgressText("");
+    setCoachStatus("idle");
+  }
+
+  // Modal '코칭 보기': 명시적 코칭 생성. 모달 안에서만 가능.
+  // CRITICAL — Inference serialization:
+  // 각 요청은 고유한 identity 를 가지며, finally 블록에서 현재 identity 와
+  // 일치할 때만 isRunningRef 를 false 로 설정한다. old stream 이 unwinding 중인
+  // 동안에는 새로운 요청이 시작되지 않는다.
+  async function generateCoachingNow() {
+    if (blockUnavailablePreferences()) return;
+    if (liveInputRef.current !== liveInputKey || store.getSnapshot().state !== "ready" || !coachHasData) return;
+    const requestedGeneration = currentGenerationRef.current;
+    if (pendingGenerationsRef.current.has(requestedGeneration)) return;
+    pendingGenerationsRef.current.add(requestedGeneration);
+    try {
+      await runExclusiveInference(async () => {
+        // A waiting click is not permission to send stale financial input.
+        if (currentGenerationRef.current !== requestedGeneration || liveInputRef.current !== liveInputKey || !preferencesReadyRef.current || store.getSnapshot().state !== "ready") return;
+        await generateCoachingActive();
+      });
+    } finally {
+      pendingGenerationsRef.current.delete(requestedGeneration);
+    }
+  }
+
+  async function generateCoachingActive() {
+    if (blockUnavailablePreferences()) return;
+    if (liveInputRef.current !== liveInputKey) return;
+    if (prep.state !== "ready") return;
+    if (!coachHasData) return;
+    if (isRunningRef.current) return;
+
+    // CRITICAL: 고유한 request identity 생성
+    const requestIdentity = Symbol("coaching-request");
+    currentRequestIdentityRef.current = requestIdentity;
+
+    const generation = currentGenerationRef.current;
+    isRunningRef.current = true;
+    setCoachError("");
+    setCoachingText("");
+    setOutputInputKey(liveInputKey);
+    setCoachStatus("generating");
+    const engineJobId = store.getSnapshot().jobId;
+    let stopSubscription = () => {};
+    const workerDisposed = new Promise<void>(resolve => {
+      stopSubscription = store.subscribe(snapshot => {
+        if (snapshot.jobId === engineJobId && snapshot.state === "ready") return;
+        currentGenerationRef.current++;
+        // SDK stream RPCs, like reload, can remain unresolved after terminate.
+        // Release the queue only AFTER disposal so no live GPU streams overlap.
+        void Promise.resolve().then(() => store.whenDisposed()).then(resolve);
+      });
+    });
+    try {
+      const factory = getPageFactory(() => createProvisionFactory());
+      const engine = factory.getEngine();
+      if (!engine) {
+        throw new Error("ENGINE_NOT_READY");
+      }
+      activeEngineRef.current = engine as unknown as { interruptGenerate?: () => void };
+      await Promise.race([streamCoaching(
+        engine,
+        coachInput,
+        (full) => {
+          if (currentGenerationRef.current === generation) {
+            setCoachingText(full);
+          }
+        },
+        { protectedItemNames: fixedCosts.filter(item => protectedFixedCostIds.has(item.id)).map(item => item.name) }
+      ), workerDisposed]);
+      if (currentGenerationRef.current !== generation) return;
+      setCoachStatus("ready");
+      setCoachOptIn(true);
+    } catch (err) {
+      if (currentGenerationRef.current !== generation) return;
+      // 보안: streamCoaching/SDK 원시 오류 메시지(URL·스택 포함 가능)는 분류에만
+      // 쓰고 화면에는 고정 한국어 메시지만 올린다. 추론 실패는 ready/artifact 를
+      // 건드리지 않는다(store 전이 없음, 새 동의·재다운로드 없음).
+      setCoachingText("");
+      setCoachError(sanitizeCoachError(err, "inference"));
+      setCoachStatus("error");
+    } finally {
+      stopSubscription();
+      activeEngineRef.current = null;
+      // CRITICAL: 현재 요청의 identity 와 일치할 때만 정리
+      if (currentRequestIdentityRef.current === requestIdentity) {
+        isRunningRef.current = false;
+        currentRequestIdentityRef.current = null;
+      }
+    }
+  }
+
+  // 코칭이 끝나거나 input/scope 가 바뀌면 재실행 (모달 안에서 '다시 코칭' 버튼).
+  const runCoaching = generateCoachingNow;
+
+  // 외부 store 의 변화(시작/준비/실패)를 모달 상태에 반영한다.
+  useEffect(() => {
+    if (prep.state === "preparing") {
+      setCoachProgress(prep.progress);
+      setCoachProgressText(prep.progressText);
+      setCoachStatus("loading");
+      setCoachError("");
+    } else if (prep.state === "ready") {
+      setCoachProgress(1);
+      setCoachProgressText("준비됨");
+      // 다운로드 끝났지만 코칭 시작 안함 — idle 로 두어 모달 별도 CTA 로
+      // 사용자가 명시적으로 코칭 보기를 누르도록 한다.
+      if (coachStatus === "loading") {
+        setCoachStatus("idle");
+      }
+    } else if (prep.state === "cancelled") {
+      currentGenerationRef.current++;
+      setCoachingText("");
+      setCoachProgress(0);
+      setCoachProgressText("");
+      setCoachStatus("idle");
+      setCoachError("");
+    } else if (prep.state === "error") {
+      currentGenerationRef.current++;
+      setCoachingText("");
+      setCoachStatus("error");
+      // prep.error 는 store 전이 경계에서 이미 sanitizeCoachError 를 통과한 고정
+      // 메시지다. 재분류하면 고정 문자열이 다른 고정 문자열로 바뀔 수 있으므로
+      // (멱등 아님) 그대로 display 한다.
+      setCoachError(prep.error || "준비에 실패했어요");
+    } else if (prep.state === "idle") {
+      setCoachProgress(0);
+      setCoachProgressText("");
+    }
+    // coachStatus 의존성은 모달 본문에 들어갈 현재 상태만 본다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prep.state, prep.progress, prep.progressText, prep.error]);
+
+  // Header 용 정리 상태.
+  const headerIndicator: "none" | "preparing" | "ready" | "error" =
+    prep.state === "preparing" ? "preparing"
+    : prep.state === "ready" ? "ready"
+    : prep.state === "error" ? "error"
+    : "none";
+
+  const headerProgressLabel = prep.state === "preparing"
+    ? `AI 준비 중 ${Math.round((prep.progress || 0) * 100)}%`
+    : null;
+  const headerReadyLabel = prep.state === "ready" ? "AI 준비 완료 · 코칭 보기" : null;
 
   function reportScopeOf(session: ServerSession): string | null {
     return session.workspace ? `${session.user.id}|${session.workspace.id}` : null;
@@ -368,38 +481,51 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
     setMonthlyReport(null);
   }
 
-  // UI 표시용 동의 상태 (엔진 상태 기반)
-  const engineStatus = getCoachEngineStatus();
-  const coachAttemptConsent = coachAttemptConsentRef.current;
-
-  // 콜드 스타트 필요 여부 (엔진이 없고 동의도 없음)
-  const awaitingConsent = coachingPreferencesReady && engineStatus === "none" && !coachAttemptConsent && coachStatus === "idle" && coachHasData && isWebGpuAvailable();
-
   return {
     isCoachModalOpen,
     setIsCoachModalOpen,
     coachStatus,
     coachProgress,
     coachProgressText,
-    coachingText: outputInputKey === liveInputKey ? coachingText : "",
+    coachingText: prep.state === "ready" && outputInputKey === liveInputKey ? coachingText : "",
     coachError,
     coachHasData,
     coachInput,
     coachFallbackHeadline,
-    // CRITICAL: 동의 상태 및 상수
-    coachAttemptConsent,
+    coachAttemptConsent: coachAttemptConsentRef.current,
     awaitingConsent,
+    preparation: {
+      state: prep.state,
+      modelId: prep.modelId,
+      jobId: prep.jobId,
+      progress: prep.progress,
+      progressText: prep.progressText,
+      error: prep.error
+    },
+    headerIndicator,
+    headerProgressLabel,
+    headerReadyLabel,
     COACH_MODEL_APPROX_MB,
     COACH_MODEL_VRAM_MB,
+    COACH_MODEL_ID,
+    COACH_MODEL_ENABLE_THINKING,
     monthlyReport,
     runCoaching,
-    confirmConsentAndRun,
-    declineConsent,
+    generateCoachingNow,
+    confirmConsentAndPrepare,
+    // BACKWARD COMPAT — 일부 테스트가 옛 이름으로 호출한다. 새 흐름에서는
+    // confirmConsentAndPrepare 가 동의 후 prepare 까지 함께 진행하지만, 옛
+    // 테스트는 engine/stream 이 호출되지 않는지만 확인한다.
+    confirmConsentAndRun: confirmConsentAndPrepare,
+    continueWithoutModal,
+    cancelPreparation,
+    retryPreparation,
     openCoachModal,
     closeCoachModal,
     refreshMonthlyReport,
-    invalidateMonthlyReport
-  };
+    invalidateMonthlyReport,
+    onHeaderOpenCoach: openCoachModal
+  } as const;
 }
 
 export type CoachApi = ReturnType<typeof useCoach>;

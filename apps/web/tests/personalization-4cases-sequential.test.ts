@@ -29,7 +29,8 @@ import type { FixedCost } from "../app/lib/budget";
 const mocks = vi.hoisted(() => ({
   stream: vi.fn(),
   engine: vi.fn(),
-  engineStatus: vi.fn(() => "ready" as const)
+  engineStatus: vi.fn(() => "ready" as const),
+  factory: vi.fn()
 }));
 
 vi.mock("../app/lib/coach", async () => {
@@ -41,14 +42,21 @@ vi.mock("../app/lib/coach", async () => {
     streamCoaching: mocks.stream
   };
 });
-vi.mock("../app/lib/coachModel", () => ({
-  isCoachOptedIn: () => false,
-  isWebGpuAvailable: () => true,
-  setCoachOptIn: vi.fn(),
-  COACH_MODEL_APPROX_MB: 500,
-  COACH_MODEL_VRAM_MB: 945
-}));
+vi.mock("../app/lib/coachModel", async () => {
+  const actual = await vi.importActual("../app/lib/coachModel") as any;
+  return {
+    ...actual,
+    isCoachOptedIn: () => false,
+    isWebGpuAvailable: () => true,
+    setCoachOptIn: vi.fn(),
+    COACH_MODEL_APPROX_MB: 453,
+    COACH_MODEL_VRAM_MB: 1629.49
+  };
+});
 vi.mock("../app/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("../app/lib/coachEngine/createWebWorkerClient", () => ({
+  createWorkerCoachEngineFactory: mocks.factory
+}));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -406,12 +414,26 @@ describe("Case D: Protection setting change invalidates previous coaching", () =
       return text;
     });
 
+    // CRITICAL — 새 흐름은 모델 준비가 별도 단계. 가짜 ready factory 를
+    // 주입해 store 가 즉시 ready 가 되도록 한다.
+    const fakeFactory: any = (callbacks: any) => {
+      callbacks.onReady();
+      return { jobId: 1, modelId: "Qwen3.5-0.8B-q4f16_1-MLC" };
+    };
+    fakeFactory.getEngine = () => ({});
+    fakeFactory.unload = vi.fn();
+    fakeFactory.hasLiveWorker = () => true;
+    mocks.factory.mockReturnValue(fakeFactory);
+
     const h = renderHook(
       ({ ids }) => useCoach({ budget: data, serverApi: null, protectedFixedCostIds: new Set(ids) }),
       { initialProps: { ids: ["ins-a"] as string[] } }
     );
 
-    // First run with ins-a protected
+    // First run with ins-a protected (prepare → ready → run)
+    act(() => h.result.current.confirmConsentAndPrepare());
+    await act(async () => { await Promise.resolve(); });
+    expect(h.result.current.preparation.state).toBe("ready");
     await act(async () => { await h.result.current.runCoaching(); });
     expect(h.result.current.coachingText).toContain("실손보험");
     expect(h.result.current.coachingText).not.toContain("종신보험");
@@ -420,7 +442,9 @@ describe("Case D: Protection setting change invalidates previous coaching", () =
     h.rerender({ ids: ["ins-b"] });
     expect(h.result.current.coachingText).toBe(""); // Invalidated
 
-    // Second run with ins-b protected
+    // 다시 prepare 후 second run with ins-b protected
+    act(() => h.result.current.confirmConsentAndPrepare());
+    await act(async () => { await Promise.resolve(); });
     await act(async () => { await h.result.current.runCoaching(); });
     expect(h.result.current.coachingText).toContain("종신보험");
     expect(h.result.current.coachingText).not.toContain("실손보험");

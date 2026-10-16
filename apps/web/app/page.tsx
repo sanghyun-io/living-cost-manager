@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Text } from "@mantine/core";
-import { COACH_MODEL_APPROX_MB, COACH_MODEL_VRAM_MB, isWebGpuAvailable } from "./lib/coachModel";
+import { COACH_MODEL_APPROX_MB, COACH_MODEL_ID, COACH_MODEL_VRAM_MB, isWebGpuAvailable } from "./lib/coachModel";
 import { track } from "./lib/analytics";
 import { renewalQueue } from "./lib/costViews";
 import { AppHeader } from "./components/AppHeader";
@@ -203,6 +203,9 @@ export default function Home() {
         onOpenTemplates={() => { setTemplateError(""); setTemplatesOpen(true); }}
         onOpenTour={() => tour.start(document.querySelector<HTMLElement>('[data-product-tour-opener]') ?? undefined)}
         onServerLogout={handleExitAccount}
+        coachHeaderIndicator={coach.headerIndicator}
+        coachHeaderProgressLabel={coach.headerProgressLabel}
+        coachHeaderReadyLabel={coach.headerReadyLabel}
       />
       <main className="page-shell quiet-home">
       <ProductTour tour={tour} signedIn={!!auth.serverSession && !users.isSampleMode} paused={tourPaused} readOnly={viewer} />
@@ -466,11 +469,13 @@ export default function Home() {
         />
 
       <CoachModal
+          preferencesReady={coachingPrefs.ready}
           opened={coach.isCoachModalOpen}
           webGpuAvailable={isWebGpuAvailable()}
           hasData={coach.coachHasData}
           approxMb={COACH_MODEL_APPROX_MB}
           vramMb={COACH_MODEL_VRAM_MB}
+          modelName={COACH_MODEL_ID}
           status={coach.coachStatus}
           loadProgress={coach.coachProgress}
           loadText={coach.coachProgressText}
@@ -478,11 +483,15 @@ export default function Home() {
           errorMessage={coach.coachError}
           fallbackHeadline={coach.coachFallbackHeadline}
           awaitingConsent={coach.awaitingConsent}
+          preparationState={coach.preparation.state}
           onStart={() => void coach.runCoaching()}
           onRegenerate={() => void coach.runCoaching()}
           onClose={coach.closeCoachModal}
-          onConfirmConsent={coach.confirmConsentAndRun}
-          onDeclineConsent={coach.declineConsent}
+          onConfirmConsent={coach.confirmConsentAndPrepare}
+          onContinueWithoutPreparation={coach.continueWithoutModal}
+          onCancelPreparation={coach.cancelPreparation}
+          onRetryPreparation={coach.retryPreparation}
+          onGenerateCoaching={() => void coach.generateCoachingNow()}
         />
 
       <CategoryModal
