@@ -96,11 +96,11 @@ export function FixedCostTable({
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
   // 화면 전환: 모바일로 돌아가면 행을 기본 접힘 상태로 복원한다(값·draft 는 DOM 에 그대로).
   useEffect(() => { setExpandedIds(new Set<string>()); }, [isCompactViewport]);
-  // 포커스 대상이 접힌 행에 있으면 포커스 전에 먼저 펼친다(이름 필드는 항상 보이므로 방어선).
-  useEffect(() => {
-    if (!isCompactViewport || !focusItemId) return;
-    setExpandedIds((prev) => (prev.has(focusItemId) ? prev : new Set(prev).add(focusItemId)));
-  }, [isCompactViewport, focusItemId, focusRequest]);
+  // revealItem/handleAddItem 의 포커스 대상은 항상 이름(주요 노출 셀)이므로
+  // 포커스를 이유로 상세를 펼치지 않는다 — 새 행 추가·이름 복귀 시 상세는
+  // 기본 접힘을 유지하고 이름에 포커스된다.将来 숨은 필드가 포커스/invalid
+  // 대상이 될 때만 해당 details 를 먼저 열고 연결된 같은 노드를 rAF 로 포커스할
+  // 것(현재 FocusIntent 는 ledger 이름 경로만 존재 — 프록시를 만들지 않는다).
   const quickPreview = previewQuickAdd(quickAddText);
 
   function submitQuickAdd() {
@@ -211,11 +211,14 @@ export function FixedCostTable({
           <span className="cost-cell th-name">항목</span>
           <span className="cost-cell th-amount">금액</span>
           <span className="cost-cell th-due">납부일</span>
-          <span className="cost-cell th-category">카테고리</span>
-          <span className="cost-cell th-payment">결제수단</span>
-          <span className="cost-cell th-payment-option">결제 옵션</span>
-          <span className="cost-cell th-period">주기</span>
-          <span className="cost-cell th-monthly">월 환산</span>
+          {/* 행의 details-body 와 동일한 nested grid 트랙을 공유해 header↔field X 정렬이 보장된다. */}
+          <span className="cost-cell th-advanced cost-advanced-grid">
+            <span>카테고리</span>
+            <span>결제수단</span>
+            <span>결제 옵션</span>
+            <span>주기</span>
+            <span>월 환산</span>
+          </span>
           <span className="cost-cell th-actions">{isDeleteMode ? "선택" : ""}</span>
         </div>
         {visibleFixedCosts.length === 0 ? (
@@ -241,10 +244,11 @@ export function FixedCostTable({
             suggestedCategoryId && suggestedCategoryId !== item.categoryId
               ? categories.find((c) => c.id === suggestedCategoryId) ?? null
               : null;
-          // 모바일(≤560px)에서는 항목·금액·납부일을 기본으로 보이고, 나머지는
-          // '상세' disclosure 로 제공한다. 모든 입력은 한 번만 DOM 에 존재한다
-          // (desktop/mobile 이중 렌더 없음). 데스크톱에서는 details 가 CSS 로
-          // display:contents 가 되어 9-컬럼 표에 그대로 참여한다.
+          // 모바일(≤560px)에서는 항목·금액·납부일이 기본 노출되고, 나머지 5개 필드는
+          // 네이티브 details 안의 advanced-grid(body)에 있다. 데스크톱에서는 details
+          // 자체가 advanced-group 트랙(550px)을 채우는 단일 항목으로, header 의 같은
+          // 트랙 그룹과 X 정렬을 공유한다. 모든 입력은 한 번만 DOM 에 존재한다
+          // (desktop/mobile 이중 렌더 없음).
           const rowOpen = !isCompactViewport || expandedIds.has(item.id);
           const detailsBodyId = `${detailsIdBase}-body-${item.id}`;
           const renewalAttention = item.renewalStatus === "cancel-planned" || item.renewalStatus === "change-review";
@@ -326,7 +330,7 @@ export function FixedCostTable({
                     <span className="cost-details-toggle-chevron" aria-hidden="true">{rowOpen ? "▾" : "▸"}</span>
                   </summary>
                 ) : null}
-                <div className="cost-row-details-body" id={detailsBodyId}>
+                <div className="cost-row-details-body cost-advanced-grid" id={detailsBodyId}>
                   <span className="cost-cell cost-cell-category">
                     <Group gap={6} wrap="nowrap" align="center">
                       <Select

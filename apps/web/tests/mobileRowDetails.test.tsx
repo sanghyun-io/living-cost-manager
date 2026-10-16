@@ -146,13 +146,14 @@ describe("compact (≤560px) row details", () => {
     expect(nameCell.contains(document.querySelector("details"))).toBe(false);
   });
 
-  it("포커스 요청이 접힌 행에 오면 포커스 전에 펼쳐진다", async () => {
+  it("이름 포커스 복귀/추가 시 상세는 접힌 상태를 유지하고 이름에 포커스된다", () => {
     const props = tableProps({ focusItemId: "row-1", focusRequest: 1 });
     renderTable(props);
     const details = document.querySelector("details.cost-row-details")!;
-    // effect: 펼쳐진 뒤 이름 입력에 포커스.
-    expect(details.hasAttribute("open")).toBe(true);
+    // 이름은 주요 노출 셀이라 포커스를 위해 상세를 펼치지 않는다(새 행=접힘 기본).
+    expect(details.hasAttribute("open")).toBe(false);
     expect(document.activeElement).toBe(screen.getByLabelText("항목명"));
+    expect(getRowSummary().getAttribute("aria-expanded")).toBe("false");
   });
 
   it("갱신 상태 라벨은 '계속 이용'으로 표시되고 값(keep)은 그대로다", () => {
@@ -185,9 +186,14 @@ describe("desktop (>560px) row table", () => {
     expect(document.querySelectorAll('input[aria-label="주기"]')).toHaveLength(1);
   });
 
-  it("헤더 라벨이 새로운 우선순위 열 순서(이름·금액·납부일·…)와 정렬된다", () => {
+  it("헤더는 [이름·금액·납부일·상위5라벨그룹·동작] 구조로 행 details-body 와 같은 트랙을 쓴다", () => {
     renderTable(tableProps());
-    const heads = Array.from(document.querySelectorAll(".table-head > span")).map((s) => s.textContent);
-    expect(heads.slice(0, 6)).toEqual(["항목", "금액", "납부일", "카테고리", "결제수단", "결제 옵션"]);
+    const headCells = Array.from(document.querySelectorAll(".table-head > span"));
+    expect(headCells).toHaveLength(5);
+    expect(headCells.map((s) => s.classList.contains("cost-advanced-grid"))).toEqual([false, false, false, true, false]);
+    const headLabels = Array.from(headCells[3].children).map((s) => s.textContent);
+    expect(headLabels).toEqual(["카테고리", "결제수단", "결제 옵션", "주기", "월 환산"]);
+    // 행의 details-body 도 같은 cost-advanced-grid 클래스(공유 트랙 변수)로 정렬된다.
+    expect(document.querySelector(".cost-row-details-body.cost-advanced-grid")).toBeTruthy();
   });
 });

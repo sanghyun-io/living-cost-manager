@@ -254,18 +254,40 @@ body {
 .table {
   display: grid;
   gap: 0;
+  /* 데스크톱 최소 행 폭이 컨테이너보다 좁을 때 페이지가 아니라 표만 가로 스크롤한다. */
+  overflow-x: auto;
 }
 
 /* Keep date entry readable; narrower screens use stacked editing fields.
    Column order is primary-first (이름·금액·납부일) so the mobile compact layout
    keeps the same DOM order; cells carry semantic classes instead of relying
-   on child-index rules. */
+   on child-index rules.
+
+   데스크톱 표는 5-그룹 구조: [name, amount, due, advanced-group(550px), actions].
+   Chromium 의 네이티브 details 는 내부 ::details-content 래퍼를 두므로
+   display:contents 로 안쪽 필드가 부모 그리드에 flattening 되지 않는다.
+   그래서 details 자체를 부모 그리드의 한 항목(advanced-group 폭)으로 두고,
+   header 의 상위 5개 라벨과 row의 details-body 가 동일한 nested grid
+   (--cost-adv-cols/--cost-adv-gap) 트랙을 공유해 X 정렬을 보장한다.
+   actions 열은 header/row 모두 고정 트랙(라벨 길이와 무관하게 같은 X). */
+.cost-list {
+  --cost-adv-cols: 86px 100px 112px 92px 112px;
+  --cost-adv-gap: 12px;
+  /* 86+100+112+92+112 = 502 + 4 gap 48 = 550 */
+  --cost-adv-group: 550px;
+  --cost-actions-col: 152px;
+  --cost-actions-col-delete: 64px;
+  /* 120(name min)+104+148+550+152 + 4 gap 48 = 1122 */
+  --cost-row-min: 1122px;
+}
+
 .table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 104px 148px minmax(86px, 0.58fr) 100px 112px 92px 112px max-content;
+  grid-template-columns: minmax(120px, 1fr) 104px 148px var(--cost-adv-group) var(--cost-actions-col);
   gap: 12px;
   align-items: center;
   min-height: 68px;
+  min-width: var(--cost-row-min);
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -275,16 +297,17 @@ body {
 }
 
 .table-row.delete-mode {
-  grid-template-columns: minmax(120px, 1fr) 104px 148px minmax(86px, 0.58fr) 100px 112px 92px 112px 64px;
+  grid-template-columns: minmax(120px, 1fr) 104px 148px var(--cost-adv-group) var(--cost-actions-col-delete);
+  min-width: calc(var(--cost-row-min) - (var(--cost-actions-col) - var(--cost-actions-col-delete)));
 }
 
-/* 데스크톱에서는 행 상세 영역이 contents 로 펼져져 9-컬럼 표에 그대로 참여한다.
-   summary 는 표에서 렌더되지 않는다(컴팩트 뷰포트에서만 JS 로 생성). */
 .cost-row > .cost-cell { min-width: 0; }
 .cost-cell-name { display: flex; flex-direction: column; gap: 2px; }
-.cost-row-details { display: contents; }
+/* details 는 advanced-group 트랙을 채우는 단일 그리드 항목. summary 는
+   컴팩트 뷰포트에서만 JS 로 렌더되며, 그 외에는 항상 open. */
+.cost-row-details { display: block; min-width: 0; }
 .cost-row-details > summary { display: none; }
-.cost-row-details-body { display: contents; }
+.cost-advanced-grid { display: grid; grid-template-columns: var(--cost-adv-cols); gap: var(--cost-adv-gap); min-width: 0; align-items: center; }
 
 .table-empty {
   border: 0;
@@ -310,7 +333,7 @@ body {
   justify-content: center;
 }
 
-.row-secondary-actions { display: flex; justify-content: flex-end; }
+.row-secondary-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
 
 .monthly-equivalent-cell {
   white-space: normal;
@@ -535,7 +558,14 @@ body {
   .table-row.delete-mode {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+    min-width: 0; /* 데스크톱 고정 트랙/스크롤은 1240px 이상에서만 */
   }
+
+  .cost-cell-name,
+  .cost-row-details,
+  .row-secondary-actions,
+  .delete-select-cell { grid-column: 1 / -1; }
+  .cost-row-details-body { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 
   .table-head {
     display: none;
