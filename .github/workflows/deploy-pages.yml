@@ -1,0 +1,98 @@
+name: Deploy Pages (production)
+
+# Cloudflare Pages FE 배포(프로젝트 living-cost-manager, production branch main).
+# 기존 운영 계약(DEPLOYMENT_MIGRATION.md)대로 push-to-main 자동 배포는 폐지된
+# 상태를 유지한다 — 이 워크플로도 workflow_dispatch 수동 트리거만 허용한다.
+# 백엔드 OCI 이미지 빌드/전환은 이 워크플로 범위가 아니며 기존 운영자 승인 절차를
+# 따른다(FE/BE 승인은 짝을 맞춰야 하므로 수동 게이트를 유지한다).
+#
+# 승인 게이트(실제 상태, 2026-10-16 확인):
+#   - GitHub environment `production`의 required_reviewers = sanghyun-io
+#     (환경 승인 없이는 job 시작·시크릿 노출 불가).
+#   - job 실행 조건: 이벤트가 이 저장소의 refs/heads/main에서만 (exact SHA).
+#     임의 ref/태그/fork/PR 입력 경로는 없다.
+#   - main 브랜치 보호규칙은 전환 공개 단계에서 별도 결정(현재 404=미설정,
+#     docs/ci-self-hosted-runner-20261016.md §게이트 참고).
+#
+# 시크릿 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID는 GitHub environment
+# `production` scope에만 존재하며(opskv /shared/unverified/… 의 전달본 —
+# provisioning 절차는 docs 문서 참조, 값은 opskv에만 근거), 이 파일을 커밋한
+# 시점에는 어떤 값도 저장소에 없다. job env로만 주입되고 argv·stdout에 복사하지
+# 않는다. provisioning 전 이 워크플로를 실행하면 환경 승인 실패 또는 시크릿
+# 공백으로 배포가 수행되지 않는 것이 기대 동작이다.
+#
+# Wrangler는 저장소 manifest를 변경하지 않기 위해 npx로만 사용하며 2026-10-03
+# 릴리스 근거와 동일한 4.131.1로 고정한다.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pages-production
+  cancel-in-progress: false
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
+jobs:
+  deploy:
+    name: Build FE + Cloudflare Pages production deploy
+    if: github.repository == 'sanghyun-io/living-cost-manager' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    environment:
+      name: production
+      url: https://living-cost-manager.gamja.top
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact event SHA (no credentials persisted)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Node (pinned exact 24.18.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+
+      - name: Activate pnpm via corepack
+        run: corepack enable pnpm && pnpm --version
+
+      - name: Install dependencies (frozen lockfile, official npm)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static FE (web workspace + deps) for the production API origin
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api.gamja.top/living-cost-manager/v1
+        run: pnpm --filter "@living-cost-manager/web..." build
+
+      - name: Write release metadata for exact SHA traceability
+        run: node scripts/write-release-meta.mjs "$GITHUB_SHA"
+
+      - name: Deploy to Cloudflare Pages (token/Account via env only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx -y wrangler@4.131.1 pages deploy apps/web/out --project-name=living-cost-manager --branch=main --commit-dirty=true
+
+      - name: Verify deployed release identity on both Pages origins
+        run: |
+          set -eu
+          for origin in living-cost-manager.gamja.top living-cost-manager.pages.dev; do
+            verified=""
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              body="$(curl -fsS "https://${origin}/release-meta.json" || true)"
+              if [ "${body}" = "" ]; then sleep 15; continue; fi
+              if printf '%s' "${body}" | grep -q "${GITHUB_SHA}"; then
+                echo "verified ${origin} release-meta matches ${GITHUB_SHA}"
+                verified=1
+                break
+              fi
+              sleep 15
+            done
+            [ -n "${verified}" ] || { echo "release-meta on ${origin} does not match ${GITHUB_SHA}"; exit 1; }
+            curl -fsS -o /dev/null -w "%{http_code} ${origin}/\n" "https://${origin}/"
+          done

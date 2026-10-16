@@ -1,0 +1,89 @@
+name: CI (Mac Mini self-hosted)
+
+# 전사 CI/CD 기준(policies/ci-cd-github-actions-macmini-runner-policy.md)에 따른
+# Living Cost Manager 저장소 전용 self-hosted 워크플로다. GitHub-hosted Linux
+# 우회는 금지이며, 비신뢰 코드(fork·PR 자동 실행·이슈 콘텐츠)는 이 워크플로로
+# 실행되지 않는다(트리거: main push / workflow_dispatch만).
+# runs-on 라벨 4종은 job 라우팅 조건일 뿐 보안 격리 수단이 아니다. 실제 경계는
+# repository-scoped 등록(sanghyun-io/living-cost-manager 전용 runner)과 Mac Mini
+# 위의 전용 비관리자 OS 계정(lcm-ci) 실행 격리다.
+#
+# Action pin: third-party 금지, GitHub 공식 actions만 commit SHA로 고정.
+#   actions/checkout@3d3c42e5... = v7.0.1 (release 2026-07-20)
+#   actions/setup-node@949feb24... = v7.1.0 (release 2026-10-08)
+# pnpm은 서드파티 action 없이 corepack(Node 동봉) + 루트 packageManager
+# 필드(pnpm@11.1.3)로 활성화한다. Actions cache는 Free 플랜 저장소 캐시
+# 한도(500MB) 소진 회피와 재현성을 위해 사용하지 않는다.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
+jobs:
+  build-test:
+    name: Build + tests (ephemeral test Postgres)
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact event SHA (no credentials persisted)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Node (pinned exact 24.18.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+
+      - name: Activate pnpm via corepack
+        run: corepack enable pnpm && pnpm --version
+
+      - name: Install dependencies (frozen lockfile, official npm)
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build all workspaces (shared tsc, api tsc, web esbuild+Next export)
+        run: pnpm -r --if-present build
+
+      - name: Typecheck web
+        run: pnpm --filter @living-cost-manager/web typecheck
+
+      - name: Start ephemeral 127.0.0.1 test Postgres (lcm_ci_test db/schema)
+        run: node scripts/ci/ephemeral-postgres.mjs start --github-env "$GITHUB_ENV"
+
+      - name: Run shared package tests
+        run: node scripts/ci/run-workspace-vitest.mjs packages/shared
+
+      - name: Run web unit tests (jsdom, no GUI/browser)
+        run: node scripts/ci/run-workspace-vitest.mjs apps/web node scripts/bundle-coach-worker.mjs
+
+      - name: Run API integration tests against the ephemeral cluster
+        run: node scripts/ci/run-workspace-vitest.mjs apps/api tsx tests/setup-test-db.ts
+
+      - name: Run marketing script tests
+        run: pnpm test:marketing
+
+      # verify:pricing·public-smoke·브라우저 스크립트는 운영자 로컬 검증으로 유지
+      # (Playwright browser 바이너리/pwsh 의존 → CI 계정 홈에 다운로드하지 않는다;
+      # §docs/ci-self-hosted-runner-20261016.md §3).
+
+      # 클린업은 마지막 `if: always()` 단계에서 수행한다. 이전 단계가 실패해도
+      # 항상 실행되며, stop 스크립트는 자기 state 파일/PID가 아닌 프로세스에는
+      # 손대지 않는다(스크립트 상단 안전 규칙 참조).
+      - name: Stop ephemeral test Postgres (cleanup, always)
+        if: always()
+        run: node scripts/ci/ephemeral-postgres.mjs stop || true

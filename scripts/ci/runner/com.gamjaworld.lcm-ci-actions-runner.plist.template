@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>__LAUNCHD_LABEL__</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__RUNNER_DIR__/runsvc.sh</string>
+	</array>
+	<key>UserName</key>
+	<string>__ACCOUNT__</string>
+	<key>WorkingDirectory</key>
+	<string>__RUNNER_DIR__</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- upstream 공식 plist template에는 KeepAlive가 없다(성공 종료 재시작 루프
+	회피). CI 상시 대기를 위해 SuccessfulExit=false 조건부로만 추가한다:
+	clean exit 0(config remove 등) 후에는 재시작하지 않는다. -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>ACTIONS_RUNNER_SVC</key>
+		<string>1</string>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HOME</key>
+		<string>__ACCOUNT_HOME__</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>__LOG_DIR__/launchd.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>__LOG_DIR__/launchd.err.log</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+</dict>
+</plist>
