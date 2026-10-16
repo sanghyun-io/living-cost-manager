@@ -1,10 +1,19 @@
 // Ephemeral test-only PostgreSQL cluster for LCM API integration tests on the
-// Mac Mini self-hosted runner. Owns exactly one state directory (default
-// $HOME/lcm-ci-test-pg, mode 0700) and a 127.0.0.1-only cluster with
-// trust auth (no password in URLs or logs). Database/role/schema names all
-// carry the `test` marker required by apps/api/tests/test-database.ts, and the
-// process refuses to touch anything not recorded in its own state file (never
-// the 5432 developer cluster, tunnels, or production/OCI databases).
+// Mac Mini self-hosted runner.
+//
+// Security (P1 PG trust fix):
+//   - NO TCP listener (listen_addresses='') — prevents other OS UIDs from
+//     connecting as DB superuser via TCP with trust auth
+//   - Unix socket only, in a 0700 directory owned by the CI user
+//   - peer auth for local (Unix socket) connections — DB superuser role must
+//     match the actual OS username (os.userInfo().username)
+//   - reject auth for host (TCP) connections — explicit defense in depth
+//   - DB name = role = schema = "lcm_ci_test" (satisfies *_test_* guard)
+//
+// Connection URL format:
+//   postgresql://<os-user>@localhost/lcm_ci_test?host=<socket-dir>&schema=lcm_ci_test
+// The hostname "localhost" satisfies the test-database.ts guard, but the actual
+// connection goes through the Unix socket via the ?host= query parameter.
 //
 // Usage:
 //   node scripts/ci/ephemeral-postgres.mjs start [--github-env <file>]
@@ -18,6 +27,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 
 import { acquireLock, releaseLock } from "./host-lock.mjs";
 
@@ -39,6 +49,7 @@ if (!process.env.HOME || stateDir === resolve(process.env.HOME)) {
 }
 const pgBinDir = flagValue("pg-bin-dir") ?? process.env.LCM_CI_PG_BIN_DIR ?? "/opt/homebrew/opt/postgresql@16/bin";
 const dataDir = join(stateDir, "data");
+const socketDir = join(stateDir, "socket"); // Unix socket directory (0700, CI-owned)
 const stateFile = join(stateDir, "state.json");
 const lockDir = join(stateDir, "host.lock");
 
@@ -49,6 +60,9 @@ for (const bin of ["initdb", "pg_ctl", "psql"]) {
 }
 const uid = process.getuid();
 if (uid === 0) throw new Error("refusing to run the test cluster as root");
+
+// DB superuser role must match the actual OS username for peer auth
+const osUsername = os.userInfo().username;
 
 function ensureStateDir() {
   if (existsSync(stateDir)) {
@@ -123,9 +137,15 @@ function cleanupDataDir() {
       throw new Error(`refusing to remove unexpected data dir content in ${dataDir}`);
     }
   }
+  // Also clean socket dir
+  if (existsSync(socketDir)) {
+    rmSync(socketDir, { recursive: true, force: true });
+  }
 }
 
 async function pickFreePortAsync() {
+  // We still pick a port for metadata, but TCP is disabled.
+  // This is for logging/tracing only — no actual TCP listener.
   for (const port of PORT_CANDIDATES) {
     const free = await new Promise((resolvePromise) => {
       const s = createServer();
@@ -146,43 +166,91 @@ async function start(githubEnvFile) {
   try {
     stopOwnedCluster(); // clean any previous job's leftovers
 
+    // Create socket directory (0700, CI-owned)
+    if (!existsSync(socketDir)) {
+      mkdirSync(socketDir, { mode: 0o700 });
+    }
+    chmodSync(socketDir, 0o700);
+
     const port = await pickFreePortAsync();
     if (!port) throw new Error("no free 127.0.0.1 port in range 54500-54559");
 
-    const initdb = spawnSync(join(pgBinDir, "initdb"), ["-D", dataDir, "-U", PG_DB_NAME, "-A", "trust", "-E", "UTF8"], {
-      stdio: "inherit"
-    });
+    // initdb with peer auth for local, reject for host (TCP)
+    // DB superuser role = OS username (for peer auth matching)
+    const initdb = spawnSync(
+      join(pgBinDir, "initdb"),
+      [
+        "-D", dataDir,
+        "-U", osUsername, // DB superuser = OS username (peer auth requirement)
+        "--auth-local=peer", // Unix socket: peer auth
+        "--auth-host=reject", // TCP: reject all
+        "-E", "UTF8"
+      ],
+      { stdio: "inherit" }
+    );
     if (initdb.status !== 0) throw new Error("initdb failed");
     chmodSync(dataDir, 0o700);
 
-    const socketOpts = `-c unix_socket_directories='${stateDir}'`;
+    // Create the test database and role
+    // We need to start the cluster temporarily to create the DB/role
+    const socketOpts = `-c unix_socket_directories='${socketDir}'`;
     const ctl = spawnSync(join(pgBinDir, "pg_ctl"), [
       "-D", dataDir, "-l", join(stateDir, "pg.log"), "-w", "-t", "60", "start",
-      "-o", `-p ${port} -c listen_addresses=127.0.0.1 ${socketOpts} -c fsync=off -c max_connections=64`
+      "-o", `-c listen_addresses='' ${socketOpts} -c fsync=off -c max_connections=64`
     ], { stdio: "inherit" });
     if (ctl.status !== 0) throw new Error("pg_ctl start failed");
     try {
       chmodSync(join(stateDir, "pg.log"), 0o600);
     } catch {}
 
+    // Create test database and role via Unix socket (peer auth)
+    // The role name must match the OS username for peer auth, but we also
+    // create a separate role for the test DB if needed.
+    // Actually, the DB superuser is the OS username, so we can create the test DB directly.
+    const createDb = spawnSync(
+      join(pgBinDir, "createdb"),
+      ["-h", socketDir, "-U", osUsername, PG_DB_NAME],
+      { stdio: "inherit" }
+    );
+    if (createDb.status !== 0) throw new Error("createdb failed");
+
+    // Create schema in the test database
+    const createSchema = spawnSync(
+      join(pgBinDir, "psql"),
+      ["-h", socketDir, "-U", osUsername, "-d", PG_DB_NAME, "-c", `CREATE SCHEMA IF NOT EXISTS ${PG_DB_NAME};`],
+      { stdio: "inherit" }
+    );
+    if (createSchema.status !== 0) throw new Error("create schema failed");
+
     const state = {
-      version: 1,
+      version: 2, // v2: Unix socket + peer auth
       uid,
       pid: postmasterPid(),
-      port,
+      port, // metadata only, no TCP listener
       dataDir,
+      socketDir,
       pgBinDir,
+      osUsername,
       startedAt: new Date().toISOString()
     };
     writeFileSync(stateFile, JSON.stringify(state) + "\n", { mode: 0o600 });
     // Lock owner becomes the postmaster so a concurrent start can detect a live cluster.
     writeFileSync(join(lockDir, "owner.json"), JSON.stringify({ uid, pid: state.pid, at: state.startedAt }) + "\n", { mode: 0o600 });
 
-    const url = `postgresql://${PG_DB_NAME}@127.0.0.1:${port}/${PG_DB_NAME}?schema=${PG_DB_NAME}`;
+    // Connection URL: Unix socket via ?host= query parameter
+    // The hostname "localhost" satisfies the test-database.ts guard,
+    // but the actual connection goes through the Unix socket.
+    // The port is included so the client finds the right socket file (.s.PGSQL.<port>).
+    const encodedSocketDir = encodeURIComponent(socketDir);
+    const url = `postgresql://${osUsername}@localhost:${port}/${PG_DB_NAME}?host=${encodedSocketDir}&schema=${PG_DB_NAME}`;
+    
     if (githubEnvFile) {
       writeFileSync(githubEnvFile, `API_TEST_DATABASE_URL=${url}\n`, { flag: "a" });
     }
     console.log(url);
+    console.log(`Unix socket: ${socketDir}`);
+    console.log(`TCP listener: disabled (listen_addresses='')`);
+    console.log(`Auth: peer (local), reject (host)`);
   } finally {
     // The lock stays held conceptually for the cluster's lifetime via owner pid;
     // release only when the cluster is not (or no longer) running under this state.

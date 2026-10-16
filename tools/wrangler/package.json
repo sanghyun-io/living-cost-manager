@@ -1,0 +1,12 @@
+{
+  "name": "lcm-ci-wrangler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pre-installed wrangler for LCM CI/CD (locked version, no npx)",
+  "dependencies": {
+    "wrangler": "4.131.1"
+  },
+  "scripts": {
+    "wrangler": "wrangler"
+  }
+}

@@ -3,7 +3,17 @@ name: CI (Mac Mini self-hosted)
 # 전사 CI/CD 기준(policies/ci-cd-github-actions-macmini-runner-policy.md)에 따른
 # Living Cost Manager 저장소 전용 self-hosted 워크플로다. GitHub-hosted Linux
 # 우회는 금지이며, 비신뢰 코드(fork·PR 자동 실행·이슈 콘텐츠)는 이 워크플로로
-# 실행되지 않는다(트리거: main push / workflow_dispatch만).
+# 실행되지 않는다.
+#
+# P1 security (2026-10-16):
+#   - workflow_dispatch REMOVED: unguarded manual dispatch could execute
+#     arbitrary branch code on the persistent production runner.
+#   - Only push to protected main triggers CI. Fork events cannot bypass
+#     the branch condition (forks push to their own default branch, not ours).
+#   - pull_request_target is NOT used (would execute fork code with write perms).
+#   - No Ubuntu/GitHub-hosted fallback (policy: self-hosted only for LCM).
+#   - Checkout uses exact github.sha (not a ref input that could be manipulated).
+#
 # runs-on 라벨 4종은 job 라우팅 조건일 뿐 보안 격리 수단이 아니다. 실제 경계는
 # repository-scoped 등록(sanghyun-io/living-cost-manager 전용 runner)과 Mac Mini
 # 위의 전용 비관리자 OS 계정(lcm-ci) 실행 격리다.
@@ -18,7 +28,9 @@ name: CI (Mac Mini self-hosted)
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+  # workflow_dispatch intentionally REMOVED — unguarded manual dispatch on a
+  # persistent self-hosted runner is a P1 security risk. To re-run CI for a
+  # specific commit, push to a feature branch and merge to main after review.
 
 permissions:
   contents: read
@@ -31,8 +43,53 @@ env:
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
 
 jobs:
+  # Guard job: verifies this workflow run is for the correct repo/ref/SHA.
+  # This is a defense-in-depth check in case the trigger conditions are
+  # somehow bypassed (e.g., GitHub bug, branch protection misconfiguration).
+  preflight:
+    name: Preflight security checks
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    timeout-minutes: 5
+    steps:
+      - name: Verify repository identity
+        run: |
+          set -eu
+          if [ "${{ github.repository }}" != "sanghyun-io/living-cost-manager" ]; then
+            echo "error: wrong repository: ${{ github.repository }}" >&2
+            exit 1
+          fi
+          echo "✓ repository: ${{ github.repository }}"
+
+      - name: Verify ref is protected main
+        run: |
+          set -eu
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "error: ref is not main: ${{ github.ref }}" >&2
+            exit 1
+          fi
+          echo "✓ ref: ${{ github.ref }}"
+
+      - name: Verify event is push (not pull_request, workflow_dispatch, etc.)
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "error: event is not push: ${{ github.event_name }}" >&2
+            exit 1
+          fi
+          echo "✓ event: ${{ github.event_name }}"
+
+      - name: Verify SHA is exact event SHA (no ref manipulation)
+        run: |
+          set -eu
+          if [ "${{ github.sha }}" != "${{ github.event.head_commit.id }}" ]; then
+            echo "error: SHA mismatch: github.sha=${{ github.sha }} != head_commit.id=${{ github.event.head_commit.id }}" >&2
+            exit 1
+          fi
+          echo "✓ SHA: ${{ github.sha }}"
+
   build-test:
     name: Build + tests (ephemeral test Postgres)
+    needs: [preflight]
     runs-on: [self-hosted, macOS, ARM64, lcm-production]
     timeout-minutes: 30
     steps:
@@ -41,6 +98,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+          # Explicitly checkout the exact SHA, not a ref
+          ref: ${{ github.sha }}
 
       - name: Setup Node (pinned exact 24.18.0)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -62,7 +121,7 @@ jobs:
       - name: Typecheck web
         run: pnpm --filter @living-cost-manager/web typecheck
 
-      - name: Start ephemeral 127.0.0.1 test Postgres (lcm_ci_test db/schema)
+      - name: Start ephemeral test Postgres (Unix socket, peer auth, no TCP)
         run: node scripts/ci/ephemeral-postgres.mjs start --github-env "$GITHUB_ENV"
 
       - name: Run shared package tests

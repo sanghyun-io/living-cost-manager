@@ -4,14 +4,20 @@
 <dict>
 	<key>Label</key>
 	<string>__LAUNCHD_LABEL__</string>
+	<!-- Program points to root-owned bundle, NOT CI-owned path.
+	     This prevents TOCTOU: CI user cannot modify the executable
+	     that root's launchd invokes. -->
 	<key>ProgramArguments</key>
 	<array>
-		<string>__RUNNER_DIR__/runsvc.sh</string>
+		<string>__BUNDLE_ROOT__/runsvc.sh</string>
 	</array>
 	<key>UserName</key>
 	<string>__ACCOUNT__</string>
+	<!-- WorkingDirectory is the CI-owned dir where .credentials/_work go.
+	     The runner reads binaries from __BUNDLE_ROOT__ via $(dirname "$0")
+	     in runsvc.sh, but writes data to this working directory. -->
 	<key>WorkingDirectory</key>
-	<string>__RUNNER_DIR__</string>
+	<string>__RUNNER_WORK_DIR__</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<!-- upstream 공식 plist template에는 KeepAlive가 없다(성공 종료 재시작 루프
@@ -31,6 +37,9 @@
 		<key>HOME</key>
 		<string>__ACCOUNT_HOME__</string>
 	</dict>
+	<!-- Logs go to root-owned parent directory. Log files are created by
+	     launchd as root; CI user can append via ACL. This prevents CI from
+	     creating symlinks in a CI-writable parent that root would follow. -->
 	<key>StandardOutPath</key>
 	<string>__LOG_DIR__/launchd.out.log</string>
 	<key>StandardErrorPath</key>
