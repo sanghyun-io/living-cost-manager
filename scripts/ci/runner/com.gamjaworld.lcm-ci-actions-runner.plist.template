@@ -4,25 +4,32 @@
 <dict>
 	<key>Label</key>
 	<string>__LAUNCHD_LABEL__</string>
-	<!-- Program points to root-owned bundle, NOT CI-owned path.
-	     This prevents TOCTOU: CI user cannot modify the executable
-	     that root's launchd invokes. -->
+	<!-- Program is the ROOT-OWNED immutable wrapper in the install parent.
+	     launchd drops uid/gid to UserName/GroupName BEFORE exec, so the
+	     wrapper runs unprivileged and only execs the CI-owned official
+	     run.sh after that UID drop. Root never executes leaf contents.
+	     (The v2.338.0 osx package ships no service-control template at all
+	     — verified by package inspection 2026-10-16; run.sh is the official
+	     entrypoint, driven by this LaunchDaemon instead.) -->
 	<key>ProgramArguments</key>
 	<array>
-		<string>__BUNDLE_ROOT__/runsvc.sh</string>
+		<string>__PARENT__/run-runner.sh</string>
 	</array>
 	<key>UserName</key>
 	<string>__ACCOUNT__</string>
-	<!-- WorkingDirectory is the CI-owned dir where .credentials/_work go.
-	     The runner reads binaries from __BUNDLE_ROOT__ via $(dirname "$0")
-	     in runsvc.sh, but writes data to this working directory. -->
+	<key>GroupName</key>
+	<string>__ACCOUNT__</string>
+	<!-- Official appRoot (leaf): config.sh/run.sh expect .credentials, .env,
+	     .runner, _work/ to live in the same directory as their binaries. -->
 	<key>WorkingDirectory</key>
-	<string>__RUNNER_WORK_DIR__</string>
+	<string>__LEAF__</string>
 	<key>RunAtLoad</key>
 	<true/>
-	<!-- upstream 공식 plist template에는 KeepAlive가 없다(성공 종료 재시작 루프
-	회피). CI 상시 대기를 위해 SuccessfulExit=false 조건부로만 추가한다:
-	clean exit 0(config remove 등) 후에는 재시작하지 않는다. -->
+	<!-- Official run.sh semantics: retryable failures are re-launched inside
+	     run.sh itself; a clean exit (0 — including after config.sh remove)
+	     must NOT restart, avoiding the remove-then-crash-loop pattern.
+	     Unexpected non-zero exits (wrapper validation failures, hard crashes)
+	     restart after ThrottleInterval. -->
 	<key>KeepAlive</key>
 	<dict>
 		<key>SuccessfulExit</key>
@@ -30,16 +37,21 @@
 	</dict>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>ACTIONS_RUNNER_SVC</key>
+		<!-- INT/TERM forwarding to the runner process group for clean
+		     bootout; without it run.sh's helper loop cannot be stopped
+		     gracefully by launchd. -->
+		<key>RUNNER_MANUALLY_TRAP_SIG</key>
 		<string>1</string>
 		<key>PATH</key>
 		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
 		<key>HOME</key>
 		<string>__ACCOUNT_HOME__</string>
 	</dict>
-	<!-- Logs go to root-owned parent directory. Log files are created by
-	     launchd as root; CI user can append via ACL. This prevents CI from
-	     creating symlinks in a CI-writable parent that root would follow. -->
+	<!-- Log files are pre-created 0640 root:wheel by 02-install-bundle.sh in
+	     the 0700 root-owned dir. launchd opens them as root and passes the
+	     descriptors to the uid-dropped child. No file/directory ACLs exist
+	     anywhere on this path, so there is no CI add_file/symlink role and
+	     the CI user needs no path-traversal permission on the log dir. -->
 	<key>StandardOutPath</key>
 	<string>__LOG_DIR__/launchd.out.log</string>
 	<key>StandardErrorPath</key>

@@ -6,29 +6,45 @@ name: Deploy Pages (production)
 # 백엔드 OCI 이미지 빌드/전환은 이 워크플로 범위가 아니며 기존 운영자 승인 절차를
 # 따른다(FE/BE 승인은 짝을 맞춰야 하므로 수동 게이트를 유지한다).
 #
-# P1 security (2026-10-16):
-#   - verify-ci job: checks ci.yml succeeded for the EXACT same SHA before deploy.
-#     This ensures what's deployed is what was tested (no rebuild, no drift).
-#   - Artifact handoff: CI job creates a local archive on the runner, deploy job
-#     reads it. No GitHub artifact costs, no rebuild, SHA-verified.
-#   - Wrangler pre-installed: tools/ directory with package-lock, installed in a
-#     secret-free step. Deploy step invokes the pre-installed CLI with CF env.
-#     No npx (network install in secret step), no dependency drift.
+# CI-success gate (2026-10-16 재작성):
+#   - verify-ci job: 게이트 스크립트 scripts/ci/release-gate.mjs가 GitHub API
+#     응답 JSON을 실제 파싱해 (a) 워크플로 이름, (b) event=push, (c)
+#     head_branch=main, (d) head_sha==배포 대상 SHA, (e) status=completed,
+#     (f) conclusion=success, (g) run별 최신 attempt만 인정 — 모든 run id의
+#     최신 attempt이 성공인 경우에만 통과. runId/runAttempt을 후속 job에
+#     출력으로 전달.
+#   - 아티팩트 핸드오프: 배포는 CI run의 아티팩트(lcm-release-<sha>)를
+#     다운로드해 build-info.json + content digest를 재계산 검증하고 그대로
+#     배포한다. 승인 후 재빌드 없음 — 테스트된 것과 배포되는 것이 byte 단위로
+#     동일함을 digest가 보증.
+#   - environment `production` restricts (실제 API 상태, 2026-10-16 적용·확인):
+#     required_reviewers = sanghyun-io(prevent_self_review=false, wait 0)이며
+#     deployment branch policy name=main type=branch (policy id 63284906)로
+#     main 브랜치만 이 환경에 배포 가능. 이전 404 주장은 오타 경로
+#     (/deployment_branch_policies)의 오류이며 무료 플랜 제한이 아니다.
 #
-# 승인 게이트(실제 상태, 2026-10-16 확인):
-#   - GitHub environment `production`의 required_reviewers = sanghyun-io
-#     (환경 승인 없이는 job 시작·시크릿 노출 불가).
-#   - job 실행 조건: 이벤트가 이 저장소의 refs/heads/main에서만 (exact SHA).
-#     임의 ref/태그/fork/PR 입력 경로는 없다.
-#   - main 브랜치 보호규칙은 전환 공개 단계에서 별도 결정(현재 404=미설정,
-#     docs/ci-self-hosted-runner-20261016.md §게이트 참고).
+# 승인 게이트 요건:
+#   - job 실행 조건: 이벤트가 이 저장소의 refs/heads/main push/dispatch에만
+#     (exact SHA). 임의 ref/태그/fork/PR 입력 경로는 없다.
+#   - dispatch는 Owner(sanghyun-io)만 사용 가능하도록 actor 검증. main push는
+#     브랜치 보호(force-push·삭제 금지)+독립 리뷰를 거친 신뢰 소스만 도달 —
+#     관리자 우회는 Owner 본인이며 수동 리뷰 절차를 문서로 대체한다(강제 PR
+#     요구는 solo Owner에게 자기 승인 불가로 deadlock, 의도적 미설정).
+#   - environment secret은 required reviewers 승인 후에만 노출되며, verify-ci
+#     게이트 통과 없이는 deploy job 자체가 needs 체인으로 시작하지 않는다.
 #
+# GITHUB_TOKEN: 저장소 기본 workflow permissions=read(least privilege) 유지.
+#   이 워크플로는 job별로 contents:read(+게이트 job은 actions:read)만 선언한다.
 # 시크릿 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID는 GitHub environment
-# `production` scope에만 존재하며(opskv /shared/unverified/… 의 전달본 —
-# provisioning 절차는 docs 문서 참조, 값은 opskv에만 근거), 이 파일을 커밋한
-# 시점에는 어떤 값도 저장소에 없다. job env로만 주입되고 argv·stdout에 복사하지
-# 않는다. provisioning 전 이 워크플로를 실행하면 환경 승인 실패 또는 시크릿
-# 공백으로 배포가 수행되지 않는 것이 기대 동작이다.
+# `production` scope에만 존재하며(opskv 기준 — provisioning은 docs 문서, 값은
+# opskv에만 근거), provisioning 전 실행은 환경 승인 실패/시크릿 공백으로 배포가
+# 수행되지 않는 것이 기대 동작이다. job env로만 주입되고 argv·stdout에 복사하지
+# 않는다.
+#
+# Action pin(공식 GitHub actions만, third-party 금지):
+#   actions/checkout@3d3c42e5... = v7.0.1
+#   actions/setup-node@949feb24... = v7.1.0
+#   actions/download-artifact@d3f86a10... = v4.3.0
 
 on:
   workflow_dispatch:
@@ -40,17 +56,28 @@ concurrency:
   group: deploy-pages-production
   cancel-in-progress: false
 
-env:
-  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
-
 jobs:
-  # Verify that CI succeeded for the exact SHA we're about to deploy.
-  # This ensures what's deployed is what was tested (no rebuild, no drift).
+  # Gate: the exact deploy SHA must have a completed SUCCESS run of ci.yml
+  # (latest attempt per run) before anything downstream can start. This job
+  # has no environment secrets at all.
   verify-ci:
     name: Verify CI succeeded for this SHA
     runs-on: [self-hosted, macOS, ARM64, lcm-production]
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read   # read workflow-run records of this repo only
+    outputs:
+      ci-run-id: ${{ steps.gate.outputs.ci_run_id }}
+      ci-run-attempt: ${{ steps.gate.outputs.ci_run_attempt }}
     steps:
+      - name: Checkout exact event SHA (gate script only; no secrets needed)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+
       - name: Verify repository and ref
         run: |
           set -eu
@@ -59,45 +86,28 @@ jobs:
             exit 1
           fi
           if [ "${{ github.ref }}" != "refs/heads/main" ]; then
-            echo "error: ref is not main" >&2
+            echo "error: ref is not main: ${{ github.ref }}" >&2
             exit 1
           fi
           echo "✓ repository and ref verified"
 
-      - name: Check CI workflow succeeded for exact SHA
+      - name: Gate on exact-SHA CI success (parsed JSON, not string match)
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           TARGET_SHA="${{ github.sha }}"
-          echo "checking CI status for SHA: $TARGET_SHA"
-          
-          # Query the CI workflow run for this exact SHA
-          CI_RUN="$(gh api "repos/sanghyun-io/living-cost-manager/actions/runners" --jq '.runners[0].name' 2>/dev/null || echo "")"
-          
-          # Get the workflow run for this SHA
-          RUN_INFO="$(gh api "repos/sanghyun-io/living-cost-manager/actions/runs?event=push&status=success&head_sha=$TARGET_SHA" \
-            --jq '.workflow_runs[] | select(.name=="CI (Mac Mini self-hosted)") | {id, name, head_sha, status, conclusion}' 2>/dev/null || echo "")"
-          
-          if [ -z "$RUN_INFO" ]; then
-            echo "error: no successful CI run found for SHA $TARGET_SHA" >&2
-            echo "the CI workflow must succeed before deployment" >&2
-            exit 1
-          fi
-          
-          echo "✓ CI run found:"
-          echo "$RUN_INFO" | jq -R 'split("\n")[] | select(length > 0)' | sed 's/^/  /'
-          
-          # Verify the SHA matches exactly
-          RUN_SHA="$(echo "$RUN_INFO" | jq -r '.head_sha' | head -1)"
-          if [ "$RUN_SHA" != "$TARGET_SHA" ]; then
-            echo "error: CI run SHA ($RUN_SHA) does not match deploy SHA ($TARGET_SHA)" >&2
-            exit 1
-          fi
-          
-          echo "✓ CI succeeded for exact SHA $TARGET_SHA"
+          RUNS_JSON="$(mktemp)"
+          trap 'rm -f "$RUNS_JSON"' EXIT
+          gh api "repos/sanghyun-io/living-cost-manager/actions/runs?event=push&head_sha=${TARGET_SHA}&per_page=100" \
+            > "$RUNS_JSON"
+          SELECTED="$(node scripts/ci/release-gate.mjs gate --target-sha "$TARGET_SHA" --runs "$RUNS_JSON")"
+          echo "eligible CI run selected: $SELECTED"
+          echo "ci_run_id=$(printf '%s' "$SELECTED" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).runId))')" >> "$GITHUB_OUTPUT"
+          echo "ci_run_attempt=$(printf '%s' "$SELECTED" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).runAttempt))')" >> "$GITHUB_OUTPUT"
 
-  # Guard job: verifies this workflow run is for the correct repo/ref/SHA.
+  # Guard job: identity + actor checks (needs the gate to have passed).
   preflight:
     name: Preflight security checks
     needs: [verify-ci]
@@ -131,16 +141,22 @@ jobs:
           fi
           echo "✓ actor: ${{ github.actor }}"
 
+  # Deploy consumes the gated CI artifact — no rebuild. The environment
+  # (required reviewer + main-only branch policy) releases secrets only after
+  # Owner approval of an already-CI-green SHA.
   deploy:
     name: Deploy verified artifact to Cloudflare Pages
-    needs: [preflight]
+    needs: [verify-ci, preflight]
     runs-on: [self-hosted, macOS, ARM64, lcm-production]
     environment:
       name: production
       url: https://living-cost-manager.gamja.top
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read   # download the gated run's artifact
     steps:
-      - name: Checkout exact event SHA (no credentials persisted)
+      - name: Checkout exact event SHA (scripts + locked wrangler only; no build)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -152,33 +168,31 @@ jobs:
         with:
           node-version: 24.18.0
 
-      - name: Activate pnpm via corepack
-        run: corepack enable pnpm && pnpm --version
-
-      - name: Install dependencies (frozen lockfile, official npm)
-        run: pnpm install --frozen-lockfile
-
-      - name: Install wrangler (pre-installed, secret-free, locked version)
-        # P2 fix: install wrangler in a secret-free step with locked dependencies.
-        # The tools/ directory has package.json + package-lock.json with exact wrangler version.
-        # No npx (network install in secret step), no dependency drift.
+      - name: Install wrangler (locked, secret-free step, no npx)
         run: |
           set -eu
           cd tools/wrangler
           npm ci --ignore-scripts
           echo "wrangler installed: $(node_modules/.bin/wrangler --version)"
 
-      - name: Build static FE (web workspace + deps) for the production API origin
-        env:
-          NEXT_PUBLIC_API_BASE_URL: https://api.gamja.top/living-cost-manager/v1
-        run: pnpm --filter "@living-cost-manager/web..." build
+      - name: Download gated CI release artifact (run id + attempt pinned)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: lcm-release-${{ github.sha }}
+          repository: sanghyun-io/living-cost-manager
+          run-id: ${{ needs.verify-ci.outputs.ci-run-id }}
+          path: release
 
-      - name: Write release metadata for exact SHA traceability
-        run: node scripts/write-release-meta.mjs "$GITHUB_SHA"
+      - name: Verify artifact identity + content digest (no unresolved rebuild)
+        run: |
+          set -eu
+          node scripts/ci/release-gate.mjs verify \
+            --dir release \
+            --sha "${{ github.sha }}" \
+            --run-id "${{ needs.verify-ci.outputs.ci-run-id }}" \
+            --attempt "${{ needs.verify-ci.outputs.ci-run-attempt }}"
 
       - name: Deploy to Cloudflare Pages (token/Account via env only)
-        # P2 fix: invoke pre-installed wrangler, not npx.
-        # CF env vars are only available in this step (environment scope).
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -189,7 +203,7 @@ jobs:
             echo "error: wrangler not found at $WRANGLER" >&2
             exit 1
           fi
-          "$WRANGLER" pages deploy apps/web/out \
+          "$WRANGLER" pages deploy release/out \
             --project-name=living-cost-manager \
             --branch=main \
             --commit-dirty=true
