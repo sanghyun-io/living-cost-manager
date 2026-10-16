@@ -4,6 +4,9 @@
 # Prerequisites:
 #   - 01-create-account.sh has created the CI account
 #   - 00-bootstrap-bundle.sh has created the root-owned bundle
+#   - CI user has created the working directory:
+#     sudo -u lcm-ci mkdir -p '/Library/Application Support/GamjaWorld/CI/lcm-runner/working'
+#     sudo -u lcm-ci chmod 0700 '/Library/Application Support/GamjaWorld/CI/lcm-runner/working'
 #
 # Token handling (P1 security):
 #   - Reads token from /dev/tty (hidden prompt) — NOT argv, NOT stdin pipe,
@@ -14,11 +17,8 @@
 #   - Token is unset immediately after use.
 #   - No token value appears in args, logs, or echo output.
 #
-# Run as CI user (via sudo -u from the owner's sudo session):
+# Run as CI user:
 #   sudo -u lcm-ci scripts/ci/runner/02-register-runner.sh
-#
-# Or, if already running as the CI user:
-#   scripts/ci/runner/02-register-runner.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +26,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/runner-version.env"
 
 BUNDLE_ROOT="/Library/Application Support/GamjaWorld/CI/lcm-production"
-RUNNER_WORK_DIR="$HOME/actions-runner"
+RUNNER_PARENT="/Library/Application Support/GamjaWorld/CI/lcm-runner"
+RUNNER_WORK_DIR="$RUNNER_PARENT/working"
 
 # Must NOT run as root
 if [ "$(id -u)" -eq 0 ]; then
@@ -55,6 +56,40 @@ fi
 # Verify bundle has the required files
 if [ ! -x "$BUNDLE_ROOT/config.sh" ]; then
   echo "error: bundle missing config.sh" >&2
+  exit 1
+fi
+
+# Verify runner parent exists and is root-owned
+if [ ! -d "$RUNNER_PARENT" ]; then
+  echo "error: runner parent $RUNNER_PARENT does not exist. Run 00-bootstrap-bundle.sh first." >&2
+  exit 1
+fi
+
+PARENT_OWNER="$(stat -f '%Su' "$RUNNER_PARENT")"
+if [ "$PARENT_OWNER" != "root" ]; then
+  echo "error: runner parent is owned by $PARENT_OWNER, not root — security violation" >&2
+  exit 1
+fi
+
+# Verify working directory exists and is CI-owned
+# CI user must have created this directory (root never creates it)
+if [ ! -d "$RUNNER_WORK_DIR" ]; then
+  echo "error: working directory $RUNNER_WORK_DIR does not exist." >&2
+  echo "CI user must create it first:" >&2
+  echo "  sudo -u $LCM_CI_ACCOUNT mkdir -p '$RUNNER_WORK_DIR'" >&2
+  echo "  sudo -u $LCM_CI_ACCOUNT chmod 0700 '$RUNNER_WORK_DIR'" >&2
+  exit 1
+fi
+
+WORK_OWNER="$(stat -f '%Su' "$RUNNER_WORK_DIR")"
+if [ "$WORK_OWNER" != "$LCM_CI_ACCOUNT" ]; then
+  echo "error: working directory is owned by $WORK_OWNER, not $LCM_CI_ACCOUNT — security violation" >&2
+  exit 1
+fi
+
+WORK_PERMS="$(stat -f '%Sp' "$RUNNER_WORK_DIR")"
+if [ "$WORK_PERMS" != "drwx------" ]; then
+  echo "error: working directory has wrong permissions ($WORK_PERMS); expected drwx------" >&2
   exit 1
 fi
 

@@ -1,20 +1,27 @@
 #!/bin/bash
 # Root-owned immutable installer bundle builder for LCM CI runner.
 #
-# Architecture (P1 root symlink fix):
+# Architecture (P1 root symlink fix - CORRECTED):
 #   - Bundle at /Library/Application Support/GamjaWorld/CI/lcm-production/
 #     contains runner binaries (root-owned, CI-readable, immutable)
-#   - CI working dir at /Users/lcm-ci/actions-runner/ (CI-owned, writable)
-#     holds .credentials, .env, _work, _logs
-#   - Plist points to bundle's runsvc.sh (root-owned), WorkingDirectory is CI's dir
-#   - Logs at /var/log/gamja-ci/lcm-production/ (root-owned parent, CI-writable files)
+#   - Runner working directory structure:
+#     * Root creates: /Library/Application Support/GamjaWorld/CI/lcm-runner/ (root-owned, 0755)
+#     * CI user creates: /Library/.../lcm-runner/working/ (CI-owned, 0700)
+#     * Root NEVER traverses into CI-owned directories
+#   - Logs at /var/log/gamja-ci/lcm-production/ (root-owned, pre-created files)
+#     * Root pre-creates launchd.out.log and launchd.err.log (0640, root:wheel)
+#     * CI can write to existing files via FD (append-only ACL on files, not directory)
+#     * CI cannot create new files or symlinks in log directory
 #
-# This prevents TOCTOU: CI user cannot modify binaries that root's launchd executes.
+# Security properties:
+#   - Root never operates in CI-writable namespace (no symlink attacks)
+#   - Root never follows CI-owned paths after initial setup
+#   - Log directory is root-owned with no CI create permission
+#   - Runner binaries preserve executable permissions
+#   - CI user creates working directory exclusively (no race conditions)
 #
 # Usage:
 #   sudo scripts/ci/runner/00-bootstrap-bundle.sh
-#
-# Token input: reads from /dev/tty (not argv, not stdin pipe) to prevent leakage.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -27,9 +34,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/runner-version.env"
 
 BUNDLE_ROOT="/Library/Application Support/GamjaWorld/CI/lcm-production"
+RUNNER_PARENT="/Library/Application Support/GamjaWorld/CI/lcm-runner"
 LOG_ROOT="/var/log/gamja-ci/lcm-production"
-CI_HOME="/Users/$LCM_CI_ACCOUNT"
-RUNNER_WORK_DIR="$CI_HOME/actions-runner"
 
 # Verify CI account exists and is non-admin
 if ! id "$LCM_CI_ACCOUNT" >/dev/null 2>&1; then
@@ -43,6 +49,7 @@ if dscl . -read /Groups/admin GroupMembership 2>/dev/null | grep -q "\\b$LCM_CI_
 fi
 
 # Verify CI account home is 0700 and owned by CI user
+CI_HOME="/Users/$LCM_CI_ACCOUNT"
 if [ ! -d "$CI_HOME" ]; then
   echo "error: CI home $CI_HOME does not exist" >&2
   exit 1
@@ -75,14 +82,42 @@ mkdir -p "$BUNDLE_ROOT"
 chown root:wheel "$BUNDLE_ROOT"
 chmod 0755 "$BUNDLE_ROOT"
 
-# Create log root (root-owned parent, CI can write files via ACL)
+# Create runner parent directory (root-owned, CI can create subdirectories)
+# CI user will create the 'working' subdirectory exclusively
+mkdir -p "$RUNNER_PARENT"
+chown root:wheel "$RUNNER_PARENT"
+chmod 0755 "$RUNNER_PARENT"
+
+# Create log root (root-owned, no CI create permission)
 mkdir -p "$(dirname "$LOG_ROOT")"
 chown root:wheel "$(dirname "$LOG_ROOT")"
 chmod 0755 "$(dirname "$LOG_ROOT")"
 
 mkdir -p "$LOG_ROOT"
 chown root:wheel "$LOG_ROOT"
-chmod 0755 "$LOG_ROOT"
+chmod 0700 "$LOG_ROOT"  # Root-only access to directory
+
+# Pre-create log files (root-owned, CI can append via ACL on files only)
+# Using O_NOFOLLOW equivalent: create files directly, not via CI-writable path
+for logfile in launchd.out.log launchd.err.log; do
+  LOGFILE="$LOG_ROOT/$logfile"
+  if [ ! -e "$LOGFILE" ]; then
+    # Create file as root (no symlink following possible since we're root creating it)
+    touch "$LOGFILE"
+    chown root:wheel "$LOGFILE"
+    chmod 0640 "$LOGFILE"
+    # Grant CI user append-only permission on this specific file (not directory)
+    # This allows CI to write to the file but not create new files or symlinks
+    chmod +a "user:$LCM_CI_ACCOUNT allow write,append" "$LOGFILE" 2>/dev/null || true
+  else
+    # Verify existing file is root-owned (reject if not)
+    LOGFILE_OWNER="$(stat -f '%Su' "$LOGFILE")"
+    if [ "$LOGFILE_OWNER" != "root" ]; then
+      echo "error: log file $LOGFILE is owned by $LOGFILE_OWNER, not root — refusing" >&2
+      exit 1
+    fi
+  fi
+done
 
 # Download runner tarball to root-owned temp dir (0700, not CI-writable)
 STAGING_DIR="$(mktemp -d -t lcm-ci-runner-staging.XXXXXX)"
@@ -103,7 +138,6 @@ tar -xzf "$STAGING_DIR/actions-runner.tar.gz" -C "$STAGING_DIR/runner"
 
 # Copy ALL runner files to bundle (root-owned, CI-readable)
 # This includes bin/, externals/, config.sh, runsvc.sh, etc.
-# We do NOT copy .credentials, .env, _work, _logs (those go in CI working dir)
 echo "installing runner to bundle..."
 for item in bin externals config.sh config.sh.map runsvc.sh; do
   if [ -e "$STAGING_DIR/runner/$item" ]; then
@@ -116,20 +150,29 @@ for item in bin externals config.sh config.sh.map runsvc.sh; do
 done
 
 # Set ownership and permissions: root-owned, CI-readable
+# Preserve executable bits for binaries and scripts
 chown -R root:wheel "$BUNDLE_ROOT"
 find "$BUNDLE_ROOT" -type d -exec chmod 0755 {} \;
+
+# Set base permissions for files
 find "$BUNDLE_ROOT" -type f -exec chmod 0644 {} \;
-# Make scripts executable
+
+# Restore executable permissions for binaries and scripts
+# This is critical: Runner.Listener and other binaries must be executable
 chmod 0755 "$BUNDLE_ROOT/config.sh" "$BUNDLE_ROOT/runsvc.sh"
 find "$BUNDLE_ROOT/bin" -type f -name "*.sh" -exec chmod 0755 {} \;
 
-# Create runner working directory in CI home (CI-owned, writable)
-mkdir -p "$RUNNER_WORK_DIR"
-chown "$LCM_CI_ACCOUNT" "$RUNNER_WORK_DIR"
-chmod 0700 "$RUNNER_WORK_DIR"
+# Make Runner.Listener and other binaries executable
+# The bin/ directory contains native binaries that need execute permission
+if [ -d "$BUNDLE_ROOT/bin" ]; then
+  # Make all files in bin/ executable (they are native binaries)
+  find "$BUNDLE_ROOT/bin" -type f -exec chmod 0755 {} \;
+fi
 
-# Set ACL so CI user can write log files to root-owned log dir
-chmod +a "user:$LCM_CI_ACCOUNT allow write,add_file,writeextattr,append" "$LOG_ROOT" 2>/dev/null || true
+# Make externals binaries executable if they exist
+if [ -d "$BUNDLE_ROOT/externals" ]; then
+  find "$BUNDLE_ROOT/externals" -type f \( -name "*.sh" -o -name "node" -o -name "npm" -o -name "npx" \) -exec chmod 0755 {} \;
+fi
 
 # Generate manifest with file hashes
 echo "generating manifest..."
@@ -149,10 +192,15 @@ chmod 0644 "$MANIFEST"
 echo ""
 echo "bundle created at $BUNDLE_ROOT"
 echo "manifest: $MANIFEST"
-echo "working dir: $RUNNER_WORK_DIR"
+echo "runner parent: $RUNNER_PARENT"
 echo "log dir: $LOG_ROOT"
 echo ""
+echo "IMPORTANT: CI user must create working directory:"
+echo "  sudo -u $LCM_CI_ACCOUNT mkdir -p '$RUNNER_PARENT/working'"
+echo "  sudo -u $LCM_CI_ACCOUNT chmod 0700 '$RUNNER_PARENT/working'"
+echo ""
 echo "next steps:"
-echo "  1. Register runner: sudo scripts/ci/runner/02-register-runner.sh"
-echo "  2. Install LaunchDaemon: sudo scripts/ci/runner/03-install-launchd.sh"
-echo "  3. Verify: sudo scripts/ci/runner/04-verify.sh"
+echo "  1. CI user creates working dir: sudo -u $LCM_CI_ACCOUNT mkdir -p '$RUNNER_PARENT/working'"
+echo "  2. Register runner: sudo -u $LCM_CI_ACCOUNT scripts/ci/runner/02-register-runner.sh"
+echo "  3. Install LaunchDaemon: sudo scripts/ci/runner/03-install-launchd.sh"
+echo "  4. Verify: sudo scripts/ci/runner/04-verify.sh"

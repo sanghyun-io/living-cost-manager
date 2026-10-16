@@ -6,8 +6,9 @@
 #   - Repository-scoped runner registration (GitHub API)
 #   - OS identity isolation (account, admin group, home perms)
 #   - Bundle integrity (root-owned, manifest present)
+#   - Runner parent/working directory ownership
 #   - LaunchDaemon (root-owned plist, points to bundle)
-#   - Log directory (root-owned parent)
+#   - Log directory and files (root-owned)
 #   - Other product runners (must be untouched)
 #
 # Run the gh section as the operator account.
@@ -19,8 +20,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/runner-version.env"
 
 BUNDLE_ROOT="/Library/Application Support/GamjaWorld/CI/lcm-production"
+RUNNER_PARENT="/Library/Application Support/GamjaWorld/CI/lcm-runner"
+RUNNER_WORK_DIR="$RUNNER_PARENT/working"
 LOG_DIR="/var/log/gamja-ci/lcm-production"
-RUNNER_WORK_DIR="/Users/$LCM_CI_ACCOUNT/actions-runner"
 
 echo "== repository-scoped runner registration (GitHub API) =="
 gh api "$LCM_CI_REPO_API/actions/runners" \
@@ -45,8 +47,17 @@ if [ -d "$BUNDLE_ROOT" ]; then
   fi
   echo "runsvc.sh:"; stat -f '%Sp %Su %Sg %N' "$BUNDLE_ROOT/runsvc.sh" 2>/dev/null || true
   echo "config.sh:"; stat -f '%Sp %Su %Sg %N' "$BUNDLE_ROOT/config.sh" 2>/dev/null || true
+  echo "bin/Runner.Listener:"; stat -f '%Sp %Su %Sg %N' "$BUNDLE_ROOT/bin/Runner.Listener" 2>/dev/null || true
 else
   echo "bundle missing: $BUNDLE_ROOT"
+fi
+
+echo
+echo "== Runner parent directory (root-owned) =="
+if [ -d "$RUNNER_PARENT" ]; then
+  stat -f '%Sp %Su %Sg %N' "$RUNNER_PARENT"
+else
+  echo "runner parent missing: $RUNNER_PARENT"
 fi
 
 echo
@@ -60,10 +71,16 @@ else
 fi
 
 echo
-echo "== Log directory (root-owned parent) =="
+echo "== Log directory and files (root-owned) =="
 if [ -d "$LOG_DIR" ]; then
   stat -f '%Sp %Su %Sg %N' "$LOG_DIR"
-  ls -la "$LOG_DIR" 2>/dev/null | head -5 || true
+  for logfile in launchd.out.log launchd.err.log; do
+    if [ -f "$LOG_DIR/$logfile" ]; then
+      stat -f '%Sp %Su %Sg %N' "$LOG_DIR/$logfile"
+    else
+      echo "log file missing: $LOG_DIR/$logfile"
+    fi
+  done
 else
   echo "log dir missing: $LOG_DIR"
 fi

@@ -30,7 +30,7 @@ source "$HERE/runner-version.env"
 
 BUNDLE_ROOT="/Library/Application Support/GamjaWorld/CI/lcm-production"
 PLIST="/Library/LaunchDaemons/$LCM_CI_LAUNCHD_LABEL.plist"
-RUNNER_WORK_DIR="/Users/$LCM_CI_ACCOUNT/actions-runner"
+RUNNER_WORK_DIR="/Library/Application Support/GamjaWorld/CI/lcm-runner/working"
 
 echo "=== Precondition validation (read-only, no mutations) ==="
 

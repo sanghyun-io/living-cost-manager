@@ -223,6 +223,52 @@ gh secret set CLOUDFLARE_ACCOUNT_ID --env production
 
 ## 🔍 검증 방법
 
+### GitHub Branch Protection 적용 (실제 API 호출)
+
+```bash
+# main 브랜치 보호 적용 (2026-10-16 실측)
+gh api repos/sanghyun-io/living-cost-manager/branches/main/protection -X PUT \
+  -f allow_force_pushes=false \
+  -f allow_deletions=false \
+  -f block_creations=false \
+  -f required_linear_history=false \
+  -f required_conversation_resolution=false \
+  -f lock_branch=false \
+  -f enforce_admins=false \
+  --input - <<'EOF'
+{
+  "required_status_checks": null,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "required_linear_history": false,
+  "required_conversation_resolution": false,
+  "lock_branch": false,
+  "enforce_admins": false
+}
+EOF
+
+# 적용 결과 확인
+gh api repos/sanghyun-io/living-cost-manager/branches/main/protection
+# {
+#   "allow_force_pushes": {"enabled": false},
+#   "allow_deletions": {"enabled": false},
+#   "required_status_checks": null,
+#   "required_pull_request_reviews": null
+# }
+```
+
+**적용된 보호 규칙**:
+- ✅ Force push 차단
+- ✅ Branch deletion 차단
+- ❌ Required status checks 없음 (CI가 main push에서만 실행되므로 deadlock 방지)
+- ❌ Required PR reviews 없음 (solo owner는 self-approval 불가)
+
+**주의**: Repository가 GitHub Free plan이므로 deployment branch policies는 지원되지 않음 (404).
+대신 workflow 내부에서 `github.ref == 'refs/heads/main'` guard로 배포 제한.
+
 ### 로컬에서 보안 테스트 실행
 ```bash
 cd /Users/sanghyun/services/lcm-ci-runner-20261016-a98c952d
