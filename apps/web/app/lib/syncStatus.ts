@@ -10,7 +10,90 @@ export type AccountSyncState =
   | "syncing"
   | "synced"
   | "failed"
+  | "conflict"
   | "auth-expired";
+
+/**
+ * 헤더 한 줄에 표시하는 저장 상태. 화면의 저장 주장은 마지막으로 확인한
+ * 클라이언트 상태에만 근거한다(실시간 서버 조회가 아니다). 순수 함수라서
+ * hook/컴포넌트 어디서든 같은 유한 집합 판정을 재사용한다.
+ */
+export type HeaderStorageState =
+  | "save-failed"
+  | "saving"
+  | "device-saved"
+  | "device-dirty"
+  | "server-saved"
+  | "checking"
+  | "conflict"
+  | "server-unknown"
+  | "auth-expired";
+
+export interface HeaderStorageInput {
+  signedIn: boolean;
+  hasWorkspace: boolean;
+  /** 현재 확인 스코프의 서버 상태 확인이 살아 있는지. */
+  isChecked: boolean;
+  /** 서버 syncVersion 을 한 번이라도 확인했는지. */
+  versionChecked: boolean;
+  /** 동기화 기준선(baseline)이 설정됐는지. */
+  baselineEstablished: boolean;
+  /** 현재 로컬 스냅샷이 마지막 서버 기준선과 일치하는지. */
+  baselineMatches: boolean;
+  isBlocked: boolean;
+  isBusy: boolean;
+  hasError: boolean;
+  authExpired: boolean;
+  /** 현재 역할이 서버 업로드(동기화)가 가능한지 (owner/editor). */
+  canSyncRole: boolean;
+  /** 마지막 로컬 저장이 실패했는지. */
+  localSaveError: boolean;
+  /** 마지막 편집이 아직 localStorage 에 반영되기 전인지. */
+  localSavePending: boolean;
+}
+
+export function deriveHeaderStorageState(input: HeaderStorageInput): HeaderStorageState {
+  // 로컬 쓰기 오류/대기가 어떤 서버 주장보다 우선한다 — 저장되지 않았는데
+  // "저장됨"이라고 표시하지 않는다.
+  if (input.localSaveError) return "save-failed";
+  if (input.localSavePending) return "saving";
+  if (!input.signedIn || !input.hasWorkspace) return "device-saved";
+  if (input.authExpired) return "auth-expired";
+  if (input.isBlocked) return "conflict";
+  if (input.isBusy) return "checking";
+  // 확인 스코프·버전·기준선이 하나라도 불확실하면 서버를 주장하지 않는다.
+  if (!input.isChecked || !input.versionChecked || input.hasError || !input.baselineEstablished) {
+    return "server-unknown";
+  }
+  if (input.baselineMatches) return "server-saved";
+  // 기준선과 다른 로컬 변경. 보기 전용은 업로드할 수ないので '미반영'을 암시하지 않는다.
+  return input.canSyncRole ? "device-dirty" : "device-saved";
+}
+
+export type HeaderStorageView = { state: HeaderStorageState; label: string; tooltip: string };
+
+export function getHeaderStorageView(state: HeaderStorageState): HeaderStorageView {
+  switch (state) {
+    case "save-failed":
+      return { state, label: "기기 저장 실패", tooltip: "브라우저 저장에 실패했습니다. 백업을 내보내세요." };
+    case "saving":
+      return { state, label: "기기에 저장 중", tooltip: "이 브라우저에 저장하는 중입니다." };
+    case "device-saved":
+      return { state, label: "기기에 저장됨", tooltip: "이 브라우저에만 저장됩니다." };
+    case "device-dirty":
+      return { state, label: "기기에 저장됨 · 서버 미반영", tooltip: "마지막 저장 내용이 서버에 아직 없습니다. 데이터 관리에서 저장하세요." };
+    case "server-saved":
+      return { state, label: "기기·서버에 저장됨", tooltip: "마지막 확인 기준입니다. 실시간 서버 조회가 아닙니다." };
+    case "checking":
+      return { state, label: "동기화 확인 중", tooltip: "서버와 통신 중입니다." };
+    case "conflict":
+      return { state, label: "충돌 · 확인 필요", tooltip: "다른 기기/멤버 변경과 충돌했습니다. 데이터 관리에서 상태를 확인하세요." };
+    case "server-unknown":
+      return { state, label: "서버 상태 확인 필요", tooltip: "서버 저장 여부는 확인 전에는 표시하지 않습니다. 데이터 관리에서 확인하세요." };
+    case "auth-expired":
+      return { state, label: "다시 로그인 필요", tooltip: "서버 세션이 만료되어 확인하지 못합니다. 기기 저장은 유지됩니다." };
+  }
+}
 
 export type AccountSyncStateInput = {
   hasServerApi: boolean;
@@ -117,6 +200,12 @@ export function getSyncStateView(state: AccountSyncState): SyncStateView {
       return {
         label: "서버 동기화 실패",
         description: "서버 요청에 실패했습니다. 로컬 저장은 유지되며 다시 시도할 수 있습니다.",
+        tone: "danger"
+      };
+    case "conflict":
+      return {
+        label: "충돌 · 확인 필요",
+        description: "서버 데이터와 기준이 맞지 않습니다. 서버 데이터를 다시 불러오거나 업로드할지 직접 선택하세요.",
         tone: "danger"
       };
     case "auth-expired":

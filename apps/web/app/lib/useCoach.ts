@@ -229,8 +229,36 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
   function openCoachModal() {
     setIsCoachModalOpen(true);
     if (blockUnavailablePreferences()) return;
-    setCoachError("");
     coachAttemptConsentRef.current = false;
+    // 준비 실패(prep.error)는 분류 경계에서 이미 sanitize 된 고정 메시지다.
+    // 재오픈 시 비우면 모달이 generic 으로 퇴락하므로 error 상태에서는 보존한다.
+    if (prep.state === "error") {
+      setCoachError(prep.error || "준비에 실패했어요");
+      setCoachStatus("error");
+    } else {
+      setCoachError("");
+    }
+  }
+
+  /**
+   * 헤더 READY 버튼 전용 진입. 모달을 열고, 현재 기준선의 유효한 조언이 이미
+   * 있으면 재생성 없이 결과를 그대로 보여준다(GPU 재사용 없음). 결과가 없거나
+   * 입력이 바뀌었을 때만 명시 클릭 1회로 생성을 시작한다. 생성은 기존
+   * generateCoachingNow 가 직렬화·중복 클릭 차단·라이브 컨텍스트 재확인을 담당하고,
+   * 워커/모델 손실 시 새 다운로드·새 동의 없이 고정 오류 안내로 끝난다.
+   */
+  function viewPreparedCoaching() {
+    openCoachModal();
+    if (blockUnavailablePreferences()) return;
+    if (!coachHasData) return;
+    const hasCurrentAdvice =
+      store.getSnapshot().state === "ready" &&
+      outputInputKey === liveInputKey &&
+      coachStatus === "ready" &&
+      coachingText !== "";
+    if (hasCurrentAdvice) return;
+    if (coachStatus === "generating") return;
+    void generateCoachingNow();
   }
 
   // 콜드 스타트 동의 화면 = 모델 미준비 + 데이터 있고 + 동의 없음.
@@ -521,6 +549,7 @@ export function useCoach({ budget, serverApi, protectedFixedCostIds = EMPTY_PROT
     cancelPreparation,
     retryPreparation,
     openCoachModal,
+    viewPreparedCoaching,
     closeCoachModal,
     refreshMonthlyReport,
     invalidateMonthlyReport,

@@ -256,10 +256,13 @@ body {
   gap: 0;
 }
 
-/* Keep date entry readable; narrower screens use stacked editing fields. */
+/* Keep date entry readable; narrower screens use stacked editing fields.
+   Column order is primary-first (이름·금액·납부일) so the mobile compact layout
+   keeps the same DOM order; cells carry semantic classes instead of relying
+   on child-index rules. */
 .table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 148px 104px 92px 112px 32px;
+  grid-template-columns: minmax(120px, 1fr) 104px 148px minmax(86px, 0.58fr) 100px 112px 92px 112px max-content;
   gap: 12px;
   align-items: center;
   min-height: 68px;
@@ -272,8 +275,16 @@ body {
 }
 
 .table-row.delete-mode {
-  grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.58fr) 100px 112px 148px 104px 92px 112px 64px;
+  grid-template-columns: minmax(120px, 1fr) 104px 148px minmax(86px, 0.58fr) 100px 112px 92px 112px 64px;
 }
+
+/* 데스크톱에서는 행 상세 영역이 contents 로 펼져져 9-컬럼 표에 그대로 참여한다.
+   summary 는 표에서 렌더되지 않는다(컴팩트 뷰포트에서만 JS 로 생성). */
+.cost-row > .cost-cell { min-width: 0; }
+.cost-cell-name { display: flex; flex-direction: column; gap: 2px; }
+.cost-row-details { display: contents; }
+.cost-row-details > summary { display: none; }
+.cost-row-details-body { display: contents; }
 
 .table-empty {
   border: 0;
@@ -540,9 +551,48 @@ body {
     grid-template-columns: 1fr;
   }
   .table-row, .table-row.delete-mode { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
-  .table-row > span:nth-child(1), .table-row > span:nth-child(4),
-  .table-row > span:nth-child(5), .table-row > span:nth-child(8),
-  .table-row > .delete-select-cell, .table-row > .row-secondary-actions { grid-column: 1 / -1; }
+  /* 컴팩트 행: 이름·금액·납부일 우선, 나머지는 '상세' disclosure 안으로.
+     네이티브 details 라서 부모 fieldset[disabled](보기 전용)에서도 토글이 동작한다. */
+  .cost-row, .cost-row.delete-mode {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name name actions"
+      "amount due due"
+      "details details details";
+    gap: 10px 12px;
+    align-items: start;
+  }
+  .cost-cell-name { grid-area: name; }
+  .cost-cell-amount { grid-area: amount; }
+  .cost-cell-due { grid-area: due; }
+  .cost-row-details { grid-area: details; display: block; width: 100%; border-top: 1px solid var(--line); padding-top: 6px; }
+  .cost-row-details > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .cost-row-details > summary::-webkit-details-marker { display: none; }
+  .cost-row-details-body { display: block; padding-top: 4px; }
+  .cost-row-details-body > .cost-cell { display: block; margin-top: 10px; }
+  .row-secondary-actions, .delete-select-cell { grid-area: actions; }
+  /* 모바일 터치 목표: 행 동작·체크박스·빠른 추가/항목 추가는 최소 44px. */
+  .cost-row .row-secondary-actions { align-items: center; }
+  .cost-row .row-secondary-actions .mantine-Button-root,
+  .cost-row .row-secondary-actions .mantine-ActionIcon-root { min-height: 44px; min-width: 44px; }
+  .cost-row .delete-select-cell { min-height: 44px; }
+  .cost-cell-due .mantine-Checkbox-root { min-height: 44px; display: flex; align-items: center; }
+  .quick-add .mantine-Button-root, .cost-list .action-group .mantine-Button-root { min-height: 44px; }
   .monthly-equivalent-cell { border-top: 1px solid var(--line); padding-top: 12px; }
   .monthly-equivalent-cell .mantine-InputWrapper-root { margin-top: 8px; }
 
@@ -805,8 +855,6 @@ body {
   .editor-search > .mantine-TextInput-root { min-width: 0; width: 55%; }
   .editor-filters { position: relative; }
   .editor-filters .filter-bar { position: absolute; right: 0; width: min(310px, calc(100vw - 52px)); z-index: 5; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
-  .quiet-home .table-row > span:nth-child(1) { grid-column: 1; }
-  .quiet-home .table-row > span:nth-child(6) { grid-row: 1; grid-column: 2; }
   .quiet-home .table-row { gap: 12px; }
   .forecast-help[open] > p { width: min(280px, calc(100vw - 40px)); }
 }

@@ -655,11 +655,18 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     setSelectedDeleteIds([]);
   }
 
+  // 저장 주장의 진실성: localStorage 쓰기가 아직 끝나지/실패하지 않은 상태를
+  // 헤더가 구분할 수 있도록 직렬화 비교를 노출한다. 값은 effect 의 쓰기 대상과
+  // 같은 키 순서로 직렬화한다.
+  const serializedForSave = JSON.stringify({ monthlyIncome, fixedCosts, categories, cards });
+  const savePending = !!currentUser && isLoaded && loadedUserId === currentUser.id && storedValue.current !== serializedForSave;
+
   return {
     profileName: currentUser?.name,
     handleExportLegacySource,
     saveBeforeSwitch,
     initializeFreshLedger,
+    savePending,
     monthlyIncome,
     fixedCosts,
     focusItemId,

@@ -19,13 +19,13 @@ export default function GuideHome() {
       <h2 id="benefits">금액, 일정, 다음 행동을 함께 봅니다</h2>
       <div className={styles.cards}>
         <div className={styles.card}><h3>월 예산과 실제 청구 구분</h3><p>월환산 비용으로 지출 규모를 비교하고, 등록한 일정에 따른 향후 30일 청구액으로 가까운 결제를 준비합니다.</p></div>
-        <div className={styles.card}><h3>갱신 결정을 기록</h3><p>유지·해지 예정·변경 검토·완료를 구분해 다음 행동을 정리합니다. 실제 해지는 구독 사업자에서 진행합니다.</p></div>
+        <div className={styles.card}><h3>갱신 결정을 기록</h3><p>계속 이용·해지 예정·변경 검토·완료를 구분해 다음 행동을 정리합니다. 실제 해지는 구독 사업자에서 진행합니다.</p></div>
         <div className={styles.card}><h3>계획과 확인을 구분</h3><p>예상 절감과 직접 확인한 절감을 따로 기록합니다. 해지 계획을 실제 절감 실적으로 오해하지 않도록 돕습니다.</p></div>
       </div>
     </section>
     <section className={styles.section} aria-labelledby="start">
       <h2 id="start">처음에는 고정비 한 개부터</h2>
-      <ol><li>대시보드에서 빈 공간으로 시작하거나 별도 샘플 공간을 살펴보세요.</li><li>실제 이용 중인 구독의 금액, 반복 주기, 청구 기준 날짜를 입력하세요.</li><li>다음 결제일을 확인하고 유지·해지 예정·변경 검토 중 결정을 기록하세요.</li><li>사업자에서 해지나 변경 결과를 확인한 뒤 완료와 확인 절감을 기록하세요.</li></ol>
+      <ol><li>대시보드에서 빈 공간으로 시작하거나 별도 샘플 공간을 살펴보세요.</li><li>실제 이용 중인 구독의 금액, 반복 주기, 청구 기준 날짜를 입력하세요.</li><li>다음 결제일을 확인하고 계속 이용·해지 예정·변경 검토 중 결정을 기록하세요.</li><li>사업자에서 해지나 변경 결과를 확인한 뒤 완료와 확인 절감을 기록하세요.</li></ol>
       <p className={styles.note}>기준일이 없으면 일정 미확인입니다. 카드 대금 결제일과 구독 청구일은 다르므로 사업자 결제 내역에서 날짜를 확인하세요.</p>
     </section>
     <section className={styles.section} aria-labelledby="guides">

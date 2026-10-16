@@ -48,14 +48,14 @@ export function CoachingPreferencesPanel({
             <Text id="coach-prefs-title" fw={600}>내 코칭 설정</Text>
             {protectedCount > 0 && (
               <Badge size="sm" variant="light">
-                유지 {protectedCount}건
+                제안 제외 {protectedCount}건
               </Badge>
             )}
           </Group>
         </summary>
 
         <Text size="sm" c="dimmed" mt="sm">
-          유지할 항목은 절감·변경 권유에서 제외합니다. 이유는 선택 사항이며 예산 데이터와 별도로 저장됩니다.
+          절감 제안을 제외하면 그 항목은 절감·변경 권유에서 빼고, upcoming 납부와 요약에는 계속 포함합니다. 이유는 선택 사항이며 예산 데이터와 별도로 저장됩니다.
         </Text>
 
         {hasItems ? (
@@ -70,13 +70,13 @@ export function CoachingPreferencesPanel({
                     disabled={!ready}
                     checked={isProtected}
                     onChange={() => { if (ready) toggle(item.id); }}
-                    label={`${item.name} 유지`}
-                    aria-label={`${item.name} 유지 설정`}
+                    label={`${item.name} 절감 제안 제외`}
+                    aria-label={`${item.name} 절감 제안 제외 설정`}
                   />
                   {isProtected && (
                     <Select
                       disabled={!ready}
-                      aria-label={`${item.name} 유지 이유`}
+                      aria-label={`${item.name} 제외 이유`}
                       placeholder="이유 선택 (선택 사항)"
                       data={choices}
                       value={currentReason ?? null}
@@ -103,7 +103,7 @@ export function CoachingPreferencesPanel({
 
         {protectedCount > 0 && (
           <div style={{ marginTop: "0.5rem" }}>
-            <Text size="sm" fw={600}>유지 중인 항목 ({protectedCount}건)</Text>
+            <Text size="sm" fw={600}>제안 제외된 항목 ({protectedCount}건)</Text>
             <Group gap="xs" mt="xs">
               {items
                 .filter(i => activeIds.has(i.id))
@@ -114,9 +114,9 @@ export function CoachingPreferencesPanel({
                     variant="subtle"
                     size="xs"
                     onClick={() => toggle(i.id)}
-                    aria-label={`${i.name} 유지 해제`}
+                    aria-label={`${i.name} 절감 제안 다시 받기`}
                   >
-                    {i.name} · 해제
+                    {i.name} · 절감 제안 다시 받기
                   </Button>
                 ))}
             </Group>

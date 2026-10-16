@@ -17,7 +17,7 @@ import {
 import { type CreatedInvitation, ServerApiError, type ServerSession, isServerAuthFailure } from "./serverApi";
 import { getServerSyncErrorMessage } from "./serverMessages";
 import { canManageSharing, canSyncWorkspace, findCurrentMember } from "./sharing";
-import { getAccountSyncState, getSyncStateView, summarizeBudgetSnapshot } from "./syncStatus";
+import { getAccountSyncState, getSyncStateView, summarizeBudgetSnapshot, deriveHeaderStorageState, getHeaderStorageView } from "./syncStatus";
 import { track } from "./analytics";
 import type { AccountSyncState } from "./syncStatus";
 import type { UIStateApi } from "./useUIState";
@@ -123,9 +123,8 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     () => (isChecked && serverSnapshot ? summarizeBudgetSnapshot(hydrateWorkspaceSnapshot(serverSnapshot)) : null),
     [serverSnapshot, isChecked]
   );
-  const hasRemoteDecision =
-    isChecked && !!serverSnapshot &&
-    (!isWorkspaceSnapshotEmpty(serverSnapshot) || hasLocalBudgetData(budget.currentBudgetSnapshot));
+  const remoteSnapshotNonEmpty = isChecked && !!serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot);
+  const hasRemoteDecision = remoteSnapshotNonEmpty || (isChecked && hasLocalBudgetData(budget.currentBudgetSnapshot));
   const currentSnapshotKey = useMemo(
     () => buildSnapshotKey(budget.currentBudgetSnapshot),
     [budget.currentBudgetSnapshot]
@@ -141,15 +140,59 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     hasAuthFailure: auth.serverErrorKind === "auth",
     hasError: auth.serverErrorKind !== null
   });
+  // "서버에 저장됨" 주장은 현재 확인 스코프에서 마지막 서버 왕복 기준선과 로컬이
+  // 일치할 때만 성립한다. blocked/버전 불일치/확인 실패 상태의 baseline 일치만으로
+  // healthy 를 주장하지 않는다(실시간 서버 조회가 아니라 마지막 확인 기준).
+  const syncConfirmedCurrent =
+    isChecked && !!lastServerSyncedAt && safety.current.version !== null && safety.current.baseline !== null &&
+    isServerSyncCurrent && !safety.current.blocked && !safety.current.busy &&
+    !auth.isServerBusy && auth.serverErrorKind === null;
   const displayedSyncState: AccountSyncState =
-    accountSyncState === "signed-in" && lastServerSyncedAt && isServerSyncCurrent ? "synced" : accountSyncState;
+    accountSyncState === "auth-expired" || accountSyncState === "syncing" || accountSyncState === "failed" || accountSyncState === "checking"
+      ? accountSyncState
+      : safety.current.blocked
+        ? "conflict"
+        : syncConfirmedCurrent && (accountSyncState === "signed-in" || accountSyncState === "needs-decision")
+          ? "synced"
+          : accountSyncState;
   const syncStateView = getSyncStateView(displayedSyncState);
+  const headerStorageState = deriveHeaderStorageState({
+    signedIn: !!serverSession,
+    hasWorkspace: !!serverSession?.workspace,
+    isChecked,
+    versionChecked: safety.current.version !== null,
+    baselineEstablished: safety.current.baseline !== null,
+    baselineMatches: isServerSyncCurrent,
+    isBlocked: safety.current.blocked,
+    isBusy: auth.isServerBusy || safety.current.busy,
+    hasError: auth.serverErrorKind !== null,
+    authExpired: auth.serverErrorKind === "auth",
+    canSyncRole: canSyncWorkspace(currentWorkspaceRole),
+    localSaveError: !!budget.saveError,
+    localSavePending: !!budget.savePending
+  });
+  const headerStorageView = getHeaderStorageView(headerStorageState);
 
   // Precomputed here (page used to inline these for the sync panel).
   const showUploadButton = Boolean(
     isChecked && serverSnapshot && isWorkspaceSnapshotEmpty(serverSnapshot) && hasLocalBudgetData(budget.getCurrentBudgetSnapshot())
   );
   const showLoadButton = Boolean(isChecked && serverSnapshot && (!isWorkspaceSnapshotEmpty(serverSnapshot) || safety.current.blocked));
+
+  // 빈 기기 CTA: 현재 확인 스코프에서 서버 스냅샷이 비어 있지 않다는 것을 확인했고,
+  // 이 브라우저의 의미 있는 예산 전체(수입·카드·커스텀 카테고리 포함)가 비었을 때만
+  // 불러오기를 제안한다. 필터로 0개인 목록과 무관하고, 샘플·확인 실패·충돌·통신
+  // 중에는 제안하지 않는다. 클릭 시점에도 최신 로컬 데이터로 다시 확인한다.
+  const localBudgetFullyEmpty = !hasLocalBudgetData(budget.currentBudgetSnapshot);
+  const showEmptyDeviceLoadOffer = Boolean(
+    remoteSnapshotNonEmpty &&
+    localBudgetFullyEmpty &&
+    !budget.saveError &&
+    !safety.current.blocked &&
+    auth.serverErrorKind === null &&
+    !auth.isServerBusy &&
+    !safety.current.busy
+  );
 
   function setAutoSyncEnabled(enabled: boolean) {
     const state = safety.current;
@@ -227,24 +270,21 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       checkedScope.current = safety.current;
       setServerSnapshot(remoteSnapshot);
       setIsServerSnapshotChecked(true);
-      const hydrated = hydrateWorkspaceSnapshot(remoteSnapshot);
-      if (latestBudget.current.initializeFreshLedger(hydrated)) {
-        establishSyncBaseline(startingTicket, buildSnapshotKey(hydrated), remoteSnapshot.syncVersion);
-        setLastServerSyncedAt(new Date());
-        auth.setServerStatus('새로 선택한 가계부를 서버에서 불러왔습니다. 기존 가계부와 편집 캐시는 변경하지 않았습니다.');
-        void coach.refreshMonthlyReport(session);
-        return true;
-      }
       // 추세 조각용 히스토리를 백그라운드로 갱신(대기하지 않음 — 동기화 흐름 안 막음).
       void coach.refreshMonthlyReport(session);
 
+      // AUTO 서버 적용 제거: 캐시가 없는 새 가계부라도 서버 스냅샷을 자동으로
+      // 덮어쓰지 않는다. 불러오기는 사용자가 명시적으로 누를 때만 일어난다
+      // (빈 기기 CTA / 데이터 관리의 수동 불러오기).
       if (isWorkspaceSnapshotEmpty(remoteSnapshot) && hasLocalBudgetData(budget.getCurrentBudgetSnapshot())) {
         auth.setServerStatus("서버 가계부가 비어 있습니다. 이 브라우저 데이터를 업로드할 수 있습니다.");
         return true;
       }
 
       if (!isWorkspaceSnapshotEmpty(remoteSnapshot)) {
-        auth.setServerStatus("서버 데이터가 있습니다. 불러오거나 현재 브라우저 데이터로 동기화할 수 있습니다.");
+        auth.setServerStatus(hasLocalBudgetData(budget.getCurrentBudgetSnapshot())
+          ? "서버 데이터가 있습니다. 불러오거나 현재 브라우저 데이터로 동기화할 수 있습니다."
+          : "서버에 저장된 가계부가 있습니다. 불러오기 전까지는 이 기기에 데이터가 없습니다.");
         return true;
       }
 
@@ -398,6 +438,20 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
   function handleStayLocalOnly() {
     setAutoSyncEnabled(false);
     auth.setServerStatus("로컬 전용으로 계속합니다. 서버 연결은 유지되지만 데이터를 덮어쓰지 않습니다.");
+  }
+
+  /**
+   * 빈 기기 CTA 클릭. 렌더링 시점의 파생값에 의존하지 않고 클릭 시점의 최신 로컬 데이터로
+   * 자격을 다시 확인한 뒤, 기존 수동 불러오기(가드+확인+복구 백업+버전 검사)를
+   * 그대로 재사용한다. 조건이 사라졌으면 아무 요청도 하지 않는다.
+   */
+  function handleEmptyDeviceLoad() {
+    if (!showEmptyDeviceLoadOffer) return;
+    if (hasLocalBudgetData(latestBudget.current.getCurrentBudgetSnapshot())) {
+      auth.setServerStatus("이 기기에도 데이터가 있습니다. 불러오기 전에 서버와 기기 데이터를 확인하세요.");
+      return;
+    }
+    void handleLoadServerSnapshot();
   }
 
   // ── server-logout / auth-failure teardown (called from useServerAuth) ──
@@ -635,6 +689,9 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     accountSyncState,
     displayedSyncState,
     syncStateView,
+    headerStorageState,
+    headerStorageView,
+    showEmptyDeviceLoadOffer,
     showUploadButton,
     showLoadButton,
     // handlers
@@ -643,6 +700,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     handleSelectServerWorkspace,
     handleSyncNow,
     handleLoadServerSnapshot,
+    handleEmptyDeviceLoad,
     handleStayLocalOnly,
     refreshSharing,
     handleCreateInvitation,

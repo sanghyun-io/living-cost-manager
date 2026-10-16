@@ -140,7 +140,7 @@ export function CoachModal({
                     로컬 AI가 준비되었습니다. 아래 버튼으로 이번 달 코칭을 받아보세요.
                   </Text>
                   <Text size="xs" c="dimmed">
-                    보호로 표시한 이름은 코치에게 전달되지 않아요.
+                    '절감 제안 제외'한 항목은 절감·변경 권유에서 빠지고, 납부 일정과 요약에는 계속 포함돼요.
                   </Text>
                 </Stack>
               </Alert>

@@ -63,7 +63,7 @@ export function ServerSyncPanel({ sync, sharing }: ServerSyncPanelProps) {
 
   const [pwOpen, setPwOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const showComparison = displayedSyncState === "needs-decision" || displayedSyncState === "failed";
+  const showComparison = displayedSyncState === "needs-decision" || displayedSyncState === "failed" || displayedSyncState === "conflict";
 
   return (
     <Card withBorder padding="md" radius="sm" component="section" aria-label="계정·저장">

@@ -150,7 +150,7 @@ export function InsightsPanel({
                 <Text span size="sm" c="dimmed">예상 월 절감 {formatWon(insight.monthlySavings)}</Text>
                 {onKeepItem ? insight.actionableItemIds.map(id => {
                   const item = fixedCosts.find(candidate => candidate.id === id);
-                  return item && !protectedFixedCostIds.has(id) ? <Button key={id} variant="subtle" size="compact-xs" onClick={() => onKeepItem(id)} aria-label={`${item.name} 유지`}>{item.name} 유지</Button> : null;
+                  return item && !protectedFixedCostIds.has(id) ? <Button key={id} variant="subtle" size="compact-xs" onClick={() => onKeepItem(id)} aria-label={`${item.name} 절감 제안 제외`}>{item.name} 절감 제안 제외</Button> : null;
                 }) : null}
               </li>
             ))}

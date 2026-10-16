@@ -2,6 +2,7 @@ import { Button, Group, Menu, Text, useComputedColorScheme, useMantineColorSchem
 import { LOCAL_USER_NAME } from "../lib/users";
 import { formatSaveTime } from "../lib/formatting";
 import type { ServerSession } from "../lib/serverApi";
+import type { HeaderStorageView } from "../lib/syncStatus";
 import type { ReactNode } from 'react';
 
 interface AppHeaderProps {
@@ -13,9 +14,16 @@ interface AppHeaderProps {
   lastSavedAt: Date | null;
   serverSession: ServerSession | null;
   currentUserName: string | undefined;
+  /**
+   * useWorkspaceSync 가 파생한 저장 상태 표시. 없으면(단독 렌더/레거시) 로컬
+   * 저장 사실만으로 폴백한다 — 서버를 주장하지 않는다.
+   */
+  headerStorageView?: HeaderStorageView;
   onOpenData: () => void;
   onOpenAuth: () => void;
   onOpenCoach: () => void;
+  /** READY 버튼 전용: 모달을 열고 현재 기준선의 유효한 조언이 있으면 재사용, 없으면 1회 생성. */
+  onViewPreparedCoach?: () => void;
   onOpenTemplates: () => void;
   onOpenTour?: () => void;
   /** Combines server logout + local logout (wrapped in page). */
@@ -40,9 +48,11 @@ export function AppHeader({
   lastSavedAt,
   serverSession,
   currentUserName,
+  headerStorageView,
   onOpenData,
   onOpenAuth,
   onOpenCoach,
+  onViewPreparedCoach,
   onOpenTemplates,
   onOpenTour,
   onServerLogout,
@@ -50,18 +60,29 @@ export function AppHeader({
   coachHeaderProgressLabel,
   coachHeaderReadyLabel
 }: AppHeaderProps) {
-  const saveLabel = saveError || (lastSavedAt ? "이 브라우저에 저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기");
+  // 저장 주장은 동기화 파생 상태가 소유한다. 파생값이 없을 때만 로컬 사실
+  // (저장 시각/대기)으로 표시하고, 서버 저장 여부는 절대 암시하지 않는다.
+  const storage = headerStorageView ?? {
+    state: saveError ? "save-failed" as const : lastSavedAt ? "device-saved" as const : "saving" as const,
+    label: saveError || (lastSavedAt ? "이 브라우저에 저장됨 " + formatSaveTime(lastSavedAt) : "브라우저 저장 대기"),
+    tooltip: "이 브라우저 저장 기준입니다."
+  };
+  const storageTime = (storage.state === "device-saved" || storage.state === "device-dirty" || storage.state === "server-saved") && lastSavedAt
+    ? " " + formatSaveTime(lastSavedAt)
+    : "";
   const { setColorScheme } = useMantineColorScheme();
   const computed = useComputedColorScheme("light", { getInitialValueInEffect: true });
 
   // CRITICAL — 헤더의 discreet 버튼은 모달만 열고, 자동으로 코칭을 시작하지
-  // 않는다 (모달 안에서 명시적 클릭이 있어야 stream 이 호출된다).
+  // 않는다 (모달 안에서 명시적 클릭이 있어야 stream 이 호출된다). 예외는 READY
+  // 버튼 하나: 명시적 클릭이므로 모달을 열고 기존 조언 재사용 또는 1회 생성한다.
   return (
     <header className="app-header-shell">
       <Group className="app-header" justify="flex-end" gap="sm" wrap="wrap">
         <Text fw={700} className="app-brand">생활비 관리자</Text>
-        {!saveError ? <Text className="save-status" size="xs" c="dimmed">
-          {saveLabel}
+        {!saveError ? <Text className="save-status" size="xs" c="dimmed" title={storage.tooltip}>
+          {storage.label}
+          {storageTime}
         </Text> : null}
         {/* 백그라운드 준비가 살아있는 동안만 표시되는 정적(discreet) 버튼. */}
         {coachHeaderIndicator === "preparing" && coachHeaderProgressLabel ? (
@@ -82,7 +103,7 @@ export function AppHeader({
             size="compact-sm"
             variant="light"
             color="teal"
-            onClick={onOpenCoach}
+            onClick={onViewPreparedCoach ?? onOpenCoach}
           >
             {coachHeaderReadyLabel}
           </Button>
@@ -99,24 +120,19 @@ export function AppHeader({
             AI 준비 실패 · 확인
           </Button>
         ) : null}
-        {serverSession ? (
-          <Button data-product-tour="data" variant="default" onClick={onOpenData}>
-            동기화 관리
+        {/* 진입 라벨은 로그인 여부와 무관하게 '데이터 관리'로 통일한다. */}
+        <Button data-product-tour="data" variant="default" onClick={onOpenData}>
+          데이터 관리
+        </Button>
+        {!serverSession ? (
+          <Button
+            data-product-tour="login"
+            variant="subtle"
+            onClick={onOpenAuth}
+          >
+            로그인
           </Button>
-        ) : (
-          <>
-            <Button data-product-tour="data" variant="default" onClick={onOpenData}>
-              데이터 관리
-            </Button>
-            <Button
-              data-product-tour="login"
-              variant="subtle"
-              onClick={onOpenAuth}
-            >
-              로그인
-            </Button>
-          </>
-        )}
+        ) : null}
         <Menu position="bottom-end" withinPortal>
           <Menu.Target><Button data-product-tour-opener variant="subtle" color="gray">도구</Button></Menu.Target>
           <Menu.Dropdown>

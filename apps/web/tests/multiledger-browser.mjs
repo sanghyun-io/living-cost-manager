@@ -71,7 +71,7 @@ try {
   await page.waitForFunction(() => document.querySelector('input[aria-label="금액"]')?.value === '111');
   assert.equal(await amount().inputValue(), '111');
   // A late remote pull must not replace the newly selected ledger.
-  await page.getByRole('button', { name: '동기화 관리' }).click();
+  await page.getByRole('button', { name: '데이터 관리' }).click();
   page.once('dialog', dialog => dialog.accept()); holdPull = true;
   await page.getByRole('button', { name: /서버 데이터 불러오기/ }).click();
   await page.waitForFunction(() => true); // click completed; route promise is held
@@ -83,7 +83,7 @@ try {
   assert.equal(await amount().inputValue(), '200');
   // A late push updates only its outgoing ledger; cannot adopt B's baseline.
   await page.getByLabel('현재 가계부', { exact: true }).selectOption('one');
-  await page.getByRole('button', { name: '동기화 관리' }).click();
+  await page.getByRole('button', { name: '데이터 관리' }).click();
   holdPush = true; page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: /지금 동기화/ }).click();
   assert.ok(releasePush, 'push request started');

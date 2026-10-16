@@ -226,7 +226,7 @@ try {
     assert.equal(await viewer.page.getByRole('button', { name: '항목 추가', exact: true }).isDisabled(), true);
     await viewer.page.locator('.editor-tools > summary').click();
     assert.equal(await viewer.page.getByRole('button', { name: '삭제 모드', exact: true }).isDisabled(), true);
-    await viewer.page.getByRole('button', { name: '동기화 관리', exact: true }).click();
+    await viewer.page.getByRole('button', { name: '데이터 관리', exact: true }).click();
     await viewer.page.getByRole('button', { name: '지금 동기화', exact: true }).waitFor();
     assert.equal(await viewer.page.getByRole('button', { name: '지금 동기화', exact: true }).isDisabled(), true);
     const upload = viewer.page.getByRole('button', { name: '이 브라우저 데이터 업로드', exact: true });

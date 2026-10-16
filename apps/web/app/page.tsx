@@ -197,9 +197,11 @@ export default function Home() {
         lastSavedAt={budget.lastSavedAt}
         serverSession={auth.serverSession}
         currentUserName={budget.profileName}
+        headerStorageView={sync.headerStorageView}
         onOpenData={() => ui.setIsDataModalOpen(true)}
         onOpenAuth={() => ui.setIsAuthModalOpen(true)}
         onOpenCoach={coach.openCoachModal}
+        onViewPreparedCoach={coach.viewPreparedCoaching}
         onOpenTemplates={() => { setTemplateError(""); setTemplatesOpen(true); }}
         onOpenTour={() => tour.start(document.querySelector<HTMLElement>('[data-product-tour-opener]') ?? undefined)}
         onServerLogout={handleExitAccount}
@@ -213,6 +215,15 @@ export default function Home() {
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
       {CROSS_LEDGER_AGGREGATION_AVAILABLE && ledgers.aggregateMode ? <section id="aggregate-result" tabIndex={-1} aria-label="합산 보기">{ledgers.aggregate ? <LedgerSummary summary={ledgers.aggregate.totals} fromDate={ledgers.aggregate.fromDate} untilDateExclusive={ledgers.aggregate.untilDateExclusive} aggregate /> : <Text role="status">합산할 가계부를 선택하고 조회하세요. 자동으로 전체 가계부를 선택하지 않습니다.</Text>}</section> : <>
       {viewer ? <Text role="status">보기 전용 가계부입니다. 편집과 업로드는 할 수 없습니다.</Text> : null}
+      {/* 빈 기기 + 확인된 서버 데이터: 자동 적용 대신 명시적 불러오기 CTA 한 번만 제안한다. */}
+      {sync.showEmptyDeviceLoadOffer ? (
+        <div className="workspace-note" role="note">
+          <Text size="sm">서버에 저장된 가계부가 있어요.</Text>
+          <Button size="sm" variant="default" disabled={!syncAvailable} onClick={sync.handleEmptyDeviceLoad}>
+            서버에서 불러오기
+          </Button>
+        </div>
+      ) : null}
       <BudgetStrip
         monthlyIncome={budget.monthlyIncome}
         monthlyExpense={budget.summary.monthlyExpense}

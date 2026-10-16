@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Group, Input, NumberInput, Select, Text, TextInput, Title } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { suggestCategoryId, billingDateSchema } from "@living-cost-manager/shared";
 import { getScheduleStatus } from "./FixedCostSchedule";
 import { FixedCostRowActions } from "./FixedCostRowActions";
@@ -88,6 +89,18 @@ export function FixedCostTable({
   useEffect(() => {
     if (focusItemId) { focusInput.current?.focus(); focusInput.current?.select(); }
   }, [focusItemId, focusRequest]);
+  // 모바일(≤560px) 행 상세 disclosure. 데스크톱에서는 details 가 항상 열려 CSS 로
+  // 표 컬럼에 참여하므로 토글 summary 를 렌더하지 않는다.
+  const isCompactViewport = useMediaQuery("(max-width: 560px)", false, { getInitialValueInEffect: false });
+  const detailsIdBase = useId();
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  // 화면 전환: 모바일로 돌아가면 행을 기본 접힘 상태로 복원한다(값·draft 는 DOM 에 그대로).
+  useEffect(() => { setExpandedIds(new Set<string>()); }, [isCompactViewport]);
+  // 포커스 대상이 접힌 행에 있으면 포커스 전에 먼저 펼친다(이름 필드는 항상 보이므로 방어선).
+  useEffect(() => {
+    if (!isCompactViewport || !focusItemId) return;
+    setExpandedIds((prev) => (prev.has(focusItemId) ? prev : new Set(prev).add(focusItemId)));
+  }, [isCompactViewport, focusItemId, focusRequest]);
   const quickPreview = previewQuickAdd(quickAddText);
 
   function submitQuickAdd() {
@@ -171,7 +184,7 @@ export function FixedCostTable({
         <summary>필터 · 정렬{costFilters.method !== 'all' || costFilters.review !== 'all' || costFilters.sort !== 'original' || categoryFilterId !== 'all' ? ' · 적용 중' : ''}</summary>
         <div className="filter-bar" aria-label="고정비 필터">
         <Select label="결제수단 필터" value={costFilters.method} data={[{ value: "all", label: "모든 결제수단" }, ...methodData]} onChange={(value) => onCostFilters({ ...costFilters, method: value ?? "all" })} />
-        <Select label="검토 상태 필터" value={costFilters.review} data={[{ value: "all", label: "모든 검토 상태" }, { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" }, { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" }, { value: "completed", label: "검토 완료" }]} onChange={(value) => onCostFilters({ ...costFilters, review: value ?? "all" })} />
+        <Select label="검토 상태 필터" value={costFilters.review} data={[{ value: "all", label: "모든 검토 상태" }, { value: "unreviewed", label: "미검토" }, { value: "keep", label: "계속 이용" }, { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" }, { value: "completed", label: "검토 완료" }]} onChange={(value) => onCostFilters({ ...costFilters, review: value ?? "all" })} />
         <Select label="정렬" value={costFilters.sort} data={[{ value: "original", label: "등록 순서" }, { value: "amount", label: "청구 금액 큰 순" }, { value: "due", label: "다음 납부일 순 (미확인 마지막)" }]} onChange={(value) => onCostFilters({ ...costFilters, sort: value ?? "original" })} />
         <Select
           label="카테고리 보기"
@@ -195,15 +208,15 @@ export function FixedCostTable({
       </div>
       <div className="table" role="group" aria-label="고정비 목록">
         <div className={isDeleteMode ? "table-row table-head delete-mode" : "table-row table-head"} aria-hidden="true">
-          <span>항목</span>
-          <span>카테고리</span>
-          <span>결제수단</span>
-          <span>결제 옵션</span>
-          <span>납부일</span>
-          <span>금액</span>
-          <span>주기</span>
-          <span>월 환산</span>
-          <span>{isDeleteMode ? "선택" : ""}</span>
+          <span className="cost-cell th-name">항목</span>
+          <span className="cost-cell th-amount">금액</span>
+          <span className="cost-cell th-due">납부일</span>
+          <span className="cost-cell th-category">카테고리</span>
+          <span className="cost-cell th-payment">결제수단</span>
+          <span className="cost-cell th-payment-option">결제 옵션</span>
+          <span className="cost-cell th-period">주기</span>
+          <span className="cost-cell th-monthly">월 환산</span>
+          <span className="cost-cell th-actions">{isDeleteMode ? "선택" : ""}</span>
         </div>
         {visibleFixedCosts.length === 0 ? (
           <div className="table-empty" role="note">
@@ -228,9 +241,16 @@ export function FixedCostTable({
             suggestedCategoryId && suggestedCategoryId !== item.categoryId
               ? categories.find((c) => c.id === suggestedCategoryId) ?? null
               : null;
+          // 모바일(≤560px)에서는 항목·금액·납부일을 기본으로 보이고, 나머지는
+          // '상세' disclosure 로 제공한다. 모든 입력은 한 번만 DOM 에 존재한다
+          // (desktop/mobile 이중 렌더 없음). 데스크톱에서는 details 가 CSS 로
+          // display:contents 가 되어 9-컬럼 표에 그대로 참여한다.
+          const rowOpen = !isCompactViewport || expandedIds.has(item.id);
+          const detailsBodyId = `${detailsIdBase}-body-${item.id}`;
+          const renewalAttention = item.renewalStatus === "cancel-planned" || item.renewalStatus === "change-review";
           return (
-            <div className={isDeleteMode ? "table-row delete-mode" : "table-row"} role="group" aria-label={item.name} key={item.id}>
-              <span>
+            <div className={isDeleteMode ? "table-row cost-row delete-mode" : "table-row cost-row"} role="group" aria-label={item.name} key={item.id}>
+              <span className="cost-cell cost-cell-name">
                 <FixedCostNameInput
                   aria-label="항목명"
                   ref={item.id === focusItemId ? focusInput : undefined}
@@ -239,56 +259,26 @@ export function FixedCostTable({
                   value={item.name}
                   onNameChange={(name) => onItemChange(item.id, { name })}
                 />
+                {/* 접힌 상태에서도 갱신 주의가 가려지지 않는다. 납부 일정은 due 셀에 항상 표시된다. */}
+                {renewalAttention ? <Text size="xs" c="yellow" className="cost-cell-note">
+                  {item.renewalStatus === "cancel-planned" ? "해지 예정" : "변경 검토"}
+                </Text> : null}
               </span>
-              <span>
-                <Group gap={6} wrap="nowrap" align="center">
-                  <Select
-                    aria-label="카테고리"
-                    label="카테고리" classNames={{ label: "stacked-field-label" }}
-                    size="xs"
-                    style={{ flex: 1 }}
-                    data={categoryData}
-                    value={item.categoryId}
-                    onChange={(value) => onItemChange(item.id, { categoryId: value ?? item.categoryId })}
-                    allowDeselect={false}
-                  />
-                </Group>
-                {!isDeleteMode && suggestedCategory ? (
-                  <Button
-                    variant="subtle"
-                    size="compact-xs"
-                    mt={4}
-                    aria-label={`카테고리를 ${suggestedCategory.label}(으)로 변경`}
-                    onClick={() => onItemChange(item.id, { categoryId: suggestedCategory.id })}
-                  >
-                    {suggestedCategory.label}로 변경
-                  </Button>
-                ) : null}
-              </span>
-              <span>
-                <Select
-                  aria-label="결제수단"
-                  label="결제수단" classNames={{ label: "stacked-field-label" }}
+              <span className="cost-cell cost-cell-amount">
+                <NumberInput
+                  aria-label="금액"
+                  label="금액" classNames={{ label: "stacked-field-label" }}
                   size="xs"
-                  data={methodData}
-                  value={item.paymentMethodId}
-                  onChange={(value) => onPaymentMethodChange(item, (value ?? item.paymentMethodId) as FixedCost["paymentMethodId"])}
-                  allowDeselect={false}
+                  min={0}
+                  thousandSeparator=","
+                  allowDecimal={false}
+                  allowNegative={false}
+                  hideControls
+                  value={item.amount}
+                  onChange={(value) => onItemChange(item.id, { amount: toNumber(value, 0) })}
                 />
               </span>
-              <span>
-                <Select
-                  aria-label="결제 옵션"
-                  label="결제 옵션" classNames={{ label: "stacked-field-label" }}
-                  size="xs"
-                  data={optionData}
-                  value={item.paymentOptionId || null}
-                  onChange={(value) => onPaymentOptionChange(item, value ?? "")}
-                  disabled={optionData.length === 0}
-                  placeholder=""
-                />
-              </span>
-              <span>
+              <span className="cost-cell cost-cell-due">
                 <Input.Wrapper label="기준 납부일" id={`${scheduleHelpId}-${item.id}`} size="xs">
                   <Input
                     type="date"
@@ -306,7 +296,7 @@ export function FixedCostTable({
                     }}
                   />
                 </Input.Wrapper>
-                <Text size="xs" c="dimmed">{getScheduleStatus(item)}</Text>
+                <Text size="xs" c="dimmed" className="cost-cell-schedule-status">{getScheduleStatus(item)}</Text>
                 <Checkbox
                   aria-label="말일"
                   label="말일"
@@ -316,67 +306,124 @@ export function FixedCostTable({
                   onChange={(event) => onItemChange(item.id, { isEndOfMonth: event.currentTarget.checked })}
                 />
               </span>
-              <span>
-                <NumberInput
-                  aria-label="금액"
-                  label="금액" classNames={{ label: "stacked-field-label" }}
-                  size="xs"
-                  min={0}
-                  thousandSeparator=","
-                  allowDecimal={false}
-                  allowNegative={false}
-                  hideControls
-                  value={item.amount}
-                  onChange={(value) => onItemChange(item.id, { amount: toNumber(value, 0) })}
-                />
-              </span>
-              <span>
-                <NumberInput
-                  aria-label="주기"
-                  label="주기" classNames={{ label: "stacked-field-label" }}
-                  size="xs"
-                  min={0}
-                  max={120}
-                  step={0.5}
-                  decimalScale={1}
-                  suffix=" 개월"
-                  hideControls
-                  allowNegative={false}
-                  value={item.periodMonths}
-                  onChange={(value) => onItemChange(item.id, { periodMonths: toNumber(value, item.periodMonths) })}
-                />
-              </span>
-              <span className="monthly-equivalent-cell">
-                <Text fw={700} size="sm" className="tnum">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
-                <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
-                <Select size="xs" label="갱신 검토" value={item.renewalStatus ?? "unreviewed"}
-                  allowDeselect={false}
-                  data={[
-                    { value: "unreviewed", label: "미검토" }, { value: "keep", label: "유지" },
-                    { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" },
-                    { value: "completed", label: "검토 완료" }
-                  ]}
-                  onChange={(value) => onItemChange(item.id, { renewalStatus: value as FixedCost["renewalStatus"] })} />
-                {["cancel-planned", "change-review"].includes(item.renewalStatus ?? "") ? (
-                  <NumberInput size="xs" label="예상 월 절감액" min={0} max={2147483647} allowDecimal={false}
-                    value={item.potentialMonthlySavings ?? 0}
-                    onChange={(value) => onItemChange(item.id, { potentialMonthlySavings: toNumber(value, 0) })} />
+              <details
+                className="cost-row-details"
+                open={rowOpen}
+                onToggle={(event) => {
+                  if (!isCompactViewport) return;
+                  const open = event.currentTarget.open;
+                  setExpandedIds((prev) => {
+                    if (prev.has(item.id) === open) return prev;
+                    const next = new Set(prev);
+                    if (open) next.add(item.id); else next.delete(item.id);
+                    return next;
+                  });
+                }}
+              >
+                {isCompactViewport ? (
+                  <summary className="cost-details-toggle" aria-expanded={rowOpen} aria-controls={detailsBodyId}>
+                    <span className="cost-details-toggle-label">{rowOpen ? "상세 닫기" : "상세"}</span>
+                    <span className="cost-details-toggle-chevron" aria-hidden="true">{rowOpen ? "▾" : "▸"}</span>
+                  </summary>
                 ) : null}
-                {item.renewalStatus === "cancel-planned" ? (
-                  <Button size="compact-xs" variant="light" mt={4} onClick={() => {
-                    if (window.confirm("해지가 실제로 완료되었나요? 금액을 0원으로 바꾸고 현재 월 환산액을 확정 절감으로 기록합니다.")) {
-                      onItemChange(item.id, { renewalStatus: "completed", confirmedMonthlySavings: getMonthlyEquivalentAmount(item), amount: 0, billingAnchorDate: null });
-                    }
-                  }}>해지 완료 확인</Button>
-                ) : null}
-                {item.renewalStatus === "completed" ? (
-                  <NumberInput size="xs" label="직접 확인한 월 절감액" description="완료만으로 청구가 중단되지 않아요. 해지·변경 후 금액과 일정을 수정하세요."
-                    min={0} max={2147483647} allowDecimal={false} value={item.confirmedMonthlySavings ?? 0}
-                    onChange={(value) => onItemChange(item.id, { confirmedMonthlySavings: toNumber(value, 0) })} />
-                ) : null}
-              </span>
+                <div className="cost-row-details-body" id={detailsBodyId}>
+                  <span className="cost-cell cost-cell-category">
+                    <Group gap={6} wrap="nowrap" align="center">
+                      <Select
+                        aria-label="카테고리"
+                        label="카테고리" classNames={{ label: "stacked-field-label" }}
+                        size="xs"
+                        style={{ flex: 1 }}
+                        data={categoryData}
+                        value={item.categoryId}
+                        onChange={(value) => onItemChange(item.id, { categoryId: value ?? item.categoryId })}
+                        allowDeselect={false}
+                      />
+                    </Group>
+                    {!isDeleteMode && suggestedCategory ? (
+                      <Button
+                        variant="subtle"
+                        size="compact-xs"
+                        mt={4}
+                        aria-label={`카테고리를 ${suggestedCategory.label}(으)로 변경`}
+                        onClick={() => onItemChange(item.id, { categoryId: suggestedCategory.id })}
+                      >
+                        {suggestedCategory.label}로 변경
+                      </Button>
+                    ) : null}
+                  </span>
+                  <span className="cost-cell cost-cell-payment">
+                    <Select
+                      aria-label="결제수단"
+                      label="결제수단" classNames={{ label: "stacked-field-label" }}
+                      size="xs"
+                      data={methodData}
+                      value={item.paymentMethodId}
+                      onChange={(value) => onPaymentMethodChange(item, (value ?? item.paymentMethodId) as FixedCost["paymentMethodId"])}
+                      allowDeselect={false}
+                    />
+                  </span>
+                  <span className="cost-cell cost-cell-payment-option">
+                    <Select
+                      aria-label="결제 옵션"
+                      label="결제 옵션" classNames={{ label: "stacked-field-label" }}
+                      size="xs"
+                      data={optionData}
+                      value={item.paymentOptionId || null}
+                      onChange={(value) => onPaymentOptionChange(item, value ?? "")}
+                      disabled={optionData.length === 0}
+                      placeholder=""
+                    />
+                  </span>
+                  <span className="cost-cell cost-cell-period">
+                    <NumberInput
+                      aria-label="주기"
+                      label="주기" classNames={{ label: "stacked-field-label" }}
+                      size="xs"
+                      min={0}
+                      max={120}
+                      step={0.5}
+                      decimalScale={1}
+                      suffix=" 개월"
+                      hideControls
+                      allowNegative={false}
+                      value={item.periodMonths}
+                      onChange={(value) => onItemChange(item.id, { periodMonths: toNumber(value, item.periodMonths) })}
+                    />
+                  </span>
+                  <span className="cost-cell monthly-equivalent-cell cost-cell-monthly">
+                    <Text fw={700} size="sm" className="tnum">{formatWon(getMonthlyEquivalentAmount(item))}</Text>
+                    <Text size="xs" c="dimmed">{item.periodMonths}개월 기준</Text>
+                    <Select size="xs" label="갱신 검토" value={item.renewalStatus ?? "unreviewed"}
+                      allowDeselect={false}
+                      data={[
+                        { value: "unreviewed", label: "미검토" }, { value: "keep", label: "계속 이용" },
+                        { value: "cancel-planned", label: "해지 예정" }, { value: "change-review", label: "변경 검토" },
+                        { value: "completed", label: "검토 완료" }
+                      ]}
+                      onChange={(value) => onItemChange(item.id, { renewalStatus: value as FixedCost["renewalStatus"] })} />
+                    {["cancel-planned", "change-review"].includes(item.renewalStatus ?? "") ? (
+                      <NumberInput size="xs" label="예상 월 절감액" min={0} max={2147483647} allowDecimal={false}
+                        value={item.potentialMonthlySavings ?? 0}
+                        onChange={(value) => onItemChange(item.id, { potentialMonthlySavings: toNumber(value, 0) })} />
+                    ) : null}
+                    {item.renewalStatus === "cancel-planned" ? (
+                      <Button size="compact-xs" variant="light" mt={4} onClick={() => {
+                        if (window.confirm("해지가 실제로 완료되었나요? 금액을 0원으로 바꾸고 현재 월 환산액을 확정 절감으로 기록합니다.")) {
+                          onItemChange(item.id, { renewalStatus: "completed", confirmedMonthlySavings: getMonthlyEquivalentAmount(item), amount: 0, billingAnchorDate: null });
+                        }
+                      }}>해지 완료 확인</Button>
+                    ) : null}
+                    {item.renewalStatus === "completed" ? (
+                      <NumberInput size="xs" label="직접 확인한 월 절감액" description="완료만으로 청구가 중단되지 않아요. 해지·변경 후 금액과 일정을 수정하세요."
+                        min={0} max={2147483647} allowDecimal={false} value={item.confirmedMonthlySavings ?? 0}
+                        onChange={(value) => onItemChange(item.id, { confirmedMonthlySavings: toNumber(value, 0) })} />
+                    ) : null}
+                  </span>
+                </div>
+              </details>
               {isDeleteMode ? (
-                <span className="delete-select-cell">
+                <span className="cost-cell delete-select-cell">
                   <Checkbox
                     aria-label="삭제 선택"
                     color="rose"
@@ -385,11 +432,11 @@ export function FixedCostTable({
                   />
                 </span>
               ) : (
-                <span className="row-secondary-actions">
+                <span className="cost-cell row-secondary-actions">
                   <FixedCostRowActions name={item.name} opened={menuItemId === item.id}
                     onChange={(opened) => setMenuItemId(opened ? item.id : null)}
                     onDuplicate={() => onDuplicateItem(item.id)} />
-                  {onToggleProtected ? <Button variant={protectedIds.has(item.id) ? "light" : "subtle"} size="compact-xs" onClick={() => onToggleProtected(item.id)} aria-label={`${item.name} ${protectedIds.has(item.id) ? "유지 해제" : "유지"}`}>{protectedIds.has(item.id) ? "유지 중" : "유지"}</Button> : null}
+                  {onToggleProtected ? <Button variant={protectedIds.has(item.id) ? "light" : "subtle"} size="compact-xs" onClick={() => onToggleProtected(item.id)} aria-label={`${item.name} ${protectedIds.has(item.id) ? "절감 제안 다시 받기" : "절감 제안 제외"}`}>{protectedIds.has(item.id) ? "제안 제외됨" : "절감 제안 제외"}</Button> : null}
                 </span>
               )}
             </div>
