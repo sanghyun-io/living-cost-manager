@@ -196,7 +196,7 @@ async function start(githubEnvFile) {
     const socketOpts = `-c unix_socket_directories='${socketDir}'`;
     const ctl = spawnSync(join(pgBinDir, "pg_ctl"), [
       "-D", dataDir, "-l", join(stateDir, "pg.log"), "-w", "-t", "60", "start",
-      "-o", `-c listen_addresses='' ${socketOpts} -c fsync=off -c max_connections=64`
+      "-o", `-c listen_addresses='' ${socketOpts} -c port=${port} -c fsync=off -c max_connections=64`
     ], { stdio: "inherit" });
     if (ctl.status !== 0) throw new Error("pg_ctl start failed");
     try {
@@ -209,7 +209,7 @@ async function start(githubEnvFile) {
     // Actually, the DB superuser is the OS username, so we can create the test DB directly.
     const createDb = spawnSync(
       join(pgBinDir, "createdb"),
-      ["-h", socketDir, "-U", osUsername, PG_DB_NAME],
+      ["-h", socketDir, "-p", String(port), "-U", osUsername, PG_DB_NAME],
       { stdio: "inherit" }
     );
     if (createDb.status !== 0) throw new Error("createdb failed");
@@ -217,7 +217,7 @@ async function start(githubEnvFile) {
     // Create schema in the test database
     const createSchema = spawnSync(
       join(pgBinDir, "psql"),
-      ["-h", socketDir, "-U", osUsername, "-d", PG_DB_NAME, "-c", `CREATE SCHEMA IF NOT EXISTS ${PG_DB_NAME};`],
+      ["-h", socketDir, "-p", String(port), "-U", osUsername, "-d", PG_DB_NAME, "-c", `CREATE SCHEMA IF NOT EXISTS ${PG_DB_NAME};`],
       { stdio: "inherit" }
     );
     if (createSchema.status !== 0) throw new Error("create schema failed");
