@@ -304,7 +304,11 @@ jobs:
           for origin in living-cost-manager.gamja.top living-cost-manager.pages.dev; do
             verified=""
             for attempt in 1 2 3 4 5 6 7 8 9 10; do
-              body="$(curl -fsS "https://${origin}/release-meta.json" || true)"
+              # -L: the Pages *.pages.dev canonical host 301-redirects to the
+              # configured custom domain; follow it so both origins resolve the
+              # same release-meta. Without -L the subdomain check sees the 301
+              # body and wrongly reports a mismatch even when the deploy is live.
+              body="$(curl -fsSL "https://${origin}/release-meta.json" || true)"
               if [ "${body}" = "" ]; then sleep 15; continue; fi
               if printf '%s' "${body}" | grep -q "${GITHUB_SHA}"; then
                 echo "verified ${origin} release-meta matches ${GITHUB_SHA}"
@@ -313,5 +317,5 @@ jobs:
               sleep 15
             done
             [ -n "${verified}" ] || { echo "release-meta on ${origin} does not match ${GITHUB_SHA}"; exit 1; }
-            curl -fsS -o /dev/null -w "%{http_code} ${origin}/\n" "https://${origin}/"
+            curl -fsSL -o /dev/null -w "%{http_code} ${origin}/\n" "https://${origin}/"
           done
