@@ -805,7 +805,17 @@ describe("workspace sharing routes", () => {
     });
 
     expect(ownerCount).toBeGreaterThan(0);
-    expect([demoteResponse.statusCode, deleteResponse.statusCode]).toContain(409);
+    // Serializable transactions guarantee a workspace is never left without an
+    // owner. Whichever concurrent mutation commits second is rejected: with 409
+    // when the last-owner guard (or a P2034 serialization abort) fires, or with
+    // 403 when the self-demote commits first and the actor is no longer an
+    // owner. PATCH success is 200; DELETE success is 204. The invariant is that
+    // at most one mutation succeeds and owners are never zero — not one specific
+    // status code, which is interleave-dependent.
+    const statuses = [demoteResponse.statusCode, deleteResponse.statusCode];
+    const successes = statuses.filter((s) => s === 200 || s === 204);
+    expect(successes.length).toBeLessThanOrEqual(1);
+    expect(statuses.some((s) => s === 403 || s === 409)).toBe(true);
   });
 
   test("duplicate invitation and existing member return conflict", async () => {
