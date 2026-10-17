@@ -26,7 +26,7 @@ name: CI (Mac Mini self-hosted)
 # Action pin: third-party 금지, GitHub 공식 actions만 commit SHA로 고정.
 #   actions/checkout@3d3c42e5... = v7.0.1 (release 2026-07-20)
 #   actions/setup-node@949feb24... = v7.1.0 (release 2026-10-08)
-#   actions/upload-artifact@ea165f8d... = v4.6.2
+#   actions/upload-artifact@cf430e03... = v7.0.2 (GHGS backend; pairs with download v8.0.2)
 # pnpm은 서드파티 action 없이 corepack(Node 동봉) + 루트 packageManager
 # 필드(pnpm@11.1.3)로 활성화한다. Actions cache는 재현성과 저장소 캐시 잔존
 # 회피를 위해 사용하지 않는다.
@@ -184,7 +184,7 @@ jobs:
             --workflow-path .github/workflows/ci.yml
 
       - name: Upload release artifact (name pins the exact SHA)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lcm-release-${{ github.sha }}
           path: dist-release
