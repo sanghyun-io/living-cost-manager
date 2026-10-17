@@ -157,6 +157,16 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
   실측 대조. CF 시크릿은 deploy step env에만 주입, argv·stdout 무복사.
 - runner 키트: `scripts/ci/runner/README.md` 절차(01→02→03→04→05, 롤백 06).
 
+> **2026-10-18 통합 정정**: `.github/workflows/deploy-pages.yml`과 분리 `verify-ci`
+> 크로스-run 게이트는 **폐기**됐다. download-artifact의 기본 GITHUB_TOKEN 스코프는
+> 자기 run의 아티팩트만 읽을 수 있어, 다른 run(별도 workflow)의 아티팩트에는 elevated
+> PAT가 필요한데 새 토큰 발급은 승인 범위 밖이었다(실배포에서 "Artifact not found"로
+> 실패 확인). 따라서 배포를 ci.yml의 `deploy` job으로 **같은 run에 통합**했다 —
+> `needs: [preflight, build-test]`, `environment: production`(required Reviewer=Owner
+> + main-only 정책)으로 승인 전 대기, 같은 run 아티팩트를 기본 토큰으로 내려받아
+> release-gate.mjs verify(digest·attempt·workflow-meta) 후 재빌드 없이 배포, 양 Origin
+> release-meta 실측 대조. 위 §4/§5의 verify-ci·deploy-pages 서술은 이 정정으로 대체된다.
+
 ## 6. 남은 단계와 Owner 승인 경계 (순서 고정)
 
 1. **Main/독립 리뷰 통과** (현재 코드 — root 실행은 리뷰 통과 전까지 금지).

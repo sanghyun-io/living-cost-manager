@@ -13,11 +13,15 @@ name: CI (Mac Mini self-hosted)
 #     브랜치 코드를 실행하는 경로 차단. 특정 커밋 재실행은 feature branch →
 #     리뷰 → main 머지로 수행.
 #   - checkout은 event SHA 고정 + persist-credentials: false.
-#   - 배포 산출물: 이 워크플로가 프로덕션 API origin으로 정적 FE를 빌드하고
-#     아티팩트(lcm-release-<sha>)로 올린다. deploy-pages.yml은 재빌드 없이
-#     같은 run의 아티팩트만 검증·배포한다(build-info.json + content digest,
-#     scripts/ci/release-gate.mjs). API base URL은 퍼블릭 값이라 CI에서
-#     bake하는 것이 시크릿과 무관하다.
+#   - 배포 산출물: 이 워크플로 한 run 안에서 프로덕션 API origin용 정적 FE를
+#     빌드해 아티팩트(lcm-release-<sha>)로 올리고, 같은 run의 `deploy` job이
+#     재빌드 없이 그 아티팩트만 검증·배포한다(build-info.json + content digest,
+#     scripts/ci/release-gate.mjs). 기본 GITHUB_TOKEN은 현재 run의 아티팩트만
+#     읽을 수 있으므로 크로스-run 배포(deploy-pages.yml 분리)는 elevated PAT가
+#     필요해 폐기하고 same-run으로 통합했다. API base URL은 퍼블릭 값이라 CI에서
+#     bake하는 것이 시크릿과 무관하다. `deploy` job은 `production` 환경의
+#     required Reviewer(Owner) + main-only 정책으로 승인 전 대기하며 시크릿은
+#     승인 후에만 노출된다.
 #
 # runs-on 라벨 4종은 job 라우팅 조건일 뿐 보안 격리 수단이 아니다. 실제 경계는
 # repository-scoped 등록(sanghyun-io/living-cost-manager 전용 runner)과 Mac Mini
@@ -197,3 +201,117 @@ jobs:
       - name: Stop ephemeral test Postgres (cleanup, always)
         if: always()
         run: node scripts/ci/ephemeral-postgres.mjs stop || true
+
+  # Production Pages deploy — SAME run as the tested build. The artifact
+  # (lcm-release-<sha>) uploaded by build-test is downloaded by this run's own
+  # GITHUB_TOKEN (download-artifact's default scoping only sees the current
+  # run), so NO cross-run elevation / PAT is required and there is NO rebuild.
+  # The `production` environment keeps the gate: required Reviewer (Owner) +
+  # main-only deployment branch policy, so this job PAUSES for explicit Owner
+  # approval of an already-green SHA and secrets are only exposed after approval.
+  # deploy-pages.yml was retired: cross-workflow artifact handoff cannot read a
+  # different run's artifact with the default token, which is exactly why it
+  # failed "Artifact not found". Same-run needs() also enforces CI success for
+  # this exact SHA, replacing the old verify-ci gate.
+  deploy:
+    name: Deploy verified artifact to Cloudflare Pages
+    needs: [preflight, build-test]
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    environment:
+      name: production
+      url: https://living-cost-manager.gamja.top
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read   # read this run's artifact + workflow metadata
+    steps:
+      - name: Verify repository, ref and actor
+        run: |
+          set -eu
+          if [ "${{ github.repository }}" != "sanghyun-io/living-cost-manager" ]; then
+            echo "error: wrong repository: ${{ github.repository }}" >&2; exit 1
+          fi
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "error: ref is not main: ${{ github.ref }}" >&2; exit 1
+          fi
+          if [ "${{ github.actor }}" != "sanghyun-io" ]; then
+            echo "error: actor is not Owner: ${{ github.actor }}" >&2; exit 1
+          fi
+          echo "✓ repository/ref/actor verified"
+
+      - name: Checkout exact event SHA (scripts + locked wrangler only; no build)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+
+      - name: Setup Node (pinned exact 24.18.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+
+      - name: Install wrangler (locked, secret-free step, no npx)
+        run: |
+          set -eu
+          cd tools/wrangler
+          npm ci --ignore-scripts
+          echo "wrangler installed: $(node_modules/.bin/wrangler --version)"
+
+      - name: Download this-run release artifact (no cross-run token needed)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lcm-release-${{ github.sha }}
+          path: release
+
+      - name: Verify artifact identity + content digest (no unresolved rebuild)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          META_JSON="$(mktemp)"
+          trap 'rm -f "$META_JSON"' EXIT
+          # Bind the artifact to THIS workflow file via the fixed source-path
+          # route (cmdVerify enforces meta.path === ci.yml and meta.id). The
+          # run-id/attempt are this same run, so build-info recorded in
+          # build-test must match — no cross-run token, no rebuild.
+          gh api "repos/${{ github.repository }}/actions/workflows/ci.yml" > "$META_JSON"
+          node scripts/ci/release-gate.mjs verify \
+            --dir release \
+            --sha "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --attempt "${{ github.run_attempt }}" \
+            --workflow-meta "$META_JSON"
+
+      - name: Deploy to Cloudflare Pages (token/Account via env only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -eu
+          WRANGLER="$GITHUB_WORKSPACE/tools/wrangler/node_modules/.bin/wrangler"
+          if [ ! -x "$WRANGLER" ]; then
+            echo "error: wrangler not found at $WRANGLER" >&2; exit 1
+          fi
+          "$WRANGLER" pages deploy release/out \
+            --project-name=living-cost-manager \
+            --branch=main \
+            --commit-dirty=true
+
+      - name: Verify deployed release identity on both Pages origins
+        run: |
+          set -eu
+          for origin in living-cost-manager.gamja.top living-cost-manager.pages.dev; do
+            verified=""
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              body="$(curl -fsS "https://${origin}/release-meta.json" || true)"
+              if [ "${body}" = "" ]; then sleep 15; continue; fi
+              if printf '%s' "${body}" | grep -q "${GITHUB_SHA}"; then
+                echo "verified ${origin} release-meta matches ${GITHUB_SHA}"
+                verified=1; break
+              fi
+              sleep 15
+            done
+            [ -n "${verified}" ] || { echo "release-meta on ${origin} does not match ${GITHUB_SHA}"; exit 1; }
+            curl -fsS -o /dev/null -w "%{http_code} ${origin}/\n" "https://${origin}/"
+          done

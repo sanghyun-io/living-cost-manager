@@ -589,8 +589,10 @@ describe("official v2.338.0 package behaviour proof (normal owner, no registrati
 // ---------------------------------------------------------------------------
 describe("workflow + plist specification-level guards", () => {
   const ci = fs.readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
-  const dep = fs.readFileSync(path.join(ROOT, ".github/workflows/deploy-pages.yml"), "utf8");
   const plist = fs.readFileSync(path.join(KIT, "com.gamjaworld.lcm-ci-actions-runner.plist.template"), "utf8");
+  // ci.yml's `deploy` job is the production deploy stage (same run as build).
+  const deployJob = ci.split("  deploy:\n")[1] ?? (() => { throw new Error("no `deploy:` job found in ci.yml"); })();
+  const beforeDeploy = ci.split("  deploy:\n")[0] ?? "";
 
   it("ci.yml triggers only push to protected main; no dispatch/PR path", () => {
     expect(ci).toContain("push:");
@@ -601,28 +603,47 @@ describe("workflow + plist specification-level guards", () => {
     expect(ci).toContain("event is not push");
   });
 
-  it("deploy gate: needs chain before environment; artifact handoff; no rebuild", () => {
-    expect(dep.split("\n").filter((l) => /^\s*workflow_dispatch:/.test(l)).length).toBe(1); // deploy allowed, ci not
+  it("deploy gate: same-run needs chain; environment; no cross-run artifact; no rebuild", () => {
+    // The whole pipeline is a single push->main workflow; there is NO separate
+    // deploy-pages.yml and NO verify-ci cross-run job anymore.
+    expect(existsSync(path.join(ROOT, ".github/workflows/deploy-pages.yml"))).toBe(false);
+    // No dedicated cross-run gate job remains (only prose may mention the
+    // retired gate, so we assert on the actual needs/refs, not substrings).
+    expect(ci).not.toContain("needs: [verify-ci");
     expect(ci.split("\n").filter((l) => /^\s*workflow_dispatch:/.test(l))).toHaveLength(0);
-    expect(dep).toContain("needs: [verify-ci]"); // preflight gated on verify-ci
-    expect(dep).toContain("needs: [verify-ci, preflight]"); // deploy gated too
-    expect(dep).toContain("environment:");
-    expect(dep).toContain("actions: read");
-    const deployJob = dep.split("deploy:")[1] ?? "";
-    expect(deployJob).not.toContain("Build static FE"); // no unresolved autobuild after approval
-    expect(deployJob).not.toContain("pnpm install");
-    expect(dep).toContain("lcm-release-${{ github.sha }}");
-    expect(dep).toContain("run-id: ${{ needs.verify-ci.outputs.ci-run-id }}");
-    expect(dep).toContain("release-gate.mjs verify");
-    expect(dep).toContain("--attempt");
+    // deploy waits on this run's tests and gates behind the production env.
+    expect(ci).toContain("needs: [preflight, build-test]");
+    expect(deployJob).toContain("environment:");
+    expect(deployJob).toContain("name: production");
+    expect(deployJob).toContain("url: https://living-cost-manager.gamja.top");
+    expect(deployJob).toContain("actions: read");
+    // same-run artifact download: name pins SHA, NO repository / cross-run run-id.
+    expect(deployJob).toContain("lcm-release-${{ github.sha }}");
+    expect(deployJob).not.toMatch(/^\s*repository:/m);
+    expect(deployJob).not.toContain("needs.verify-ci");
+    expect(deployJob).not.toMatch(/run-id: \$\{\{ needs\./);
+    // digest verify binds to this run + fixed ci.yml path; no rebuild in deploy.
+    expect(deployJob).toContain("release-gate.mjs verify");
+    expect(deployJob).toContain("--workflow-meta");
+    expect(deployJob).toContain("--run-id \"${{ github.run_id }}\"");
+    expect(deployJob).toContain("--attempt \"${{ github.run_attempt }}\"");
+    expect(deployJob).not.toContain("Build static FE");
+    expect(deployJob).not.toMatch(/pnpm install/);
+    // actor gate on Owner for the deploy stage too.
+    expect(deployJob).toContain("actor is not Owner");
   });
 
-  it("wrangler stays locked + pre-installed, secret steps keep CF env only at deploy", () => {
+  it("wrangler stays locked + pre-installed, CF env only in the deploy stage", () => {
     const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "tools/wrangler/package-lock.json"), "utf8"));
     expect(lock.packages[""].dependencies.wrangler).toBe("4.131.1");
-    expect(dep).toContain("npm ci --ignore-scripts");
-    expect(dep).toContain("tools/wrangler/node_modules/.bin/wrangler");
-    expect(dep).not.toMatch(/npx wrangler/);
+    expect(deployJob).toContain("npm ci --ignore-scripts");
+    expect(deployJob).toContain("tools/wrangler/node_modules/.bin/wrangler");
+    expect(deployJob).not.toMatch(/npx wrangler/);
+    // CF token/account appear ONLY in the deploy stage (after `deploy:`), never
+    // in the build/test stage that runs before approval.
+    expect(beforeDeploy).not.toContain("CLOUDFLARE_API_TOKEN");
+    expect(beforeDeploy).not.toContain("CLOUDFLARE_ACCOUNT_ID");
+    expect(deployJob).toContain("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}");
   });
 
   it("plist: root wrapper program + uid/gid drop + official leaf workingdir + trap env + no svc refs", () => {
