@@ -107,7 +107,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
+          # fetch-depth: 0 (full history) is required because the
+          # product-tour-migration legacy-compatibility test runs
+          # `git show 260c8d4:prisma/schema.prisma`. The repo history is
+          # small (~210 commits) and this is a trusted Owner-pushed main, so
+          # fetching history adds negligible size. Checked-out SHA stays pinned
+          # to github.sha (see preflight), so the trust model is unchanged.
+          fetch-depth: 0
           ref: ${{ github.sha }}
 
       - name: Setup Node (pinned exact 24.18.0)
