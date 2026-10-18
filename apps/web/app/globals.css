@@ -858,10 +858,7 @@ body {
 .month-review-record, .month-review-whatif, .month-review-compare { display: grid; gap: 4px; margin: 8px 0; }
 .month-review-patches { display: grid; gap: 4px; }
 .month-review .mantine-Button-root { min-height: 36px; }
-@media (max-width: 560px) {
-  .month-review .mantine-Button-root { min-height: 40px; }
-  .month-review .mantine-TextInput-input, .month-review .mantine-Select-input { min-height: 40px; }
-}
+/* 모바일(≤560) 터치 기준은 아래 새 계획 패널 가족 블록에서 44px로 통일 */
 .home-onboarding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 16px; }
 .home-onboarding .mantine-Button-root { min-height: 44px; }
 .management-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding-block: 4px; }
@@ -936,9 +933,18 @@ body {
      dues reveal button and the quiet-pane summaries. Desktop keeps the dense
      sizes; no global redesign, no layout column/order change. */
   .quiet-upcoming-reveal { min-width: 44px; min-height: 44px; }
-  .weekly-budget-panel .mantine-Button-root { min-height: 40px; }
-  .weekly-budget-panel .mantine-Select-input, .weekly-budget-panel .mantine-TextInput-input { min-height: 40px; }
-  .weekly-budget-panel .weekly-budget-history summary { padding-block: 11px; }
+  /* 새 계획 패널 가족(주간 생활비·큰지출준비·월말 점검)만 44px 터치 기준 —
+     Mantine 전역/기존 표 규칙은 변경하지 않는다. */
+  .weekly-budget-panel .mantine-Button-root,
+  .reserve-panel .mantine-Button-root,
+  .month-review .mantine-Button-root { min-height: 44px; min-width: 44px; }
+  .weekly-budget-panel .mantine-Input-input,
+  .weekly-budget-panel .mantine-Select-input,
+  .reserve-panel .mantine-Input-input,
+  .month-review .mantine-Input-input,
+  .month-review .mantine-Select-input { min-height: 44px; }
+  .weekly-budget-panel .weekly-budget-history summary { min-height: 44px; padding-block: 12px; }
+  .month-review > summary { min-height: 44px; padding-block: 12px; }
   .quiet-upcoming .forecast-help summary { padding-block: 13px; }
   .quiet-home .quiet-disclosure > summary { padding-block: 11px; }
 }
