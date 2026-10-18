@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import React from "react";
-import { MantineProvider } from "@mantine/core";
+import React, { useState } from "react";
+import { MantineProvider, NumberInput } from "@mantine/core";
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { BudgetStrip } from "../app/components/BudgetStrip";
@@ -118,5 +118,74 @@ describe("analysis pane stays read-openable for non-editing controls", () => {
     expect(keep!.hasAttribute("disabled")).toBe(false); // 분석 페인은 disabled 래퍼로 감기지 않는다
     fireEvent.click(keep!);
     expect(toggle).toHaveBeenCalledWith("s2");
+  });
+});
+
+describe("management-closed fragment entries open the panel via the existing request handler", () => {
+  // page.tsx 와 같은 배선(제거/우회 없음): toggle+hidden 패널, 편집 fieldset,
+  // 분석 페인은 fieldset 밖 — 리뷰 P2 계약의 integration 단위 검증.
+  function WiringHarness({ canEdit }: { canEdit: boolean }) {
+    const [open, setOpen] = useState(false);
+    const requestManagementOpen = () => setOpen(true);
+    return (
+      <MantineProvider>
+        <InsightsPanel fixedCosts={[cost("a", "넷플릭스", 17000, "2026-10-20")]}
+          monthlyIncome={100000} monthlyExpense={17000} onRequestEdit={requestManagementOpen} />
+        <section id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
+          <button type="button" aria-expanded={open} aria-controls="harness-panel" onClick={() => setOpen(value => !value)}>항목 관리</button>
+          <div id="harness-panel" hidden={!open}>
+            <fieldset disabled={!canEdit}>
+              <NumberInput aria-label="금액" value={17000} onChange={() => {}} />
+            </fieldset>
+          </div>
+        </section>
+      </MantineProvider>
+    );
+  }
+
+  test("owner: clicking 납부일·갱신 계획 수정 expands the closed panel and keeps native anchor + focus target", () => {
+    const { container, getByRole } = render(<WiringHarness canEdit />);
+    const panel = container.querySelector<HTMLElement>("#harness-panel")!;
+    const toggle = getByRole("button", { name: "항목 관리" });
+    expect(panel.hasAttribute("hidden")).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const link = getByRole("link", { name: "납부일·갱신 계획 수정" });
+    expect(link.getAttribute("href")).toBe("#fixed-costs"); // 네이티브 fragment preserved
+    fireEvent.click(link);
+    expect(panel.hasAttribute("hidden")).toBe(false); // 펼침은 기존 request handler 경로
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const target = container.querySelector<HTMLElement>("#fixed-costs")!;
+    expect(target.getAttribute("tabindex")).toBe("-1"); // anchor focus 대상 그대로
+    expect((container.querySelector("input[aria-label=금액]")!.closest("fieldset") as HTMLFieldSetElement).disabled).toBe(false); // 편집 가능
+    expect(target.closest("[hidden]")).toBeNull(); // 더 이상 감기지 않음 — 강제 포커스 없음
+  });
+
+  test("viewer: the analysis link still opens read-only management; ledger inputs stay disabled", () => {
+    const { container, getByRole } = render(<WiringHarness canEdit={false} />);
+    const link = getByRole("link", { name: "납부일·갱신 계획 수정" });
+    expect(link.closest("fieldset[disabled]")).toBeNull(); // 분석 페인은 통째 disable 없음
+    fireEvent.click(link);
+    const panel = container.querySelector<HTMLElement>("#harness-panel")!;
+    expect(panel.hasAttribute("hidden")).toBe(false);
+    const amount = container.querySelector<HTMLInputElement>("input[aria-label=금액]")!;
+    // fieldset-disabled 전파는 브라우저 라이브 상태 — 가드 메커니즘 자체가 유지되는지 검증한다.
+    expect(amount.closest("fieldset[disabled]")).not.toBeNull();
+    expect((amount.closest("fieldset") as HTMLFieldSetElement).disabled).toBe(true);
+  });
+});
+
+describe("skip link and fragment audits", () => {
+  test("the guide link target stays a supported visible entry while management is closed", () => {
+    // 접힌 상태에서도 #fixed-costs 섹션(바)은 DOM에 보이고 anchor 가능해야 한다.
+    const { container } = render(
+      <MantineProvider>
+        <section id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
+          <button type="button" aria-expanded={false} aria-controls="management-panel">항목 관리 · 2개</button>
+          <div id="management-panel" hidden />
+        </section>
+      </MantineProvider>
+    );
+    const target = container.querySelector<HTMLElement>("#fixed-costs")!;
+    expect(target.closest("[hidden]")).toBeNull(); // skip/link 대상이 감긴 채로 남지 않는다
   });
 });

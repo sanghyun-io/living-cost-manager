@@ -22,6 +22,10 @@ interface InsightsPanelProps {
   protectedFixedCostIds?: ReadonlySet<string>;
   onKeepItem?: (id: string) => void;
   coachingPreferencesReady?: boolean;
+  /** 접힌 '항목 관리'를 펼치는 기존 handler(page 가 budget.requestManagementOpen
+   * 를 매 렌더 최신 클로저로 전달 — stale closure 없음). fragment 이동 자체는
+   * 네이티브로 두고, 펼침 요청만 추가한다(강제 클릭/DOM 해킹 없음). */
+  onRequestEdit?: () => void;
 }
 
 const TREND_MAX = 6;
@@ -42,7 +46,7 @@ export function InsightsPanel({
   monthlyExpense,
   topCategoryLabel,
   topCategoryAmount
-   , protectedFixedCostIds = EMPTY_PROTECTED_IDS, onKeepItem, coachingPreferencesReady = true
+   , protectedFixedCostIds = EMPTY_PROTECTED_IDS, onKeepItem, coachingPreferencesReady = true, onRequestEdit
 }: InsightsPanelProps) {
   const insights = useMemo(() => coachingPreferencesReady ? buildSavingsInsights(fixedCosts, { protectedFixedCostIds }) : [], [fixedCosts, protectedFixedCostIds, coachingPreferencesReady]);
   const [shareStatus, setShareStatus] = useState<string>("");
@@ -83,7 +87,7 @@ export function InsightsPanel({
       {fixedCosts.length === 0 ? (
         <Text size="sm" c="dimmed">항목과 기준 납부일을 등록하면 절감 검토와 공유 요약을 볼 수 있습니다.</Text>
       ) : (
-        <a className="guide-link" href="#fixed-costs">납부일·갱신 계획 수정</a>
+        <a className="guide-link" href="#fixed-costs" onClick={() => onRequestEdit?.()}>납부일·갱신 계획 수정</a>
       )}
 
       {!coachingPreferencesReady ? <Text role="status" size="sm">{PREFERENCES_UNAVAILABLE}</Text> : null}

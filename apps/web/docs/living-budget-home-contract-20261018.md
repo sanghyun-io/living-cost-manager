@@ -29,7 +29,11 @@ component re-runs `summarizeWorkspaceBudget` for headline numbers.
   구성 facts only (count, largest, average, `연 환산 (월 환산 × 12) · 추정`).
 - `InsightsPanel` no longer renders the 30-day total block or a second
   near-payment list; savings/report/trend/share and the read-only
-  `납부일·갱신 계획 수정` link (target `#fixed-costs` stays visible) remain.
+  `납부일·갱신 계획 수정` link remain. The link and the root skip link both call
+  the existing `budget.requestManagementOpen` on click before native fragment
+  navigation, so a `#fixed-costs` entry is supported even while management is
+  collapsed (reviewer P2 follow-up commit). No forced clicks, no global DOM
+  hacks; viewer ledger fields stay disabled through the per-region fieldset
 - The analysis/renewal pane is no longer wrapped in a disabled `fieldset`, so
   native `<summary>` and read-only/reveal/preference controls work for viewers;
   every ledger write (table edits, quick add, delete/duplicate, income,

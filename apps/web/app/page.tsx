@@ -199,7 +199,7 @@ export default function Home() {
 
   return (
     <>
-      <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
+      <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'} onClick={ledgers.aggregateMode ? undefined : budget.requestManagementOpen}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
       <AppHeader
         ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={sync.handleSelectServerWorkspace} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError && !users.isSampleMode}
           onFocusIntent={focusIntent} focusRef={(destination, element) => { focusTargets.current[destination] = element; }} /> : null}
@@ -336,7 +336,7 @@ export default function Home() {
           <summary>지출 분석</summary>
           <div className="dashboard-overview">
             <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-            <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={homePlan.monthlyIncome} monthlyExpense={homePlan.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} />
+            <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={homePlan.monthlyIncome} monthlyExpense={homePlan.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} onRequestEdit={budget.requestManagementOpen} />
           </div>
           {budget.summary.monthlyExpense > 0 && (
               <details className="quiet-charts">
