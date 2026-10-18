@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { useRef, useState } from "react";
 import { renderHook, act, cleanup } from "@testing-library/react";
-import { createDefaultWorkspacePlanningData, type WorkspacePlanning, type WorkspacePlanningData, type WorkspaceSnapshot } from "@living-cost-manager/shared";
+import { createDefaultWorkspacePlanningData, type WorkspacePlanning, type WorkspacePlanningData, type WorkspaceRole, type WorkspaceSnapshot } from "@living-cost-manager/shared";
 import { useWorkspaceSync } from "../app/lib/useWorkspaceSync";
 import { usePlanningData, type PlanningDataApi } from "../app/lib/usePlanningData";
 import { ServerApiError, type ServerApiClient, type ServerSession } from "../app/lib/serverApi";
@@ -82,7 +82,7 @@ function makeSequencer() {
 function harness(sequencer: ReturnType<typeof makeSequencer>) {
   const planningRef = { current: null as PlanningDataApi | null };
   const captured = { statuses: [] as string[] };
-  const view = renderHook((props: { profileId: string }) => {
+  const view = renderHook((props: { profileId: string; role?: WorkspaceRole }) => {
     const [snapshot, setSnapshot] = useState(() => localSnapshot());
     const [busy, setBusy] = useState(false);
     const [errorKind, setErrorKind] = useState<"auth" | "request" | null>(null);
@@ -120,14 +120,14 @@ function harness(sequencer: ReturnType<typeof makeSequencer>) {
       profileId: props.profileId,
       serverSession: session(),
       serverApi: sequencer.api,
-      role: "owner",
+      role: props.role ?? "owner",
       getBudgetServerVersion: sync.getBudgetServerVersion,
       isBudgetServerCurrent: sync.isBudgetServerCurrent,
       isBudgetDirty: sync.isBudgetDirty
     });
     planningRef.current = planning;
     return { sync, planning, editBudget: () => setSnapshot(snapshot2 => ({ ...snapshot2, monthlyIncome: 3_100_000 })) };
-  }, { initialProps: { profileId: profileOne } });
+  }, { initialProps: { profileId: profileOne } as { profileId: string; role?: WorkspaceRole } });
   return { view, captured, planningRef };
 }
 
@@ -231,5 +231,56 @@ describe("P2-3 — 실제 useWorkspaceSync + usePlanningData 체인 통합", () 
     expect(view.result.current.planning.planningActive).toBe(false);
     // ws-1 캐시 원본이 여전히 ws-1 키에만 존재
     expect(serializePlanning(view.result.current.planning.data)).toBe(serializePlanning(createDefaultWorkspacePlanningData()));
+  });
+});
+
+describe("P2-2 — 체인 commit 직전 최신 자격 재확인", () => {
+  test("prepare 후 멤버십 viewer 강등 + 가계부 PUT 확인 → 계획 PUT 0회, 부분 성공 진실 유지", async () => {
+    const seq = makeSequencer();
+    let releaseBudget: (value: WorkspaceSnapshot & { monthlyIncome: number }) => void = () => {};
+    seq.putSnapshot.mockImplementation(() => new Promise<WorkspaceSnapshot & { monthlyIncome: number }>(resolve => { releaseBudget = resolve; }));
+    seq.getPlanning.mockResolvedValue(planningRemote(5, createDefaultWorkspacePlanningData(), 9));
+    const { view, captured } = harness(seq);
+    await act(async () => { await view.result.current.sync.prepareServerSyncDecision(session()); });
+    await act(async () => { await view.result.current.planning.checkRemote(); });
+    expect(view.result.current.planning.baseConfirmed).toBe(true);
+    await act(async () => { view.result.current.planning.setBudget(monday, 30000); });
+    let chain: Promise<unknown> | null = null;
+    act(() => { chain = view.result.current.sync.handleSyncNow(); });
+    // 가계부 PUT 대기 중 멤버가 viewer로 강등됨(페이지는 sync 역할 파생을 재평가)
+    view.rerender({ profileId: profileOne, role: "viewer" });
+    await act(async () => { releaseBudget({ ...serverSnapshot(false), syncVersion: 10 }); await chain; });
+    expect(seq.putSnapshot).toHaveBeenCalledTimes(1);      // 가계부는 저장됨
+    expect(seq.putPlanning).not.toHaveBeenCalled();        // 강등된 권한으로는 계획 PUT 금지
+    const last = captured.statuses[captured.statuses.length - 1];
+    expect(last).toContain("가계부는 서버에 저장됨 · 주간 계획 미반영");
+    expect(last).not.toContain("동기화했습니다");
+    expect(view.result.current.planning.data.weeks[0].budgetAmount).toBe(30000); // 의도 유지
+  });
+
+  test("prepare 후 다른 탭 충돌(로컬 쓰기 차단) 발생 → 계획 PUT 0회", async () => {
+    const seq = makeSequencer();
+    let releaseBudget: (value: WorkspaceSnapshot & { monthlyIncome: number }) => void = () => {};
+    seq.putSnapshot.mockImplementation(() => new Promise<WorkspaceSnapshot & { monthlyIncome: number }>(resolve => { releaseBudget = resolve; }));
+    seq.getPlanning.mockResolvedValue(planningRemote(5, createDefaultWorkspacePlanningData(), 9));
+    const { view, captured } = harness(seq);
+    await act(async () => { await view.result.current.sync.prepareServerSyncDecision(session()); });
+    await act(async () => { await view.result.current.planning.checkRemote(); });
+    await act(async () => { view.result.current.planning.setBudget(monday, 30000); });
+    let chain: Promise<unknown> | null = null;
+    act(() => { chain = view.result.current.sync.handleSyncNow(); });
+    // 준비 이후 다른 탭이 같은 계획을 먼저 변경 — commit 직전 차단 상태 재평가
+    window.localStorage.setItem(planningStorageKey(profileOne), serializePlanning(weekData(999000)));
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: planningStorageKey(profileOne),
+        newValue: serializePlanning(weekData(999000))
+      }));
+    });
+    await act(async () => { releaseBudget({ ...serverSnapshot(false), syncVersion: 10 }); await chain; });
+    expect(seq.putPlanning).not.toHaveBeenCalled();
+    expect(captured.statuses[captured.statuses.length - 1]).toContain("주간 계획 미반영");
+    expect(view.result.current.planning.saveError).toContain("다른 탭");
+    expect(view.result.current.planning.planningServerDirty).toBe(true);
   });
 });

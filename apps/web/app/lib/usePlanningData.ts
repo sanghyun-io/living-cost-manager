@@ -455,6 +455,12 @@ export function usePlanningData({
       }
     }
     if (baseNow.dataHash === outgoingHash && !latest.current.conflict) return { status: "ok", changed: false }; // 이미 같은 내용
+    // (checkRemote 대기가 있었다면) 전송 직전 최신 자격을 다시 확인 — 강등/차량이
+    // 확인 중에 생겨도 계획 PUT를 보내지 않는다.
+    if ((latest.current.role as WorkspaceRole | null) === "viewer" || writeBlocked.current ||
+        uploadBusy.current || !latest.current.scopeReady || store.getItem(getUserErasureKey(scope))) {
+      return { status: "skipped", reason: "권한·저장 상태가 저장 직전에 바뀌어 계획 반영을 중단했습니다." };
+    }
     const snapshotVersion = options.snapshotVersion ?? getBudgetServerVersion();
     if (snapshotVersion === null || snapshotVersion === undefined) {
       return { status: "error", message: "가계부 서버 기준 버전이 확인되지 않아 계획만 저장하지 않았습니다. 먼저 서버 상태를 확인하세요." };
@@ -571,8 +577,21 @@ export function usePlanningData({
         latest.current.serverSession?.workspace?.id !== intent.workspaceId) {
       return { status: "skipped", reason: "전환 중이라 계획 반영을 중단했습니다." };
     }
+    // 전송 직전 '최신' 자격을 ref에서 재확인한다: prepare 이후 권한 강등(viewer),
+    // 다른 탭 충돌·삭제 마커(writeBlocked), 샘플 전환(scopeReady), 동시 서버 요청이
+    // 생기면Intent를 버리고 계획 PUT를 보내지 않는다. 서버가 최종 경계이지만
+    // 프론트가 알면서 보내지 않는 것이 원칙. own ticket의 active busy와
+    // 방금 확인된 snapshotVersion만 예외(selfValidated) — P2-3 가드 재도입 금지.
+    if (!latest.current.scopeReady || latest.current.role === "viewer" ||
+        writeBlocked.current || uploadBusy.current ||
+        store.getItem(getUserErasureKey(intent.scope))) {
+      return { status: "skipped", reason: "권한·저장 상태가 저장 직전에 바뀌어 계획 반영을 중단했습니다." };
+    }
     if (latest.current.staged && planningHash(latest.current.staged.data) !== intent.dataHash) {
       return { status: "diverged" };
+    }
+    if (latest.current.conflict) {
+      return { status: "skipped", reason: "미해소 충돌이 있어 계획 반영을 중단했습니다." };
     }
     uploadBusy.current = true;
     setIsBusy(true);
