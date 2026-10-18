@@ -28,7 +28,7 @@ import { buildLivingCostBackup } from "./backup";
 import { getUserDataKey } from "./users";
 import { blockSync, canAutoSync, canReplaceLocal, createSyncSafety, establishSyncBaseline, syncScope, syncSnapshotKey as buildSnapshotKey } from "./syncSafety";
 import { canCreateFirstOwnedLedger } from './publicRelease';
-import type { PlanningDataApi } from './usePlanningData';
+import type { PlanningDataApi, PlanningUploadOutcome } from './usePlanningData';
 
 interface UseWorkspaceSyncOptions {
   ui: UIStateApi;
@@ -349,6 +349,10 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     if (automatic && !canAutoSync(ticket, buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot()))) return;
     if (!automatic && ticket.baseline === null && serverSnapshot && !isWorkspaceSnapshotEmpty(serverSnapshot) &&
         !window.confirm("서버의 전체 데이터를 현재 브라우저 데이터로 교체할까요? 다른 기기의 데이터도 교체됩니다.")) return;
+    // 계획 체인 의도는 가계부 PUT 시작 전에 동기 캡처 — 대기 중 스코프/세션 전환 시
+    // 늦은 commit이 새 스코프에 쓰이거나 구 응답이 화면을 오염시키지 않는다.
+    const planningForChain = !automatic ? getPlanning?.() : null;
+    const chainPrepared = planningForChain?.prepareChainedUpload() ?? null;
     ticket.busy = true;
     const outgoing = latestBudget.current.getCurrentBudgetSnapshot();
     const outgoingKey = buildSnapshotKey(outgoing);
@@ -370,22 +374,28 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       let statusText = "현재 브라우저 데이터를 서버에 동기화했습니다.";
       // 계획 체인 반영은 명시 저장에서만 한다(자동 동기화는 계획까지 몰아서 올리지
       // 않는다). 가계부 PUT이 방금 확인해 준 새 syncVersion을 계획 CAS 기준으로 쓴다.
-      if (!automatic) {
-        const planning = getPlanning?.();
-        if (planning) {
-          const outcome = await planning.chainUploadAfterBudgetConfirmed(savedSnapshot.syncVersion);
-          if (!isActive(ticket)) return;
-          if (outcome.status === "ok") {
-            if (outcome.changed) statusText = "가계부와 주간 계획을 서버에 동기화했습니다.";
-          } else if (outcome.status === "conflict") {
-            statusText = "가계부는 서버에 저장됨 · 주간 계획 미반영(기준 충돌). 데이터 관리에서 확인 후 직접 선택하세요.";
-          } else if (outcome.status === "diverged") {
-            statusText = "가계부는 서버에 저장됨 · 주간 계획은 서버 기록과 달라 반영하지 않았습니다. 대조 후 선택하세요.";
-          } else if (outcome.status === "skipped" && outcome.reason === "no planning") {
-            // 계획이 전혀 없으면 가계부 저장 사실만 그대로 표시(오염 메시지 금지).
-          } else {
-            statusText = "가계부는 서버에 저장됨 · 주간 계획 미반영" + (outcome.status === "skipped" && outcome.reason ? `: ${outcome.reason}` : ".");
-          }
+      if (planningForChain && chainPrepared) {
+        let outcome: PlanningUploadOutcome;
+        if (!chainPrepared.ok) {
+          outcome = chainPrepared.outcome;
+        } else if ("intent" in chainPrepared) {
+          outcome = await planningForChain.commitChainedUpload(chainPrepared.intent, savedSnapshot.syncVersion);
+        } else {
+          outcome = { status: "ok", changed: false };
+        }
+        if (!isActive(ticket)) return;
+        if (outcome.status === "ok") {
+          if (outcome.changed) statusText = "가계부와 주간 계획을 서버에 동기화했습니다.";
+        } else if (outcome.status === "conflict") {
+          statusText = "가계부는 서버에 저장됨 · 주간 계획 미반영(기준 충돌). 데이터 관리에서 확인 후 직접 선택하세요.";
+        } else if (outcome.status === "diverged") {
+          statusText = "가계부는 서버에 저장됨 · 주간 계획은 서버 기록과 달라 반영하지 않았습니다. 대조 후 선택하세요.";
+        } else if (outcome.status === "skipped" && outcome.reason === "no planning") {
+          // 계획이 전혀 없으면 가계부 저장 사실만 그대로 표시(오염 메시지 금지).
+        } else if (outcome.status === "skipped" && outcome.reason === "전환 중이라 계획 반영을 중단했습니다.") {
+          statusText = "가계부는 서버에 저장됨 · 주간 계획은 화면 전환으로 미반영. 기기 기록은 유지됩니다.";
+        } else {
+          statusText = "가계부는 서버에 저장됨 · 주간 계획 미반영" + (outcome.status === "skipped" && outcome.reason ? `: ${outcome.reason}` : ".");
         }
       }
       auth.setServerStatus(statusText);
@@ -709,8 +719,12 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     // safety/baseline 은 호출 시점 ref 를 읽는다(이벤트 시점 최신값).
     getBudgetServerVersion: () => (isChecked && safety.current.version !== null ? safety.current.version : null),
     isBudgetServerCurrent: () => isChecked && !safety.current.blocked && safety.current.version !== null && !safety.current.busy,
-    isBudgetDirty: () => isChecked && !safety.current.blocked && safety.current.baseline !== null &&
-      buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot()) !== safety.current.baseline,
+    isBudgetDirty: () => isChecked && !safety.current.blocked && (
+      (safety.current.baseline !== null && buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot()) !== safety.current.baseline) ||
+      // 아직 기준선이 없으면서 이 기기에 의미 있는 가계부 데이터가 있으면
+      // '서버에 아직 안 올린 변경' 상태다 — 계획 단독 PUT를 막아야 한다.
+      (safety.current.baseline === null && hasLocalBudgetData(latestBudget.current.getCurrentBudgetSnapshot()))
+    ),
     localSnapshotSummary,
     serverSnapshotSummary,
     hasRemoteDecision,

@@ -76,12 +76,30 @@ export interface UsePlanningDataOptions {
   storage?: StringStorage | null;
 }
 
+/** 가계부 PUT 전에 동기 캡처하는 계획 업로드 의도(selfValidated 체인 전용). */
+export type ChainedUploadIntent = {
+  ticket: { scope: string | null };
+  scope: string;
+  sessionId: string;
+  workspaceId: string;
+  token: string;
+  api: ServerApiClient;
+  expectedRevision: number;
+  data: WorkspacePlanningData;
+  dataHash: string;
+};
+
 export type PlanningUploadOutcome =
   | { status: "ok"; changed: boolean }
   | { status: "skipped"; reason: string }
   | { status: "conflict" }
   | { status: "diverged" }
   | { status: "error"; message: string };
+
+export type ChainedPrepare =
+  | { ok: true; intent: ChainedUploadIntent }
+  | { ok: true; noChange: true }
+  | { ok: false; outcome: PlanningUploadOutcome };
 
 const EMPTY_PLANNING = createDefaultWorkspacePlanningData();
 const EMPTY_SERIALIZED = serializePlanning(EMPTY_PLANNING);
@@ -414,7 +432,7 @@ export function usePlanningData({
       if (options.snapshotVersion === undefined && isBudgetDirty()) {
         return { status: "skipped", reason: "가계부에 서버 미반영 변경이 있어 계획 단독 교체를 막았습니다. 먼저 함께 저장하세요." };
       }
-      return performPut(stagedNow.revision, outgoing, outgoingHash, { snapshotVersion: options.snapshotVersion });
+      return performPut(stagedNow.revision, outgoing, outgoingHash, { snapshotVersion: options.snapshotVersion, session, api });
     }
     if (stagedDiverged) return { status: "diverged" }; // UI 표시와 무관 — 미해소 발산은 항상 차단
     let baseNow = latest.current.base;
@@ -435,13 +453,15 @@ export function usePlanningData({
     if (options.snapshotVersion === undefined && isBudgetDirty()) {
       return { status: "skipped", reason: "가계부에 서버 미반영 변경이 있어 계획 단독 업로드를 막았습니다. 먼저 함께 저장하세요." };
     }
-    return performPut(baseNow.revision, outgoing, outgoingHash, { snapshotVersion });
+    return performPut(baseNow.revision, outgoing, outgoingHash, { snapshotVersion, session, api });
   }
 
-  async function performPut(expectedRevision: number, outgoing: WorkspacePlanningData, outgoingHash: string, options: { snapshotVersion?: number }): Promise<PlanningUploadOutcome> {
+  async function performPut(expectedRevision: number, outgoing: WorkspacePlanningData, outgoingHash: string, options: { snapshotVersion?: number; session?: ServerSession | null; api?: ServerApiClient | null }): Promise<PlanningUploadOutcome> {
     const ticket = epoch.current;
-    const api = latest.current.serverApi;
-    const session = latest.current.serverSession;
+    // 전송 대상은 호출 시작 시점의 세션/API로 고정 — 대기 중 스코프 전환이
+    // 다른 워크스페이스로 쓰거나 새 스코프에 편집을 쓰는 경로가 없다.
+    const api = options.api ?? latest.current.serverApi;
+    const session = options.session ?? latest.current.serverSession;
     if (!api || !session?.workspace) return { status: "skipped", reason: "서버 가계부가 없습니다." };
     const snapshotVersion = options.snapshotVersion ?? getBudgetServerVersion();
     if (snapshotVersion === null || snapshotVersion === undefined) {
@@ -498,24 +518,112 @@ export function usePlanningData({
     }
   }
 
-  /** 함께 저장(체인)용. 가계부 PUT 직후 자기 ticket 확인(selfValidated)이면 외부 busy
-   * 가드를 완화하지 않고 본인 기준만 검증한다. 발산/미확인에서는 절대 PUT 하지 않는다. */
-  async function chainUploadAfterBudgetConfirmed(snapshotVersion: number, opts: { selfValidated?: boolean } = {}): Promise<PlanningUploadOutcome> {
-    if (latest.current.role === "viewer") return { status: "skipped", reason: "보기 전용" };
+  /** 체인 저장 2단계(A): 가계부 PUT 시작 전에 호출해 의도(session/api/전송 data/
+   * expectedRevision/스코프/ticket)를 동기 캡처한다. 발산·미확인·뷰어·busy면 거부. */
+  function prepareChainedUpload():
+    | { ok: true; intent: ChainedUploadIntent }
+    | { ok: true; noChange: true }
+    | { ok: false; outcome: PlanningUploadOutcome } {
+    const scope = latest.current.profileId;
+    const api = latest.current.serverApi;
+    const session = latest.current.serverSession;
+    if (!latest.current.scopeReady || !api || !session?.workspace || !scope || latest.current.loadedScope !== scope) {
+      return { ok: false, outcome: { status: "skipped", reason: "서버 가계부가 선택되지 않았거나 계획 로딩이 끝나지 않았습니다." } };
+    }
+    if (latest.current.role === "viewer") return { ok: false, outcome: { status: "skipped", reason: "보기 전용" } };
+    if (uploadBusy.current) return { ok: false, outcome: { status: "skipped", reason: "다른 서버 요청 처리 중" } };
+    if (writeBlocked.current) return { ok: false, outcome: { status: "skipped", reason: "기기 저장 상태가 안전하지 않습니다." } };
     const localHash = planningHash(latest.current.data);
     if (isPlanningNoOp(latest.current.data) && latest.current.base === null && latest.current.staged === null) {
-      return { status: "skipped", reason: "no planning" };
+      return { ok: false, outcome: { status: "skipped", reason: "no planning" } };
     }
+    const stagedNow = latest.current.staged;
+    if (stagedNow && planningHash(stagedNow.data) !== localHash) return { ok: false, outcome: { status: "diverged" } };
+    if (!latest.current.base) return { ok: false, outcome: { status: "skipped", reason: "계획 서버 기록을 먼저 확인해야 합니다. 데이터 관리에서 확인하세요." } };
+    if (localHash === latest.current.base.dataHash && !latest.current.conflict) return { ok: true, noChange: true };
+    if (!flushLocalWrite()) return { ok: false, outcome: { status: "skipped", reason: "계획을 기기에 저장하지 못해 업로드하지 않았습니다." } };
+    const outgoing = canonicalPlanning(latest.current.data);
+    return {
+      ok: true,
+      intent: {
+        ticket: epoch.current, scope, sessionId: session.user.id, workspaceId: session.workspace.id,
+        token: session.token, api, expectedRevision: latest.current.base!.revision,
+        data: outgoing, dataHash: planningHash(outgoing)
+      }
+    };
+  }
+
+  /** 체인 저장 2단계(B): 가계부 PUT이 확인한 새 snapshotVersion으로 반영.
+   * selfValidated=true 가계부 PUT 직전 같은 ticket/스코프에서 prepare한 의도만 허용 —
+   * 대기 중 스코프/세션 전환 시 어떤 쓰기 없이 중단한다. */
+  async function commitChainedUpload(intent: ChainedUploadIntent, snapshotVersion: number): Promise<PlanningUploadOutcome> {
+    if (!isActive(intent.ticket) || latest.current.profileId !== intent.scope ||
+        latest.current.serverSession?.user.id !== intent.sessionId ||
+        latest.current.serverSession?.workspace?.id !== intent.workspaceId) {
+      return { status: "skipped", reason: "전환 중이라 계획 반영을 중단했습니다." };
+    }
+    if (latest.current.staged && planningHash(latest.current.staged.data) !== intent.dataHash) {
+      return { status: "diverged" };
+    }
+    uploadBusy.current = true;
+    setIsBusy(true);
+    try {
+      const response = await intent.api.putWorkspacePlanning(intent.workspaceId, {
+        expectedRevision: intent.expectedRevision,
+        expectedSnapshotVersion: snapshotVersion,
+        data: intent.data
+      }, intent.token);
+      // 응답 커밋 직전에도 동일 스코프/세션/토큰을 재확인한다.
+      if (!isActive(intent.ticket) || latest.current.profileId !== intent.scope ||
+          latest.current.serverSession?.workspace?.id !== intent.workspaceId) {
+        return { status: "skipped", reason: "전환 중 응답이 무효화되어 화면에는 반영하지 않았습니다." };
+      }
+      setBase({ revision: response.revision, dataHash: planningHash(canonicalPlanning(response.data)) });
+      setConflict(false);
+      setStaged(null);
+      setLastPlanningSyncedAt(new Date());
+      setStatusMessage("계획을 서버에 저장했습니다.");
+      return { status: "ok", changed: true };
+    } catch (error) {
+      if (!isActive(intent.ticket) || latest.current.profileId !== intent.scope) {
+        return { status: "skipped", reason: "전환 중 요청이 무효화되었습니다." };
+      }
+      if (error instanceof ServerApiError && error.status === 409) {
+        setConflict(true);
+        setStatusMessage("서버에서 가계부나 계획을 먼저 저장해 계획 반영을 중단했습니다. 서버 기록을 확인한 뒤 적용/교체를 직접 선택하세요. 기기 기록은 유지됩니다.");
+        return { status: "conflict" };
+      }
+      if (error instanceof ServerApiError && error.status === 404) {
+        setServerSupport("missing");
+        setStatusMessage("이 서버에서는 계획 저장 기능을 제공하지 않습니다. 기기 기록은 그대로 유지됩니다.");
+        return { status: "error", message: "서버 기능 미사용" };
+      }
+      if (error instanceof ServerApiError && (error.status === 401 || error.status === 403)) {
+        setStatusMessage("서버 저장 권한이 확인되지 않아 계획을 반영하지 않았습니다. 멤버 권한과 이메일 인증을 확인하세요.");
+        return { status: "error", message: "권한 확인 필요" };
+      }
+      if (error instanceof ServerApiError && error.status === 503) {
+        setServerSupport("unavailable");
+        setStatusMessage("서버 계획 저장소를 사용할 수 없어 반영하지 않았습니다. 빈 상태로 간주하지 않으며 기기 기록은 유지됩니다.");
+        return { status: "error", message: "서버 저장소 이상" };
+      }
+      setStatusMessage((isServerAuthFailure(error) ? "로그인이 만료되어" : "통신 실패로") + " 계획을 반영하지 않았습니다. 기기 기록은 유지됩니다.");
+      return { status: "error", message: "저장 실패" };
+    } finally {
+      uploadBusy.current = false;
+      if (isActive(intent.ticket)) setIsBusy(false);
+    }
+  }
+
+  /** 호환 경로: 단일 훅에서 즉시 확인/저장 순서를 실행. */
+  async function chainUploadAfterBudgetConfirmed(snapshotVersion: number, opts: { selfValidated?: boolean } = {}): Promise<PlanningUploadOutcome> {
     if (!opts.selfValidated && !isBudgetServerCurrent()) {
       return { status: "skipped", reason: "가계부 서버 기준이 유효하지 않아 계획을 반영하지 않았습니다." };
     }
-    const stagedNow = latest.current.staged;
-    if (stagedNow && planningHash(stagedNow.data) !== localHash) return { status: "diverged" };
-    if (!latest.current.base && !stagedNow) return { status: "skipped", reason: "계획 서버 기록을 먼저 확인해야 합니다. 데이터 관리에서 확인하세요." };
-    if (latest.current.base && localHash === latest.current.base.dataHash && !latest.current.conflict && !stagedNow) {
-      return { status: "ok", changed: false }; // 변경 없음
-    }
-    return uploadNow({ snapshotVersion });
+    const prepared = prepareChainedUpload();
+    if (!prepared.ok) return prepared.outcome;
+    if ("noChange" in prepared) return { status: "ok", changed: false };
+    return commitChainedUpload(prepared.intent, snapshotVersion);
   }
 
   /** 명시적 서버 기록 적용/표시(사용자 확인 후). 미저장 메모리 편집이 있으면
@@ -643,6 +751,8 @@ export function usePlanningData({
     // actions
     checkRemote,
     uploadNow,
+    prepareChainedUpload,
+    commitChainedUpload,
     chainUploadAfterBudgetConfirmed,
     adoptRemote,
     closeRemoteComparison,
