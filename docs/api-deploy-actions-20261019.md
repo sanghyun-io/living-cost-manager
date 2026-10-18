@@ -168,8 +168,10 @@ stated design choice, not a silent substitution.
   `docker save <imageID>` → 153,910,829 B, sha256
   `db1088d2f031f2db3fc966e530c9ec7b65f56222ef3631df9b9a2c1a4fbca0e7`;
   verify-archive PASS; the archive was `docker load`-tested back to the
-  SAME image ID and then the local image copy was removed (archive
-  retained as evidence; image regenerable from the exact SHA). This real
+  SAME image ID and then the local image copy was removed (the archive
+  file itself was later removed under the approved resource cleanup — see
+  §7 — its hashes recorded here permanently; image regenerable from the
+  exact SHA). This real
   run FOUND AND FIXED a genuine integration bug: saving by immutable image
   ID makes `docker load` report `Loaded image ID:` WITHOUT a tag — the
   helper now accepts both load forms and re-tags the ID itself, with tests
@@ -194,18 +196,39 @@ stated design choice, not a silent substitution.
 - If the first gated run halts on any code, the remediation is INSPECT +
   document, never a manual local-ssh migration (explicitly out of scope).
 
-## 7. Resource receipts (this readiness session, Mac Mini)
+## 7. Resource receipts (cleanup executed 2026-10-19 under approved classes)
 
-- Owned heavy writes: candidate image 642 MB (built then `docker rmi`'d by
-  exact ID), evidence archive 147 MB retained at
-  `$TMPDIR-opencode/lcm-api-evidence-<sha>/` (image.tar.gz + metadata.json;
-  purpose: reviewer load/verify evidence; re-examinable/rebuildable from
-  the exact SHA — disposable after main review, TTL: review of this branch).
-- Synthetic containers/network/env-state dirs: all `lcm-ci-*`-named, torn
-  down (verified `docker ps -a`/`network ls` show none; state dir empty).
-- `df` avail: 25 GiB session start → 16.9 GiB at report time (concurrent
-  sessions moved it too; NOT attributable solely to this task). Owned net
-  addition ≈ 147 MB retained evidence. No global prune, no shared-engine
-  changes, no OCI writes at all. Buildkit layer cache from this build
-  remains in the shared engine (own-tagged content only; left for main to
-  prune via the normal engine lifecycle, not touched here).
+- Fixed-manifest cleanup (non-wildcard, exact paths, 0600 manifest retained
+  as receipt at `$TMP/lcm-cleanup-manifest-20261019.txt`,
+  sha256 `77f0c35418221b16507aeb94d60f64d9a4ca9ff6bd532da93d917eb1b0f11541`,
+  635 entries): 621 deleted after per-path revalidation (own UID, no symlink,
+  no open handles, known-completion). `df` 16.78 → 17.56 GiB (**+0.78 GiB**,
+  matches the 771 MiB dry-run estimate; concurrent-session movement is NOT
+  attributed to this task).
+- Deleted: 599 pipeline-test mkdtemp fixtures (≈121 MiB, class #1); the
+  147MB readiness archive FILE only (class #2 — its sha256 `db1088d2…`,
+  imageID `0aff72c39ae2…`, source SHA 29f8d0b and build method remain
+  documented here, superseded as head-proof by HEAD a8d5206; unique
+  `metadata.json` RETAINED 896 B); `lcm-ci-kit-llVJML` closed test copy
+  (439 MiB, class #3 — real runner untouched, no listener referenced it);
+  `lcm-usability-test-dr2nU4` closed synthetic PGDATA (64 MiB, class #4 —
+  PG_VERSION present, no postmaster.pid, lsof 0, own-uid regular files);
+  4 `lcm-rh-*` + `lcm-test-2c342453` + empty state dirs + empty kit dirs
+  (class #5).
+- Skipped fail-closed, recorded: 14 small `lcm-ci-kit-*` dirs containing an
+  ACL-protected `aclcheck` fixture file (kit-test lineage owns that logic;
+  forced chmod/rm NOT performed — total <1 MiB); Docker volume
+  `living-cost-manager_lcm_test_pgdata` (#6 EXCLUDED per instruction —
+  10-02 provenance significance unknown); shared buildkit cache; base
+  images; VM/global prune; worktree `node_modules`/`.next`/`out`
+  (needed by upcoming FE runs); active harness pid 20621 (other session).
+- Harness leak FIXED (cause: no per-test cleanup existed):
+  `pipeline.test.ts` now registers every mkdtemp root and removes EXACT
+  registered paths in `afterEach`/`afterAll` (failure paths included;
+  guard-limited to our own `/lcm-api-*` temp roots, no prefix sweep).
+  Verified: 48/48 pass, 0 leftover fixtures, peak ≈ ≤22 MiB (≤200 MiB
+  requirement met). Kit-test lineage cleanup stays a separate concern.
+- Gate status: free 17.56 GiB < 20.8 GiB api-image capacity gate → NO heavy
+  build until shared-space recovery; the gate was NOT lowered or modified.
+  Small/text work and the fixture-only test suites (own budget
+  0.5×1.2+1+15 < actual) remain allowed.

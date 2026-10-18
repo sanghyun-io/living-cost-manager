@@ -4,7 +4,7 @@
 // scripts/ci/runner kit-test architecture.
 //
 // Run (CI step, from apps/web): pnpm exec vitest run --root ../../scripts/ci/api
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it, beforeAll, afterEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -51,6 +51,23 @@ beforeAll(() => {
   }
 });
 
+// Fixture lifecycle: every makeHost() temp root is REGISTERED and removed
+// after each test — including failing/interrupted ones (afterEach/afterAll
+// run on failure paths too) — so the suite leaves no per-user disk debt.
+// Removal is EXACT-path from our own registry, never a prefix/glob sweep.
+const FIXTURE_ROOTS: string[] = [];
+function removeRegisteredRoots() {
+  while (FIXTURE_ROOTS.length > 0) {
+    const root = FIXTURE_ROOTS.pop() as string;
+    // guard: only ever delete under the realpath'd temp base we create
+    if (root.startsWith(fs.realpathSync(os.tmpdir()) + "/lcm-api-")) {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 2 });
+    }
+  }
+}
+afterEach(removeRegisteredRoots);
+afterAll(removeRegisteredRoots);
+
 function composeText(backendRef: string) {
   return `services:
   backend:
@@ -85,6 +102,7 @@ type HostOpts = {
 };
 function makeHost(opts: HostOpts = {}) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "lcm-api-"));
+  FIXTURE_ROOTS.push(base);
   const fh = path.join(base, "host");
   const lcm = path.join(fh, "opt", "livingcost");
   const st = path.join(fh, "state");
