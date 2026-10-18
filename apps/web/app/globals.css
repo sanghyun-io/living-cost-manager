@@ -855,6 +855,13 @@ body {
 .reserve-progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .reserve-progress-bar { height: 100%; background: var(--mantine-color-teal-6, #167761); }
 .month-review-panel { padding: 16px 0 8px; border-top: 1px solid var(--line); }
+.month-review-record, .month-review-whatif, .month-review-compare { display: grid; gap: 4px; margin: 8px 0; }
+.month-review-patches { display: grid; gap: 4px; }
+.month-review .mantine-Button-root { min-height: 36px; }
+@media (max-width: 560px) {
+  .month-review .mantine-Button-root { min-height: 40px; }
+  .month-review .mantine-TextInput-input, .month-review .mantine-Select-input { min-height: 40px; }
+}
 .home-onboarding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 16px; }
 .home-onboarding .mantine-Button-root { min-height: 44px; }
 .management-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding-block: 4px; }

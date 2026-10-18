@@ -39,6 +39,8 @@ import type { PlanningDataApi } from './lib/usePlanningData';
 import type { PlanningImportAdapter } from './lib/planningStorage';
 import { WeeklyBudgetPanel } from './components/WeeklyBudgetPanel';
 import { ReservePanel } from './components/ReservePanel';
+import { MonthReviewPanel } from './components/MonthReviewPanel';
+import { createDefaultWorkspacePlanningData } from '@living-cost-manager/shared';
 import { combinePlanningStorageState, getHeaderStorageView } from './lib/syncStatus';
 import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
 import { buildHomePlan } from './lib/homePlan';
@@ -313,6 +315,25 @@ export default function Home() {
           actions={{ editReserve: planning.editReserve, deleteReserve: planning.deleteReserve, linkReserve: planning.linkReserve }}
         />
       ) : null}
+      <MonthReviewPanel
+        planning={planning.loaded ? planning.data : createDefaultWorkspacePlanningData()}
+        fixedCosts={budget.fixedCosts}
+        monthlyIncome={budget.monthlyIncome}
+        scopeKey={budget.localScopeKey ?? ""}
+        asOf={referenceInstant}
+        canEdit={canEdit}
+        isViewer={viewer}
+        actions={{
+          saveRecoveryCopy: budget.saveCurrentRecoveryCopy,
+          applyPatches: patches => {
+            if (!canEdit) return { ok: false, message: "현재는 편집할 수 없어 적용하지 않았습니다." };
+            if (!budget.saveBeforeSwitch()) return { ok: false, message: "가계부 저장 상태를 먼저 확인하세요." };
+            if (patches.newIncome !== null) budget.handleIncomeChange(patches.newIncome);
+            for (const patch of patches.costs) budget.handleItemChange(patch.costId, { amount: patch.newAmount });
+            return { ok: true, message: "재발 변경을 가계부에 반영했습니다(복구본 저장 후, 서버 업로드는 아직)." };
+          }
+        }}
+      />
       {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}
       {budget.localRecoveryRequired ? <Button color="rose" variant="default" mb="sm" onClick={budget.handleExportRecovery}>저장 원본 내보내기</Button> : null}
 

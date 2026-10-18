@@ -128,7 +128,7 @@ export function TemplateModal({ opened, onOpen, onClose, session, onLogin, canAp
   const creationAllowed = !session || accountCanCreate;
 
   return <ModalShell opened={opened} onClose={onClose} sectionLabel="설계도" title="생활비 템플릿" size="lg">
-    <Text size="sm" c="dimmed">고정비 항목의 틀을 만들고 공유합니다. 엑셀 수식·변동 지출 장부·판매 결제 기능은 아닙니다. 현재 생활비 데이터는 자동으로 가져오지 않습니다. <a href="/guide/templates/" target="_blank" rel="noopener noreferrer">공유 범위와 만료 정책 안내</a></Text>
+    <Text size="sm" c="dimmed">고정비 항목의 틀을 만들고 공유합니다. 엑셀 수식·변동 지출 장부·판매 결제 기능은 아닙니다. 현재 생활비 데이터는 자동으로 가져오지 않습니다. 주간 예산·급여일·준비금 같은 생활 계획도 새 공간으로 복사되지 않습니다(별도 계획 없음 상태로 시작). <a href="/guide/templates/" target="_blank" rel="noopener noreferrer">공유 범위와 만료 정책 안내</a></Text>
     {status ? <Alert color={statusIsError ? "red" : "blue"} role={statusIsError ? "alert" : "status"} aria-live={statusIsError ? "assertive" : "polite"}>{status}</Alert> : null}
     <section aria-label="상황별 템플릿">
       <Title order={3} size={16}>상황별 시작점</Title>

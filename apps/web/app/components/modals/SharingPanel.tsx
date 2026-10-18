@@ -56,6 +56,7 @@ export function SharingPanel({
             공유 관리
           </summary>
           <Stack gap="xs" mt="xs" aria-label="공유 관리">
+            <Text size="xs" c="dimmed">공유되면 고정비·수입과 함께 주간 예산·급여일·준비금 기록도 멤버에게 표시되는 공통 가계부 데이터입니다. 개인 코칭 보호·동의·마케팅 설정은 공유되지 않고 개인으로 남습니다.</Text>
             <Group justify="space-between">
               <Text size="xs" c="dimmed">멤버와 초대</Text>
               <Button variant="subtle" size="xs" disabled={isServerBusy} onClick={onRefreshSharing}>새로고침</Button>

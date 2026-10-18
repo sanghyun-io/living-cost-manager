@@ -1,7 +1,7 @@
 // Only this versioned, application-owned namespace is eligible for retention.
 // Historical/unknown backups are never removed. Keep three per kind; on quota
 // pressure retain the newest existing copy until the replacement is durable.
-export function saveRecovery(storage: Storage, userKey: string, kind: "import" | "corrupt", value: string) {
+export function saveRecovery(storage: Storage, userKey: string, kind: "import" | "corrupt" | "whatif", value: string) {
   const prefix = `${userKey}:recovery:v1:${kind}:`;
   const keys = Object.keys(storage).filter(key => key.startsWith(prefix) && /^\d+-[0-9a-f-]{36}$/.test(key.slice(prefix.length)))
     .sort((a, b) => Number(b.slice(prefix.length).split("-")[0]) - Number(a.slice(prefix.length).split("-")[0]));

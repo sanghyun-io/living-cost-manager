@@ -340,6 +340,18 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     saveRecovery(window.localStorage, getUserDataKey(userId), "import", buildLivingCostBackup(JSON.parse(snapshot)));
   }
 
+  /** 월말 점검 '이 변경 적용' 직전 원본 복구본(실패 시 적용 금지 — 사전 조건). */
+  function saveCurrentRecoveryCopy(): boolean {
+    if (!currentUser || loadedUserId !== currentUser.id) return false;
+    if (window.localStorage.getItem(getUserErasureKey(currentUser.id))) return false;
+    try {
+      saveRecovery(window.localStorage, getUserDataKey(currentUser.id), "whatif", JSON.stringify(getCurrentBudgetSnapshot()));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function handleExportRecovery() {
     if (!currentUser) return;
     const rawOriginal = blockedSaveUserId === currentUser.id ? window.localStorage.getItem(getUserDataKey(currentUser.id)) : null;
@@ -776,6 +788,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     handleExportTemplate,
     handleExportBackup,
     handleExportRecovery,
+    saveCurrentRecoveryCopy,
     handleImportTemplate,
     handleImportBackup,
     getCurrentBudgetSnapshot,
