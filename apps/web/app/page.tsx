@@ -35,6 +35,8 @@ import { useLedgers } from './lib/useLedgers';
 import { LedgerControls } from './components/LedgerControls';
 import { LedgerSummary } from './components/LedgerSummary';
 import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
+import { buildHomePlan } from './lib/homePlan';
+import { tourNeedsManagementOpen } from './lib/productTour';
 import { CROSS_LEDGER_AGGREGATION_AVAILABLE } from './lib/publicRelease';
 import { useProductTour } from './lib/useProductTour';
 import { ProductTour } from './components/ProductTour';
@@ -105,6 +107,17 @@ export default function Home() {
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, []);
   const reviewItems = useMemo(() => renewalQueue(budget.fixedCosts, new Date(reviewDate)), [budget.fixedCosts, reviewDate]);
+  // 첫 화면의 모든 금액은 이 한 번의 파생에서 나온다(BudgetStrip·UpcomingDues 공유).
+  const homePlan = useMemo(
+    () => buildHomePlan(budget.fixedCosts, budget.monthlyIncome, referenceInstant),
+    [budget.fixedCosts, budget.monthlyIncome, referenceInstant]
+  );
+  // 둘러보기의 '항목 추가'·'납부일 확인' 단계는 접힌 항목 관리를 필요로 한다:
+  // 해당 단계에서만 패널을 펼치고 다른 단계·포커스는 건드리지 않는다.
+  useEffect(() => {
+    if (tourNeedsManagementOpen(tour.step)) budget.requestManagementOpen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tour.step]);
 
   usersRef.current = users;
   budgetRef.current = budget;
@@ -224,64 +237,92 @@ export default function Home() {
           </Button>
         </div>
       ) : null}
-      <BudgetStrip
-        monthlyIncome={budget.monthlyIncome}
-        monthlyExpense={budget.summary.monthlyExpense}
-        fixedCosts={budget.fixedCosts}
-        asOf={referenceInstant}
-        canEdit={canEdit}
-        onIncomeChange={budget.handleIncomeChange}
-      />
+      <section className="home-overview" aria-label="이번 달 계획과 납부 예정">
+        <BudgetStrip
+          plan={homePlan}
+          canEdit={canEdit}
+          onIncomeChange={budget.handleIncomeChange}
+        />
+        <UpcomingDues
+          fixedCosts={budget.fixedCosts}
+          asOf={referenceInstant}
+          plan={homePlan}
+          onRevealItem={budget.revealItem}
+        />
+        {budget.fixedCosts.length === 0 && canEdit ? (
+          <div className="home-onboarding">
+            <Text size="sm">고정비로 기록할 항목만 추가하면 됩니다. 변동지출·실제 잔액은 추적하지 않습니다.</Text>
+            <Button variant="default" onClick={budget.handleAddItem}>기록할 항목 추가</Button>
+          </div>
+        ) : null}
+      </section>
       {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}
       {budget.localRecoveryRequired ? <Button color="rose" variant="default" mb="sm" onClick={budget.handleExportRecovery}>저장 원본 내보내기</Button> : null}
 
       <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
-      <fieldset disabled={!canEdit} className="ledger-edit-region">
-        {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
-
-        <div className="editor-layout">
-          <div className="workspace-main">
-            <FixedCostTable
-              key={budget.localScopeKey}
-              focusItemId={budget.focusItemId}
-              focusRequest={budget.focusRequest}
-              costFilters={budget.costFilters}
-              onCostFilters={budget.setCostFilters}
-              onResetFilters={budget.resetCostFilters}
-              categories={budget.categories}
-              cards={budget.cards}
-              visibleFixedCosts={budget.visibleFixedCosts}
-              visibleFixedCostTotal={budget.visibleFixedCostTotal}
-              categoryFilterId={ui.categoryFilterId}
-              isDeleteMode={ui.isDeleteMode}
-              selectedDeleteIds={ui.selectedDeleteIds}
-              importMessage={ui.importMessage}
-              onItemChange={budget.handleItemChange}
-              onPaymentMethodChange={budget.handlePaymentMethodChange}
-              onPaymentOptionChange={budget.handlePaymentOptionChange}
-              onAddItem={budget.handleAddItem}
-              onDuplicateItem={budget.handleDuplicateItem}
-              onQuickAdd={budget.handleQuickAdd}
-              onEnterDeleteMode={budget.handleEnterDeleteMode}
-              onCancelDeleteMode={budget.handleCancelDeleteMode}
-              onConfirmDeleteItems={budget.handleConfirmDeleteItems}
-              onToggleDeleteSelection={budget.handleToggleDeleteSelection}
-              onFilterChange={ui.handleFilterChange}
-              onOpenCategory={() => ui.setIsCategoryModalOpen(true)}
-              onOpenCard={() => ui.setIsCardModalOpen(true)}
-              onOpenData={() => ui.setIsDataModalOpen(true)}
-              protectedIds={coachingPrefs.activeIds}
-              onToggleProtected={coachingPrefs.ready ? coachingPrefs.toggle : undefined}
-            />
-          </div>
-
+        <div className="management-bar">
+          <button
+            type="button"
+            className="management-toggle"
+            aria-expanded={budget.managementOpen}
+            aria-controls="management-panel"
+            onClick={budget.toggleManagementOpen}
+          >
+            <span aria-hidden="true" className="management-toggle-chevron">{budget.managementOpen ? "▾" : "▸"}</span>
+            항목 관리 · {budget.fixedCosts.length}개
+          </button>
+          <Text size="xs" c="dimmed">
+            {budget.managementOpen ? "접으면 첫 화면이 단순해집니다" : "펼치면 추가 · 빠른 추가 · 필터 · 삭제 모드 · 카테고리 · 카드 · 데이터 관리"}
+          </Text>
         </div>
-      </fieldset>
-        <aside className="workspace-sidebar">
-          <UpcomingDues fixedCosts={budget.fixedCosts} asOf={referenceInstant} />
-        </aside>
-      <CoachingPreferencesPanel items={budget.fixedCosts} {...coachingPrefs} canCloudAccess={coachingPrefs.canCloudAccess} />
-      <fieldset disabled={!canEdit} className="ledger-edit-region">
+        {/* 한 번만 DOM 에 존재하는 정본 테이블: 접기/disabled 로 감추되 언마운트하지
+            않아 draft·포커스·저장 상태가 유지된다. */}
+        <div id="management-panel" className="management-panel" hidden={!budget.managementOpen}>
+          <fieldset disabled={!canEdit} className="ledger-edit-region">
+            {budget.canUndoDelete ? <Button variant="light" onClick={budget.handleUndoDelete}>최근 삭제 취소</Button> : null}
+
+            <div className="editor-layout">
+              <div className="workspace-main">
+                <FixedCostTable
+                  key={budget.localScopeKey}
+                  focusItemId={budget.focusItemId}
+                  focusRequest={budget.focusRequest}
+                  costFilters={budget.costFilters}
+                  onCostFilters={budget.setCostFilters}
+                  onResetFilters={budget.resetCostFilters}
+                  categories={budget.categories}
+                  cards={budget.cards}
+                  visibleFixedCosts={budget.visibleFixedCosts}
+                  visibleFixedCostTotal={budget.visibleFixedCostTotal}
+                  categoryFilterId={ui.categoryFilterId}
+                  isDeleteMode={ui.isDeleteMode}
+                  selectedDeleteIds={ui.selectedDeleteIds}
+                  importMessage={ui.importMessage}
+                  onItemChange={budget.handleItemChange}
+                  onPaymentMethodChange={budget.handlePaymentMethodChange}
+                  onPaymentOptionChange={budget.handlePaymentOptionChange}
+                  onAddItem={budget.handleAddItem}
+                  onDuplicateItem={budget.handleDuplicateItem}
+                  onQuickAdd={budget.handleQuickAdd}
+                  onEnterDeleteMode={budget.handleEnterDeleteMode}
+                  onCancelDeleteMode={budget.handleCancelDeleteMode}
+                  onConfirmDeleteItems={budget.handleConfirmDeleteItems}
+                  onToggleDeleteSelection={budget.handleToggleDeleteSelection}
+                  onFilterChange={ui.handleFilterChange}
+                  onOpenCategory={() => ui.setIsCategoryModalOpen(true)}
+                  onOpenCard={() => ui.setIsCardModalOpen(true)}
+                  onOpenData={() => ui.setIsDataModalOpen(true)}
+                  protectedIds={coachingPrefs.activeIds}
+                  onToggleProtected={coachingPrefs.ready ? coachingPrefs.toggle : undefined}
+                />
+              </div>
+
+            </div>
+          </fieldset>
+        </div>
+        <CoachingPreferencesPanel items={budget.fixedCosts} {...coachingPrefs} canCloudAccess={coachingPrefs.canCloudAccess} />
+        {/* 갱신 검토·분석은 읽기 전용(가계부 쓰기 없음): 전체를 감추는 fieldset 으로
+            summary/버튼을 죽이지 않고 열 수 있게 한다. */}
         {reviewItems.length > 0 ? <details className="quiet-disclosure renewal-queue" aria-label="갱신 검토 작업목록">
           <summary>갱신 검토 · {reviewItems.length}건</summary>
           <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
@@ -295,7 +336,7 @@ export default function Home() {
           <summary>지출 분석</summary>
           <div className="dashboard-overview">
             <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-            <InsightsPanel asOf={referenceInstant} fixedCosts={budget.fixedCosts} monthlyIncome={budget.monthlyIncome} monthlyExpense={budget.summary.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} />
+            <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={homePlan.monthlyIncome} monthlyExpense={homePlan.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} />
           </div>
           {budget.summary.monthlyExpense > 0 && (
               <details className="quiet-charts">
@@ -319,7 +360,6 @@ export default function Home() {
               </details>
             )}
         </details>
-      </fieldset>
       </section>
       <details className="quiet-disclosure workspace-tools" open={workspaceToolsOpen} onToggle={event => setWorkspaceToolsOpen(event.currentTarget.open)}>
         <summary>샘플 및 복구 도구</summary>

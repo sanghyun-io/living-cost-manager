@@ -74,6 +74,9 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
   const [costFilters, setCostFilters] = useState(emptyCostFilters);
   const [focusItemId, setFocusItemId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  // 첫 화면을 조용히 유지하기 위한 '항목 관리' 펼침 오버라이드.
+  // null = 기본값(항목이 없으면 펼쳐서 온보딩, 있으면 접힘). 스위치·불러오기에서 초기화.
+  const [managementOpenOverride, setManagementOpenOverride] = useState<boolean | null>(null);
   const [deletedBatch, setDeletedBatch] = useState<{ userId: string; items: FixedCost[] } | null>(null);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [blockedSaveUserId, setBlockedSaveUserId] = useState<string | null>(null);
@@ -178,6 +181,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     setCategories(parsed.snapshot.categories);
     setCards(parsed.snapshot.cards);
     setFixedCosts(parsed.snapshot.fixedCosts);
+    setManagementOpenOverride(null);
     setLastSavedAt(null);
     setBlockedSaveUserId(parsed.recovered ? currentUser.id : null);
     setSaveError(parsed.recovered ? (recoveryFailed ? "복구 사본을 저장하지 못해 원본 보호를 위해 자동 저장을 중단했습니다. 저장 공간을 확보하고 다시 불러오세요." : "저장 데이터를 읽지 못해 자동 저장을 중단했습니다. 원본을 내보내고 정상 백업을 가져오세요.") : "");
@@ -388,6 +392,10 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
 
   // ── delete mode ──────────────────────────────────────────────────────
   function revealItem(id: string) {
+    // 접힌 '항목 관리'에서도 대상이 보이도록: 펼침 → 필터 해제 → 포커스 요청은
+    // 하나의 상태 배치라 렌더 시점에 패널이 열려 있고 포커스는 detached 대상이
+    // 아니라 현재 테이블의 이름 입력에만 걸린다.
+    setManagementOpenOverride(true);
     setCategoryFilterId("all");
     setCostFilters(emptyCostFilters);
     setFocusItemId(id);
@@ -625,7 +633,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
       if (window.localStorage.getItem(key) !== value) throw new Error('Save failed');
       storedValue.current = value;
       cancelImport();
-      ui.closeDataAndManagementModals(); setIsDeleteMode(false); setSelectedDeleteIds([]); setCategoryFilterId('all'); setCostFilters(emptyCostFilters);
+      ui.closeDataAndManagementModals(); setIsDeleteMode(false); setSelectedDeleteIds([]); setCategoryFilterId('all'); setCostFilters(emptyCostFilters); setManagementOpenOverride(null);
       return true;
     } catch { setSaveError('다른 탭의 변경 또는 저장 실패로 전환을 중단했습니다. 현재 내용을 백업하세요.'); return false; }
   }
@@ -650,6 +658,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     setCategories(snapshot.categories);
     setCards(snapshot.cards);
     setFixedCosts(snapshot.fixedCosts);
+    setManagementOpenOverride(null);
     setCategoryFilterId("all");
     setIsDeleteMode(false);
     setSelectedDeleteIds([]);
@@ -671,6 +680,9 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     fixedCosts,
     focusItemId,
     focusRequest,
+    managementOpen: managementOpenOverride ?? fixedCosts.length === 0,
+    toggleManagementOpen: () => setManagementOpenOverride(!(managementOpenOverride ?? fixedCosts.length === 0)),
+    requestManagementOpen: () => setManagementOpenOverride(true),
     costFilters,
     setCostFilters,
     resetCostFilters: () => { setCostFilters(emptyCostFilters); setCategoryFilterId("all"); },

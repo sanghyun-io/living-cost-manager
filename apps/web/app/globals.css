@@ -826,11 +826,21 @@ body {
 .app-header .save-status { margin-right: auto; }
 .header-save-error { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 8px 0 16px; }
 .quiet-home { padding-top: 24px; }
-.budget-strip { display: grid; grid-template-columns: 1.3fr 1fr 1fr 1.1fr; gap: 32px; align-items: center; padding-bottom: 24px; }
+.budget-strip { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 32px; align-items: center; padding-bottom: 24px; }
 .budget-strip > * { min-width: 0; }
 .budget-strip h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
 .budget-strip .budget-strip-amount { font-size: 32px; font-weight: 650; line-height: 1.35; letter-spacing: -0.04em; overflow-wrap: anywhere; }
 .budget-strip .budget-strip-value { font-size: 22px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+/* First screen = plan + next payments only. Management/analysis are one click away. */
+.home-overview { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.home-onboarding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 16px; }
+.home-onboarding .mantine-Button-root { min-height: 44px; }
+.management-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding-block: 4px; }
+.management-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 4px; font: inherit; font-size: 15px; font-weight: 600; color: inherit; background: none; border: 0; cursor: pointer; }
+.management-toggle:focus-visible { outline: 3px solid var(--mantine-color-blue-6); outline-offset: 2px; }
+.management-toggle-chevron { font-size: 12px; }
+.management-panel { padding-top: 8px; }
+.management-panel[hidden] { display: none; }
 .forecast-help { position: relative; font-size: 12px; color: var(--muted); }
 .forecast-help summary { cursor: pointer; padding-block: 6px; }
 .forecast-help[open] > p { position: absolute; z-index: 5; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px; width: 280px; right: 0; color: var(--text); }
@@ -857,10 +867,14 @@ body {
 .workspace-tools { margin-top: 16px; }
 .workspace-tools .mantine-Button-root { margin: 8px 8px 8px 0; }
 .quiet-upcoming { padding: 16px 0 8px; }
+.quiet-upcoming-header { align-items: center; }
+.quiet-upcoming-total { font-size: 22px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.quiet-upcoming-list { list-style: none; margin: 0; padding: 0; }
 .quiet-upcoming-header, .quiet-upcoming-item { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 .quiet-upcoming-header { margin-bottom: 8px; }
-.quiet-upcoming-item { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.quiet-upcoming-item { padding: 8px 0; border-bottom: 1px solid var(--line); align-items: center; }
 .quiet-upcoming-name { flex: 1; min-width: 0; }
+.quiet-upcoming-reveal { flex-shrink: 0; min-height: 36px; }
 .quiet-upcoming-footer .mantine-Button-root { min-height: 44px; }
 @media (max-width: 860px) {
   .editor-toolbar { grid-template-columns: 1fr; gap: 12px; }

@@ -1,15 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Text, Title } from "@mantine/core";
 import {
   buildMonthlyReport,
   buildSavingsInsights,
   buildShareSummary,
-  getUpcomingDues,
-  summarizeWorkspaceBudget,
-  kstThirtyDayWindow,
   summarizeRenewalSavings,
-  type SnapshotHistoryEntry,
-  type UpcomingDue
+  type SnapshotHistoryEntry
 } from "@living-cost-manager/shared";
 import type { FixedCost } from "../lib/budget";
 import { formatWon } from "../lib/formatting";
@@ -18,7 +14,7 @@ interface InsightsPanelProps {
   asOf?: Date;
   fixedCosts: FixedCost[];
   history?: SnapshotHistoryEntry[];
-  // 공유 요약용. 대시보드 summary 에서 전달.
+  // 공유 요약용. 첫 화면 plan 과 같은 파생값(page 의 homePlan)에서 전달한다.
   monthlyIncome: number;
   monthlyExpense: number;
   topCategoryLabel?: string;
@@ -28,29 +24,18 @@ interface InsightsPanelProps {
   coachingPreferencesReady?: boolean;
 }
 
-const UPCOMING_WINDOW_DAYS = 29;
-const UPCOMING_MAX = 5;
 const TREND_MAX = 6;
 const EMPTY_PROTECTED_IDS: ReadonlySet<string> = new Set();
 const PREFERENCES_UNAVAILABLE = "내 코칭 설정을 확인할 수 없어 절감 제안을 보류했습니다.";
-
-function dueLabel(daysUntil: number): { text: string; urgent: boolean } {
-  if (daysUntil <= 0) {
-    return { text: "오늘", urgent: true };
-  }
-  if (daysUntil === 1) {
-    return { text: "내일", urgent: true };
-  }
-  return { text: `${daysUntil}일 후`, urgent: daysUntil <= 3 };
-}
 
 function formatTrendDate(iso: string): string {
   const d = new Date(iso);
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+/** 분석(2차) 전용 인사이트. 30일 예정 청구 합계와 가까운 납부 목록의 정본은
+ * 첫 화면 UpcomingDues 에 있으므로 이곳에서 복제하지 않는다. */
 export function InsightsPanel({
-  asOf,
   fixedCosts,
   history,
   monthlyIncome,
@@ -59,26 +44,12 @@ export function InsightsPanel({
   topCategoryAmount
    , protectedFixedCostIds = EMPTY_PROTECTED_IDS, onKeepItem, coachingPreferencesReady = true
 }: InsightsPanelProps) {
-  const [upcoming, setUpcoming] = useState<UpcomingDue<FixedCost>[] | null>(null);
   const insights = useMemo(() => coachingPreferencesReady ? buildSavingsInsights(fixedCosts, { protectedFixedCostIds }) : [], [fixedCosts, protectedFixedCostIds, coachingPreferencesReady]);
   const [shareStatus, setShareStatus] = useState<string>("");
-
-  useEffect(() => {
-    const [year, month, day] = kstThirtyDayWindow(asOf ?? new Date()).fromDate.split('-').map(Number);
-    const now = new Date(year, month - 1, day);
-    setUpcoming(getUpcomingDues(fixedCosts, now, UPCOMING_WINDOW_DAYS).slice(0, UPCOMING_MAX));
-  }, [fixedCosts, asOf]);
-
-  if (upcoming === null) {
-    return coachingPreferencesReady ? null : <Text role="status" size="sm">{PREFERENCES_UNAVAILABLE}</Text>;
-  }
 
   const trend = (history ?? []).slice(0, TREND_MAX);
   const monthlyReport = (history ?? []).length > 0 ? buildMonthlyReport(history ?? []) : null;
   const canShare = monthlyExpense > 0;
-  const reference = asOf ?? new Date();
-  const dueSummary = summarizeWorkspaceBudget(monthlyIncome, fixedCosts, reference);
-  const window = kstThirtyDayWindow(reference);
   const savings = summarizeRenewalSavings(fixedCosts);
 
   async function handleShare() {
@@ -108,33 +79,12 @@ export function InsightsPanel({
   }
 
   return (
-    <section className="insights-panel" aria-label="예측 및 절감 인사이트">
-      <div className="insights-block">
-        <Title order={2} size={14} fw={600}>다음 30일 예정 청구액 · 결제 완료액 아님</Title>
-        <Text fw={700} className="due-total tnum">{dueSummary.thirtyDayDue === null ? '일정 미확인' : formatWon(dueSummary.thirtyDayDue)} <Text span size="sm" fw={400} c="dimmed">· {dueSummary.dueOccurrenceCount}회</Text></Text>
-        <Text size="sm" c="dimmed">한국 시간 {window.fromDate}부터 {window.untilDateExclusive} 전까지. 월 환산 비용은 {formatWon(Math.round(dueSummary.monthlyNormalizedExpense))}입니다.</Text>
-        {dueSummary.unknownScheduleCount > 0 ? <Text size="sm" c="dimmed">일정 미확인 {dueSummary.unknownScheduleCount}건은 합계와 알림에서 제외됩니다. 기준 납부일과 정수 개월 주기를 입력하세요.</Text> : null}
+    <section className="insights-panel" aria-label="절감·리뷰 인사이트">
+      {fixedCosts.length === 0 ? (
+        <Text size="sm" c="dimmed">항목과 기준 납부일을 등록하면 절감 검토와 공유 요약을 볼 수 있습니다.</Text>
+      ) : (
         <a className="guide-link" href="#fixed-costs">납부일·갱신 계획 수정</a>
-      </div>
-      {upcoming.length > 0 ? (
-        <div className="insights-block">
-          <Title order={3} size="h5" mb="sm">가까운 납부 · 최대 5건</Title>
-          <ul className="insights-list">
-            {upcoming.map(({ item, daysUntil }) => {
-              const label = dueLabel(daysUntil);
-              return (
-                <li key={item.id} className="insights-row">
-                  <span className="insights-row-name">{item.name}</span>
-                  <Text span size="sm" fw={label.urgent ? 700 : 400} c={label.urgent ? "rose" : "dimmed"}>
-                    {label.text}
-                  </Text>
-                  <span className="insights-row-amount">{formatWon(item.amount)}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-       ) : <Text size="sm" c="dimmed">{fixedCosts.length === 0 ? "항목과 기준 납부일을 등록하면 예정 결제를 볼 수 있습니다." : dueSummary.thirtyDayDue === null ? "기준 납부일을 입력하면 가까운 결제가 표시됩니다." : "확인된 일정 중 30일 이내 납부가 없습니다."}</Text>}
+      )}
 
       {!coachingPreferencesReady ? <Text role="status" size="sm">{PREFERENCES_UNAVAILABLE}</Text> : null}
       <details className="insights-details">

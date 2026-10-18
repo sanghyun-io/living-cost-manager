@@ -38,6 +38,11 @@ export function createTourStorage(storage: () => TourStorage | null) {
   };
 }
 export type TourAccount = { id: string; token: string; baseUrl: string };
+/** 둘러보기의 0(항목 추가)·1(납부일 확인) 단계만 접힌 '항목 관리' 패널을 필요로
+ * 한다. 다른 단계·완료 상태에서 포커스나 뷰를 건드리지 않는다(포커스 루프 방지). */
+export function tourNeedsManagementOpen(step: number | null): boolean {
+  return step === 0 || step === 1;
+}
 export function createTourApi(fetcher: typeof fetch = fetch) {
   async function request(account: TourAccount, signal: AbortSignal, status?: Exclude<TourStatus, 'unseen'>) {
     const response = await fetcher(account.baseUrl + '/onboarding/product-tour', {
