@@ -11,11 +11,12 @@ import type {
   WorkspaceDto,
   WorkspaceInvitationDto,
   WorkspaceMemberDto,
+  WorkspacePlanning,
   WorkspaceRole,
   WorkspaceSnapshot,
   SnapshotHistoryEntry
 } from "@living-cost-manager/shared";
-import type { CoachingPreferences, PutCoachingPreferences } from "@living-cost-manager/shared";
+import type { CoachingPreferences, PutCoachingPreferences, PutWorkspacePlanning } from "@living-cost-manager/shared";
 
 // Bumped to v2 because the session now stores a refresh token alongside the
 // short-lived access token (`token`). Older v1 sessions are simply ignored.
@@ -58,6 +59,11 @@ export type ServerApiClient = {
   getSnapshotHistory(workspaceId: string, token: string, limit?: number): Promise<SnapshotHistoryEntry[]>;
   getCoachingPreferences(workspaceId: string, token: string): Promise<CoachingPreferences>;
   putCoachingPreferences(workspaceId: string, input: PutCoachingPreferences, token: string): Promise<CoachingPreferences>;
+  /** 주간 예산·급여일·준비금 계획. GET 은 멤버(뷰어 포함) 누구나; PUT 은 검증된
+   * owner/editor 만. row 없으면 revision 0 기본값(서버 쓰기 없음). 404(구 서버)·
+   * 409(충돌)·503(저장 이상) 모두 호출 측에서 지역 데이터를 보존하며 수동 처리한다. */
+  getWorkspacePlanning(workspaceId: string, token: string): Promise<WorkspacePlanning>;
+  putWorkspacePlanning(workspaceId: string, input: PutWorkspacePlanning, token: string): Promise<WorkspacePlanning>;
   listMembers(workspaceId: string, token: string): Promise<WorkspaceMemberDto[]>;
   createInvitation(workspaceId: string, input: CreateInvitationRequest, token: string): Promise<CreatedInvitation>;
   listInvitations(token: string): Promise<WorkspaceInvitationDto[]>;
@@ -227,6 +233,12 @@ export function createServerApiClient(options: ClientOptions = {}): ServerApiCli
     },
     putCoachingPreferences(workspaceId, input, token) {
       return request<CoachingPreferences>("/workspaces/" + encodeURIComponent(workspaceId) + "/coaching-preferences", { method: "PUT", token, body: input });
+    },
+    getWorkspacePlanning(workspaceId, token) {
+      return request<WorkspacePlanning>("/workspaces/" + encodeURIComponent(workspaceId) + "/planning", { token });
+    },
+    putWorkspacePlanning(workspaceId, input, token) {
+      return request<WorkspacePlanning>("/workspaces/" + encodeURIComponent(workspaceId) + "/planning", { method: "PUT", token, body: input });
     },
     listMembers(workspaceId, token) {
       return request<WorkspaceMemberDto[]>("/workspaces/" + encodeURIComponent(workspaceId) + "/members", { token });

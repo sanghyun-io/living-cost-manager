@@ -82,6 +82,30 @@ export interface SyncProps {
   onOpenDeleteAccount: () => void;
 }
 
+// Grouped props for the planning (weekly budget/payday/reserve) section of DataModal.
+export interface PlanningProps {
+  hasWorkspace: boolean;
+  isViewer: boolean;
+  canUpload: boolean;
+  saveError: string;
+  isBusy: boolean;
+  serverSupport: "unknown" | "available" | "missing" | "forbidden" | "unavailable";
+  serverConfirmed: boolean;
+  planningActive: boolean;
+  serverDirty: boolean;
+  conflict: boolean;
+  lastPlanningSyncedAt: Date | null;
+  statusMessage: string;
+  localSummary: { weekCount: number; reserveCount: number; paydayDay: number | null };
+  remoteStaged: { weekCount: number; reserveCount: number; paydayDay: number | null; checkedAt: Date } | null;
+  onCheck: () => void;
+  onUpload: () => void;
+  onUploadOverwrite: () => void;
+  onAdoptRemote: () => void;
+  onDiscardRemote: () => void;
+  onRetrySave: () => void;
+}
+
 // Props for the DataModal container (import/export + server sync + sharing).
 export interface DataModalProps {
   marketingConsent: import("./useMarketingConsent").MarketingConsentState;
@@ -100,4 +124,5 @@ export interface DataModalProps {
   onImportBackup: (file: File | null) => void;
   sync: SyncProps;
   sharing: SharingProps;
+  planning: PlanningProps;
 }

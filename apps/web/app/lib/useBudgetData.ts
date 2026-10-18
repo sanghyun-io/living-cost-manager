@@ -27,6 +27,8 @@ import {
 } from "./cards";
 import { buildFixedCostCsvTemplate, parseFixedCostCsvTemplate } from "./budgetImportExport";
 import { buildLivingCostBackup, parseLivingCostBackup } from "./backup";
+import type { PlanningImportAdapter } from "./planningStorage";
+import { workspacePlanningDataSchema, type WorkspacePlanningData } from "@living-cost-manager/shared";
 import { buildPieBackground, clampBillingDay, mergeCards, mergeCategories } from "./formatting";
 import { createGuestUser, getUserDataKey, getUserErasureKey } from "./users";
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, parseBudgetSnapshot } from "./storage";
@@ -47,14 +49,20 @@ interface UseBudgetDataOptions {
   ui: UIStateApi;
   marketingPersonal?: boolean;
   session?: ServerSession | null;
+  /** LCM2 백업의 계획 교체를 위한 어댑터 ref(생성 순서상 늦게 채워진다). */
+  planning?: { current: PlanningImportAdapter | null } | null;
 }
+
+/** pendingImport 는 가계부 스냅샷에 계획 데이터를 선택적으로 실을 수 있다
+ * (CSV/LCM1 은 계획 없음 — 현재 계획 보존. LCM2 는 계획 포함 — 두 키 원자 교체). */
+type ImportCandidateSnapshot = LocalBudgetSnapshot & { planning?: WorkspacePlanningData | null };
 
 /**
  * The editable budget state (income / fixed costs / categories / cards), the
  * per-user localStorage load & save, every CRUD handler, and the derived
  * summaries the dashboard renders.
  */
-export function useBudgetData({ users: accountUsers, ui, marketingPersonal = false, session = null }: UseBudgetDataOptions) {
+export function useBudgetData({ users: accountUsers, ui, marketingPersonal = false, session = null, planning = null }: UseBudgetDataOptions) {
   marketingPersonal = marketingPersonal && !accountUsers.currentUser?.serverUserId;
   const currentLedgerUser = useMemo(() => session?.workspace && accountUsers.currentUser?.serverUserId === session.user.id
     ? { ...accountUsers.currentUser, id: ledgerProfileId(session.user.id, session.workspace.id), name: session.workspace.name }
@@ -89,7 +97,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
   loadedScopeRef.current = users.isLoaded ? loadedUserId : null;
   if (activeUserRef.current !== (users.currentUser?.id ?? null)) importEpoch.current += 1;
   activeUserRef.current = users.currentUser?.id ?? null;
-  const [pendingImport, setPendingImport] = useState<{ userId: string; before: string; storedBefore: string | null; epoch: number; snapshot: LocalBudgetSnapshot } | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ userId: string; before: string; storedBefore: string | null; epoch: number; snapshot: ImportCandidateSnapshot } | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const backupFileRef = useRef<HTMLInputElement | null>(null);
 
@@ -263,11 +271,29 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     if (!importStillCurrent(userId, before, epoch)) {
       cancelImport(); setImportMessage("공간 또는 데이터가 변경되어 미리보기를 취소했습니다. 파일을 다시 선택하세요."); return;
     }
+    // LCM1/CSV 는 planning 없음(null/undefined) — 현재 계획을 보존한다(빈 값으로
+    // 취급해 지우지 않음). LCM2 만 두 로컬 키를 원자로 교체한다.
+    const importedPlanning = snapshot.planning ?? null;
+    const adapter = planning?.current ?? null;
+    let planningRawBefore: string | null = null;
+    if (importedPlanning) {
+      if (!adapter || !adapter.isCurrentScope(userId)) {
+        cancelImport(); setImportMessage("계획 데이터를 안전하게 처리할 수 없어 교체하지 않았습니다. 잠시 후 다시 시도하세요."); return;
+      }
+      const raw = adapter.getRaw();
+      if (raw === undefined) {
+        cancelImport(); setImportMessage("계획 기록 로딩이 끝나지 않아 교체하지 않았습니다. 잠시 후 다시 시도하세요."); return;
+      }
+      planningRawBefore = raw;
+    }
     try {
       if (window.localStorage.getItem(getUserDataKey(userId)) !== pendingImport.storedBefore) {
         cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
       }
       preserveBeforeImport(userId, before);
+      if (importedPlanning && adapter && !adapter.prepareReplace(planningRawBefore)) {
+        cancelImport(); setImportMessage("교체 전 계획 복구 사본을 저장하지 못해 교체하지 않았습니다. 저장 공간을 확보하세요."); return;
+      }
       // localStorage has no cross-tab compare-and-swap. Recheck after recovery
       // and write synchronously to eliminate the deferred-effect race, without
       // claiming atomic exclusion of simultaneous writes in other processes.
@@ -276,6 +302,22 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
       }
       const value = JSON.stringify({ monthlyIncome: snapshot.monthlyIncome, fixedCosts: snapshot.fixedCosts, categories: snapshot.categories, cards: snapshot.cards });
       window.localStorage.setItem(getUserDataKey(userId), value);
+      if (importedPlanning && adapter) {
+        const replaced = adapter.replace(importedPlanning, planningRawBefore);
+        if (!replaced.ok) {
+          // 계획 쓰기 실패 → 가계부 키를 가져오기 전 원시 값으로 되돌린다.
+          try {
+            if (pendingImport.storedBefore === null) window.localStorage.removeItem(getUserDataKey(userId));
+            else window.localStorage.setItem(getUserDataKey(userId), pendingImport.storedBefore);
+            storedValue.current = pendingImport.storedBefore;
+          } catch {
+            setSaveError("계획 교체 실패 후 가계부 원본을 되돌리지 못했습니다. 지금 전체 백업을 내보내세요.");
+          }
+          cancelImport();
+          setImportMessage((replaced.message ?? "계획을 교체하지 못했습니다.") + " 가계부 교체는 되돌렸습니다.");
+          return;
+        }
+      }
       storedValue.current = value;
       importedWrite.current = { userId, value };
       setBlockedSaveUserId(null);
@@ -284,7 +326,7 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
       applyBudgetSnapshot(snapshot);
       setLastSavedAt(new Date());
       setSaveError("");
-      setImportMessage("검증한 " + snapshot.fixedCosts.length + "개 항목을 적용했습니다.");
+      setImportMessage("검증한 " + snapshot.fixedCosts.length + "개 항목을 적용했습니다." + (importedPlanning ? " 주간 계획(예산·준비금)도 함께 복원했습니다." : ""));
     } catch { setImportMessage("복구 사본을 저장하지 못해 교체하지 않았습니다."); }
   }
 
@@ -531,8 +573,10 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
     setImportMessage("템플릿을 내보냈습니다.");
   }
 
-  function handleExportBackup() {
-    const backup = buildLivingCostBackup({ monthlyIncome, fixedCosts, categories, cards });
+  function handleExportBackup(planningData?: unknown) {
+    // 이벤트 객체 등이 실수로 전달되면 계획 없음(LCM1)으로 안전하게 폴백한다.
+    const validated = workspacePlanningDataSchema.safeParse(planningData);
+    const backup = buildLivingCostBackup({ monthlyIncome, fixedCosts, categories, cards, ...(validated.success ? { planning: validated.data } : {}) });
     const blob = new Blob([backup], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

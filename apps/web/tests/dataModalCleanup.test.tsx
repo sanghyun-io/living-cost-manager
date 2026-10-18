@@ -173,6 +173,28 @@ const createMockProps = (overrides: Partial<DataModalProps> = {}): DataModalProp
     onDeleteMember: vi.fn(),
     onRevokeInvitation: vi.fn()
   },
+  planning: {
+    hasWorkspace: false,
+    isViewer: false,
+    canUpload: false,
+    saveError: "",
+    isBusy: false,
+    serverSupport: "unknown",
+    serverConfirmed: false,
+    planningActive: false,
+    serverDirty: false,
+    conflict: false,
+    lastPlanningSyncedAt: null,
+    statusMessage: "",
+    localSummary: { weekCount: 0, reserveCount: 0, paydayDay: null },
+    remoteStaged: null,
+    onCheck: vi.fn(),
+    onUpload: vi.fn(),
+    onUploadOverwrite: vi.fn(),
+    onAdoptRemote: vi.fn(),
+    onDiscardRemote: vi.fn(),
+    onRetrySave: vi.fn()
+  },
   ...overrides
 });
 

@@ -51,6 +51,7 @@ export function cleanupLocalAccountData(
 
   storage.setItem(USERS_KEY, JSON.stringify(remainingUsers));
   storage.removeItem(getUserDataKey(removedUserId));
+  storage.removeItem('living-cost-manager:planning:' + encodeURIComponent(removedUserId) + ':v1');
   // A minimal tombstone prevents other open tabs from recreating erased data.
   storage.setItem(getUserErasureKey(removedUserId), "1");
   // Enumerate before removing: Storage indices shift after each deletion.
@@ -59,6 +60,9 @@ export function cleanupLocalAccountData(
     storage.setItem(getUserErasureKey('server:' + accountId), '1');
     const ledgerPrefix = 'living-cost-manager:user:' + encodeURIComponent('ledger:' + JSON.stringify([accountId]).slice(0, -1) + ',');
     for (const key of keys) if (key?.startsWith(ledgerPrefix)) storage.removeItem(key);
+    // 계획 키는 별도 네임스페이스 — 계정 삭제 시 가계부와 함께 기기에서 지운다.
+    const planningLedgerPrefix = 'living-cost-manager:planning:' + encodeURIComponent('ledger:' + JSON.stringify([accountId]).slice(0, -1) + ',');
+    for (const key of keys) if (key?.startsWith(planningLedgerPrefix)) storage.removeItem(key);
     storage.removeItem('living-cost-manager:ledger-migration:' + encodeURIComponent(accountId));
     storage.removeItem('living-cost-manager:ledger-migration:' + encodeURIComponent(accountId) + ':complete');
     storage.removeItem('living-cost-manager:ledger-creation:' + encodeURIComponent(accountId));
@@ -66,7 +70,7 @@ export function cleanupLocalAccountData(
     try { const target = JSON.parse(storage.getItem(returnKey) ?? 'null'); if (target?.accountId === accountId || target?.profileId === removedUserId) storage.removeItem(returnKey); } catch { /* preserve unknown legacy metadata */ }
   }
   if (storage.getItem('living-cost-manager:sample-return:v1') === removedUserId) storage.removeItem('living-cost-manager:sample-return:v1');
-  const erasedPrefixes = [getUserDataKey(removedUserId), STORAGE_KEY, LEGACY_STORAGE_KEY];
+  const erasedPrefixes = [getUserDataKey(removedUserId), 'living-cost-manager:planning:' + encodeURIComponent(removedUserId) + ':v1', STORAGE_KEY, LEGACY_STORAGE_KEY];
   for (const key of keys) {
     if (key && erasedPrefixes.some((prefix) => key.startsWith(prefix + ":corrupt:") || key.startsWith(prefix + ":recovery:"))) {
       storage.removeItem(key);

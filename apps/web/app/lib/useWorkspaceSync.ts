@@ -28,6 +28,7 @@ import { buildLivingCostBackup } from "./backup";
 import { getUserDataKey } from "./users";
 import { blockSync, canAutoSync, canReplaceLocal, createSyncSafety, establishSyncBaseline, syncScope, syncSnapshotKey as buildSnapshotKey } from "./syncSafety";
 import { canCreateFirstOwnedLedger } from './publicRelease';
+import type { PlanningDataApi } from './usePlanningData';
 
 interface UseWorkspaceSyncOptions {
   ui: UIStateApi;
@@ -37,6 +38,8 @@ interface UseWorkspaceSyncOptions {
   /** Required for sync: identity and readiness of the local budget being edited. */
   localUserId?: string | null;
   isLocalDataReady?: boolean;
+  /** 계획 훅(생성 순서상 늦게 연결). 명시 저장 시 가계부 업로드 확인 후 체인 반영. */
+  getPlanning?: (() => PlanningDataApi | null) | null;
 }
 
 export type WorkspaceListLoadResult =
@@ -48,7 +51,7 @@ export type WorkspaceListLoadResult =
  * download, workspace switching, sharing (members & invitations), plus the
  * derived sync-state view the DataModal renders.
  */
-export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, isLocalDataReady = false }: UseWorkspaceSyncOptions) {
+export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, isLocalDataReady = false, getPlanning = null }: UseWorkspaceSyncOptions) {
   const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [isServerSnapshotChecked, setIsServerSnapshotChecked] = useState(false);
   const [lastServerSyncedAt, setLastServerSyncedAt] = useState<Date | null>(null);
@@ -305,7 +308,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
 
     const workspace = serverWorkspaces.find((item) => item.id === workspaceId) ?? null;
     if (!workspace || workspace.id === serverSession.workspace?.id) return;
-    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 가계부를 저장하지 못해 전환하지 않았습니다. 백업을 먼저 내보내세요.'); return; }
+    if (!latestBudget.current.saveBeforeSwitch() || !(getPlanning?.()?.saveBeforeSwitch() ?? true)) { auth.setServerStatus('현재 가계부나 계획을 안전하게 저장하지 못해 전환하지 않았습니다. 백업을 먼저 내보내세요.'); return; }
     const nextSession = {
       ...serverSession,
       workspace
@@ -364,7 +367,28 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       setServerSnapshot(savedSnapshot);
       setLastServerSyncedAt(new Date());
       auth.setServerErrorKind(null);
-      auth.setServerStatus("현재 브라우저 데이터를 서버에 동기화했습니다.");
+      let statusText = "현재 브라우저 데이터를 서버에 동기화했습니다.";
+      // 계획 체인 반영은 명시 저장에서만 한다(자동 동기화는 계획까지 몰아서 올리지
+      // 않는다). 가계부 PUT이 방금 확인해 준 새 syncVersion을 계획 CAS 기준으로 쓴다.
+      if (!automatic) {
+        const planning = getPlanning?.();
+        if (planning) {
+          const outcome = await planning.chainUploadAfterBudgetConfirmed(savedSnapshot.syncVersion);
+          if (!isActive(ticket)) return;
+          if (outcome.status === "ok") {
+            if (outcome.changed) statusText = "가계부와 주간 계획을 서버에 동기화했습니다.";
+          } else if (outcome.status === "conflict") {
+            statusText = "가계부는 서버에 저장됨 · 주간 계획 미반영(기준 충돌). 데이터 관리에서 확인 후 직접 선택하세요.";
+          } else if (outcome.status === "diverged") {
+            statusText = "가계부는 서버에 저장됨 · 주간 계획은 서버 기록과 달라 반영하지 않았습니다. 대조 후 선택하세요.";
+          } else if (outcome.status === "skipped" && outcome.reason === "no planning") {
+            // 계획이 전혀 없으면 가계부 저장 사실만 그대로 표시(오염 메시지 금지).
+          } else {
+            statusText = "가계부는 서버에 저장됨 · 주간 계획 미반영" + (outcome.status === "skipped" && outcome.reason ? `: ${outcome.reason}` : ".");
+          }
+        }
+      }
+      auth.setServerStatus(statusText);
       track({ type: "sync.push", timestamp: Date.now(), data: { workspaceId: serverSession.workspace.id } });
       // 방금 업로드가 새 히스토리 엔트리가 되므로 추세를 다시 계산해 둔다.
       // (업로드 await 중 전환이 있었다면 serverSession 의 scope 가 활성 scope 와
@@ -547,7 +571,7 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
       return;
     }
 
-    if (!latestBudget.current.saveBeforeSwitch()) { auth.setServerStatus('현재 가계부 저장을 확인한 뒤 초대를 수락하세요.'); return; }
+    if (!latestBudget.current.saveBeforeSwitch() || !(getPlanning?.()?.saveBeforeSwitch() ?? true)) { auth.setServerStatus('현재 가계부나 계획 저장을 확인한 뒤 초대를 수락하세요.'); return; }
 
     const ticket = safety.current;
     auth.setIsServerBusy(true);
@@ -681,6 +705,12 @@ export function useWorkspaceSync({ ui, auth, budget, coach, localUserId = null, 
     canManageCurrentWorkspace,
     canUploadServerSnapshot,
     visibleCreatedInvitation,
+    // 계획 훅이 쓰는 가계부 CAS 기준 접근기. closure 는 매 렌더 새로 만들어지고
+    // safety/baseline 은 호출 시점 ref 를 읽는다(이벤트 시점 최신값).
+    getBudgetServerVersion: () => (isChecked && safety.current.version !== null ? safety.current.version : null),
+    isBudgetServerCurrent: () => isChecked && !safety.current.blocked && safety.current.version !== null && !safety.current.busy,
+    isBudgetDirty: () => isChecked && !safety.current.blocked && safety.current.baseline !== null &&
+      buildSnapshotKey(latestBudget.current.getCurrentBudgetSnapshot()) !== safety.current.baseline,
     localSnapshotSummary,
     serverSnapshotSummary,
     hasRemoteDecision,

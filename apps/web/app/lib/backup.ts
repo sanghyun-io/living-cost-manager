@@ -1,4 +1,9 @@
 import {
+  createDefaultWorkspacePlanningData,
+  workspacePlanningDataSchema,
+  type WorkspacePlanningData
+} from "@living-cost-manager/shared";
+import {
   createFixedCost,
   DEFAULT_CATEGORIES,
   type Category,
@@ -13,11 +18,24 @@ export type LivingCostBackup = {
   cards: PaymentCard[];
 };
 
-const magicHeader = "LCM1";
+/** LCM1(예전 형식)는 가계부만 담고 계획 정보가 전혀 없다(planning: null —
+ * 빈_CLEAR 로 취급하면 안 된다). LCM2 는 주간 예산·급여일·준비금 계획
+ * 데이터만 담는다(서버 CAS revision/owner UID 등 남의 스코필드는 제외). */
+export type ParsedLivingCostBackup = LivingCostBackup & { planning: WorkspacePlanningData | null };
 
-export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedCosts }: LivingCostBackup): string {
+const legacyMagicHeader = "LCM1";
+const magicHeader = "LCM2";
+
+/** planning 필드를 넘기면 LCM2(계획 포함), 생략하면 기존 LCM1 바이트 포맷 그대로.
+ * LCM2 를 구버전 앱에 가져오면 마법헤더 불일치로 명시 실패한다 — 가계부만 조용히
+ * 복원하고 계획을 잃는 일이 없다. */
+export function buildLivingCostBackup(input: LivingCostBackup & { planning?: WorkspacePlanningData }): string {
+  const { monthlyIncome, categories, cards, fixedCosts } = input;
+  const planningSection = input.planning === undefined
+    ? []
+    : ["[planning]", writeRow(["json", JSON.stringify(input.planning ?? createDefaultWorkspacePlanningData())])];
   return [
-    magicHeader,
+    input.planning === undefined ? legacyMagicHeader : magicHeader,
     "[income]",
     writeRow(["monthlyIncome", String(sanitizeNumber(monthlyIncome, 0))]),
     "[categories]",
@@ -41,13 +59,15 @@ export function buildLivingCostBackup({ monthlyIncome, categories, cards, fixedC
         String(item.isEndOfMonth), item.billingAnchorDate ?? "", item.renewalStatus ?? "unreviewed",
         String(item.potentialMonthlySavings ?? 0), String(item.confirmedMonthlySavings ?? 0)
       ])
-    )
+    ),
+    ...planningSection
   ].join("\n");
 }
 
-export function parseLivingCostBackup(content: string): LivingCostBackup {
+export function parseLivingCostBackup(content: string): ParsedLivingCostBackup {
   const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
-  if (lines[0]?.trim() !== magicHeader) {
+  const header = lines[0]?.trim();
+  if (header !== magicHeader && header !== legacyMagicHeader) {
     throw new Error("Unsupported backup format");
   }
 
@@ -73,12 +93,32 @@ export function parseLivingCostBackup(content: string): LivingCostBackup {
   const categories = parseCategories(sections.get("categories") ?? []);
   const cards = parseCards(sections.get("cards") ?? []);
   const fixedCosts = parseFixedCosts(sections.get("fixedCosts") ?? []);
+  let planning: WorkspacePlanningData | null = null;
+  if (header === magicHeader) {
+    const rows = sections.get("planning");
+    if (!rows || rows.length !== 1 || rows[0][0] !== "json" || rows[0].length !== 2 || !rows[0][1]) {
+      throw new Error("Incomplete backup: planning");
+    }
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(rows[0][1]);
+    } catch {
+      throw new Error("Invalid backup row: planning");
+    }
+    const validated = workspacePlanningDataSchema.safeParse(decoded);
+    if (!validated.success) throw new Error("Invalid backup row: planning");
+    planning = validated.data;
+  } else if (sections.has("planning")) {
+    // LCM1 파일에 planning 섹션이 있으면 형식 혼합 — 조용히 계획만 버리지 않는다.
+    throw new Error("Invalid backup: planning in legacy file");
+  }
 
   return {
     monthlyIncome,
     categories: mergeCategories(DEFAULT_CATEGORIES, categories),
     cards,
-    fixedCosts
+    fixedCosts,
+    planning
   };
 }
 

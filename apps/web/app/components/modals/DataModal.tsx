@@ -2,6 +2,7 @@ import { Alert, Button, Card, Group, SimpleGrid, Text } from "@mantine/core";
 import type { DataModalProps } from "../../lib/pageTypes";
 import { ModalShell } from "./ModalShell";
 import { ServerSyncPanel } from "./ServerSyncPanel";
+import { PlanningSyncSection } from "./PlanningSyncSection";
 import { MarketingConsentControl } from "../MarketingConsentControl";
 import { formatWon } from "../../lib/formatting";
 
@@ -18,7 +19,8 @@ export function DataModal({
   onExportBackup,
   onImportBackup,
   sync,
-  sharing
+  sharing,
+  planning
 }: DataModalProps) {
   return (
     <ModalShell opened={opened} sectionLabel="관리" title="데이터 관리" size="lg" onClose={onClose}>
@@ -65,6 +67,7 @@ export function DataModal({
           <Text size="sm">브라우저 데이터를 삭제하면 기기에 저장한 내용도 사라집니다. 전체 백업을 보관하세요.</Text>
         </Alert>
       )}
+      <PlanningSyncSection {...planning} />
       <MarketingConsentControl {...marketingConsent} />
       <input
         ref={importFileRef}

@@ -71,7 +71,6 @@ export function deriveHeaderStorageState(input: HeaderStorageInput): HeaderStora
 }
 
 export type HeaderStorageView = { state: HeaderStorageState; label: string; tooltip: string };
-
 export function getHeaderStorageView(state: HeaderStorageState): HeaderStorageView {
   switch (state) {
     case "save-failed":
@@ -225,4 +224,35 @@ export function summarizeBudgetSnapshot(snapshot: LocalBudgetSnapshot): BudgetSn
     categoryCount: snapshot.categories.length,
     cardCount: snapshot.cards.length
   };
+}
+
+/**
+ * 헤더의 "기기·서버 저장됨" 주장은 가계부와 계획 두 영역이 모두 확인될 때만 성립한다.
+ *  - 계획의 로컬 쓰기 실패/대기는 가계부 서버 주장보다 우선한다(저장 안 된데 저장됨 금지).
+ *  - 계획이 전혀 없는 no-op 상태는 가계부 상태를 그대로 두며 거짓 경보를 울리지 않는다.
+ *  - 서버 세션이 없으면(게스트/로컬) 서버를 주장하지 않는 가계부 판정에만 영향 없다.
+ */
+export type PlanningStorageInput = {
+  /** 계획 로컬 쓰기 실패(quota/concurrent) — 최우선. */
+  saveError: boolean;
+  /** 계획 편집이 아직 localStorage 에 반영되기 전. */
+  savePending: boolean;
+  /** 의미 있는 계획 데이터가 있는가(no-op 아니면 true). */
+  active: boolean;
+  /** 서버 기준 확인됐으나 로컬이 다름(미반영) 또는 충돌. */
+  serverDirty: boolean;
+  /** 활성 계획인데 서버 확인 기준이 아직 없음. */
+  serverUnknown: boolean;
+};
+
+export function combinePlanningStorageState(budgetState: HeaderStorageState, planning: PlanningStorageInput): HeaderStorageState {
+  if (planning.saveError || budgetState === "save-failed") return "save-failed";
+  if (planning.savePending) return "saving";
+  if (!planning.active) return budgetState;
+  if (budgetState === "server-saved") {
+    if (planning.serverDirty) return "device-dirty";
+    if (planning.serverUnknown) return "server-unknown";
+    return "server-saved";
+  }
+  return budgetState;
 }

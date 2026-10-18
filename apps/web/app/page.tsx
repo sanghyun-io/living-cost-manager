@@ -34,6 +34,11 @@ import type { WorkspaceSyncApi } from "./lib/useWorkspaceSync";
 import { useLedgers } from './lib/useLedgers';
 import { LedgerControls } from './components/LedgerControls';
 import { LedgerSummary } from './components/LedgerSummary';
+import { usePlanningData } from './lib/usePlanningData';
+import type { PlanningDataApi } from './lib/usePlanningData';
+import type { PlanningImportAdapter } from './lib/planningStorage';
+import { WeeklyBudgetPanel } from './components/WeeklyBudgetPanel';
+import { combinePlanningStorageState, getHeaderStorageView } from './lib/syncStatus';
 import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
 import { buildHomePlan } from './lib/homePlan';
 import { tourNeedsManagementOpen } from './lib/productTour';
@@ -56,6 +61,8 @@ export default function Home() {
   const usersRef = useRef<LocalUsersApi | null>(null);
   const budgetRef = useRef<BudgetDataApi | null>(null);
   const syncRef = useRef<WorkspaceSyncApi | null>(null);
+  const planningRef = useRef<PlanningDataApi | null>(null);
+  const planningAdapterRef = useRef<{ current: PlanningImportAdapter | null }>({ current: null });
 
   const auth = useServerAuth({
     ui,
@@ -65,17 +72,39 @@ export default function Home() {
   const users = useLocalUsers({
     ui,
     auth,
-    saveBeforeSwitch: () => budgetRef.current?.saveBeforeSwitch() ?? false,
+    saveBeforeSwitch: () => (budgetRef.current?.saveBeforeSwitch() ?? false) && (planningRef.current?.saveBeforeSwitch() ?? true),
     getBudget: () => (budgetRef.current as BudgetDataApi).getCurrentBudgetSnapshot()
   });
-  const budget = useBudgetData({ users, ui, session: auth.serverSession, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId });
+  const budget = useBudgetData({ users, ui, session: auth.serverSession, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId, planning: planningAdapterRef.current });
   const coachingPrefs = useCoachingPreferences(budget.fixedCosts, users.currentUser?.id ?? null, auth.serverSession?.workspace?.id ?? null, auth.serverApi, auth.serverSession, users.currentUser?.serverUserId);
   const coach = useCoach({ budget, serverApi: auth.serverApi, protectedFixedCostIds: coachingPrefs.activeIds, coachingPreferencesReady: coachingPrefs.ready });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: budget.localScopeKey,
-    isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode });
+    isLocalDataReady: !!budget.localScopeKey && !budget.saveError && !users.isSampleMode,
+    getPlanning: () => planningRef.current });
   const ledgers = useLedgers(auth, sync);
+  const planning = usePlanningData({
+    profileId: budget.localScopeKey,
+    serverSession: auth.serverSession,
+    serverApi: auth.serverApi,
+    role: sync.currentWorkspaceRole,
+    getBudgetServerVersion: sync.getBudgetServerVersion,
+    isBudgetServerCurrent: sync.isBudgetServerCurrent,
+    isBudgetDirty: sync.isBudgetDirty,
+    scopeReady: !users.isSampleMode && !!auth.serverSession?.workspace && !!auth.serverApi
+  });
+  planningRef.current = planning;
+  planningAdapterRef.current.current = planning.importAdapter;
   const viewer = !users.isSampleMode && sync.currentWorkspaceRole === 'viewer';
   const canEdit = !viewer && !ledgers.aggregateMode && !!budget.localScopeKey;
+  // 헤더 저장 주장 = 가계부 ∧ 계획 동시 확인. 계획 로컬 쓰기 실패/대기가 우선하고,
+  // no-op 계획은 가계부 상태를 흔들지 않는다(거짓 경보 없음).
+  const combinedHeaderStorageView = getHeaderStorageView(combinePlanningStorageState(sync.headerStorageState, {
+    saveError: planning.loaded && !!planning.saveError,
+    savePending: planning.savePending,
+    active: planning.planningActive,
+    serverDirty: planning.planningServerDirty,
+    serverUnknown: planning.planningServerUnknown
+  }));
   const syncAvailable = !!budget.localScopeKey && !budget.saveError && !users.isSampleMode && !ledgers.mutationPending;
   const focusReady = users.isBootLoaded && users.isLoaded && (!!budget.localScopeKey || !!budget.saveError);
   const focusScope = JSON.stringify([auth.serverSession?.user.id ?? null, auth.serverSession?.workspace?.id ?? null, users.isSampleMode]);
@@ -165,7 +194,9 @@ export default function Home() {
 
   function handleExportBackupWithTracking() {
     track({ type: "export.backup", timestamp: Date.now(), data: {} });
-    budget.handleExportBackup();
+    // 계획이 로딩된 스코프면 LCM2(가계부+계획)로 내보낸다. 미로딩이면 기존 LCM1
+    // 바이트 포맷(가계부만)이고, 이는 "계획 없음"이 아니라 "계획 정보 미포함"이다.
+    budget.handleExportBackup(planning.loaded ? planning.data : undefined);
   }
 
   function handleCreateInvitationWithTracking() {
@@ -179,9 +210,9 @@ export default function Home() {
   }
   function handleExitAccount() {
     try {
-      if (!budget.saveBeforeSwitch() || !users.handleLogout()) return;
+      if (!budget.saveBeforeSwitch() || !planning.saveBeforeSwitch() || !users.handleLogout()) return;
       auth.handleServerLogout(); setTemplatesOpen(false);
-    } catch { setTemplateError('가계부를 안전하게 저장하지 못해 로그아웃하지 않았습니다. 현재 내용을 백업하세요.'); }
+    } catch { setTemplateError('가계부나 계획을 안전하게 저장하지 못해 로그아웃하지 않았습니다. 현재 내용을 백업하세요.'); }
   }
 
   if (!users.isBootLoaded || !users.isLoaded || (!budget.localScopeKey && !budget.saveError)) {
@@ -191,7 +222,7 @@ export default function Home() {
         <section className="login-card">
           <p className="section-label">생활비 관리자</p>
           <h1>불러오는 중입니다</h1>
-          {budget.saveError ? <><Text role="alert">{budget.saveError}</Text><Button onClick={budget.handleExportBackup}>현재 메모리 데이터 백업</Button></> : null}
+          {budget.saveError ? <><Text role="alert">{budget.saveError}</Text><Button onClick={handleExportBackupWithTracking}>현재 메모리 데이터 백업</Button></> : null}
         </section>
       </main>
     );
@@ -210,7 +241,7 @@ export default function Home() {
         lastSavedAt={budget.lastSavedAt}
         serverSession={auth.serverSession}
         currentUserName={budget.profileName}
-        headerStorageView={sync.headerStorageView}
+        headerStorageView={combinedHeaderStorageView}
         onOpenData={() => ui.setIsDataModalOpen(true)}
         onOpenAuth={() => ui.setIsAuthModalOpen(true)}
         onOpenCoach={coach.openCoachModal}
@@ -256,6 +287,21 @@ export default function Home() {
           </div>
         ) : null}
       </section>
+      {planning.loaded ? (
+        <WeeklyBudgetPanel
+          data={planning.data}
+          asOf={referenceInstant}
+          canEdit={planning.canEdit}
+          isViewer={planning.isViewer}
+          hasServer={!users.isSampleMode && !!auth.serverSession?.workspace && !!auth.serverApi}
+          serverSupport={planning.serverSupport}
+          serverConfirmed={planning.baseConfirmed}
+          serverDirty={planning.planningServerDirty}
+          conflict={planning.conflict}
+          saveError={planning.saveError}
+          actions={planning}
+        />
+      ) : null}
       {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}
       {budget.localRecoveryRequired ? <Button color="rose" variant="default" mb="sm" onClick={budget.handleExportRecovery}>저장 원본 내보내기</Button> : null}
 
@@ -425,6 +471,7 @@ export default function Home() {
             onCheckServer: () => {
                if (auth.serverSession && syncAvailable) {
                 void sync.prepareServerSyncDecision(auth.serverSession);
+                void planning.checkRemote();
               }
             },
              onSyncNow: () => { if (syncAvailable) void sync.handleSyncNow(); },
@@ -458,6 +505,39 @@ export default function Home() {
             onUpdateMemberRole: (memberId, role) => void sync.handleUpdateMemberRole(memberId, role),
             onDeleteMember: (memberId) => void sync.handleDeleteMember(memberId),
             onRevokeInvitation: (invitationId) => void sync.handleRevokeInvitation(invitationId)
+          }}
+          planning={{
+            hasWorkspace: !users.isSampleMode && !!auth.serverSession?.workspace && !!auth.serverApi,
+            isViewer: planning.isViewer,
+            canUpload: canEdit && !users.isSampleMode,
+            saveError: planning.loaded ? planning.saveError : "",
+            isBusy: planning.isBusy || auth.isServerBusy,
+            serverSupport: planning.serverSupport,
+            serverConfirmed: planning.baseConfirmed,
+            planningActive: planning.planningActive,
+            serverDirty: planning.planningServerDirty,
+            conflict: planning.conflict,
+            lastPlanningSyncedAt: planning.lastPlanningSyncedAt,
+            statusMessage: planning.statusMessage,
+            localSummary: { weekCount: planning.data.weeks.length, reserveCount: planning.data.reserves.length, paydayDay: planning.data.paydayDay },
+            remoteStaged: planning.remoteStaged ? {
+              weekCount: planning.remoteStaged.data.weeks.length,
+              reserveCount: planning.remoteStaged.data.reserves.length,
+              paydayDay: planning.remoteStaged.data.paydayDay,
+              checkedAt: planning.remoteStaged.checkedAt
+            } : null,
+            onCheck: () => void planning.checkRemote(),
+            onUpload: () => void planning.uploadNow(),
+            onUploadOverwrite: () => {
+              if (window.confirm("서버의 계획 기록을 이 기기 기록으로 교체합니다. 다른 멤버의 최근 계획이 대체될 수 있습니다. 계속할까요?")) {
+                void planning.uploadNow({ forceStagedRevision: true, allowDiverged: true });
+              }
+            },
+            onAdoptRemote: () => {
+              if (window.confirm("서버 계획 기록을 이 기기에 적용합니다. 현재 기기 계획은 교체 전 복구 사본으로 보관됩니다.")) planning.adoptRemote();
+            },
+            onDiscardRemote: planning.discardRemote,
+            onRetrySave: planning.retrySave
           }}
         />
 

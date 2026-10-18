@@ -833,6 +833,24 @@ body {
 .budget-strip .budget-strip-value { font-size: 22px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 /* First screen = plan + next payments only. Management/analysis are one click away. */
 .home-overview { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+/* 주간 생활비(M2)·큰지출준비(M4)·월말 점검(M5): 첫 화면 vicino, 조용한 구분선. */
+.weekly-budget-panel { padding: 16px 0 8px; border-top: 1px solid var(--line); margin-top: 8px; }
+.weekly-budget-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.weekly-budget-nav { display: flex; gap: 4px; margin-top: 8px; }
+.weekly-budget-readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12ch), 1fr)); gap: 8px 16px; margin-top: 12px; }
+.weekly-budget-edit { margin-top: 12px; display: grid; gap: 8px; }
+.weekly-budget-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.weekly-budget-payday { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.weekly-budget-history { margin-top: 12px; }
+.weekly-budget-history summary { cursor: pointer; font-size: 13px; }
+.weekly-budget-history-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.weekly-budget-history-list li { display: flex; gap: 12px; justify-content: space-between; border-bottom: 1px dashed var(--line); padding: 4px 0; flex-wrap: wrap; }
+.weekly-budget-basis, .weekly-budget-storage { display: block; margin-top: 8px; }
+.reserve-panel { padding: 16px 0 8px; border-top: 1px solid var(--line); }
+.reserve-panel-row { border-bottom: 1px solid var(--line); padding: 10px 0; display: grid; gap: 6px; }
+.reserve-progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.reserve-progress-bar { height: 100%; background: var(--mantine-color-teal-6, #167761); }
+.month-review-panel { padding: 16px 0 8px; border-top: 1px solid var(--line); }
 .home-onboarding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 16px; }
 .home-onboarding .mantine-Button-root { min-height: 44px; }
 .management-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding-block: 4px; }
@@ -905,6 +923,9 @@ body {
      dues reveal button and the quiet-pane summaries. Desktop keeps the dense
      sizes; no global redesign, no layout column/order change. */
   .quiet-upcoming-reveal { min-width: 44px; min-height: 44px; }
+  .weekly-budget-panel .mantine-Button-root { min-height: 40px; }
+  .weekly-budget-panel .mantine-Select-input, .weekly-budget-panel .mantine-TextInput-input { min-height: 40px; }
+  .weekly-budget-panel .weekly-budget-history summary { padding-block: 11px; }
   .quiet-upcoming .forecast-help summary { padding-block: 13px; }
   .quiet-home .quiet-disclosure > summary { padding-block: 11px; }
 }

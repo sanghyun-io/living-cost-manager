@@ -95,6 +95,8 @@ const mockApi: ServerApiClient = {
   getWorkspaceSnapshot: vi.fn(),
   putWorkspaceSnapshot: vi.fn(),
   getSnapshotHistory: vi.fn(),
+  getWorkspacePlanning: vi.fn(),
+  putWorkspacePlanning: vi.fn(),
   listMembers: vi.fn(),
   createInvitation: vi.fn(),
   listInvitations: vi.fn(),
