@@ -49,6 +49,10 @@ export function MonthReviewPanel({ planning, fixedCosts, monthlyIncome, scopeKey
   const [costTarget, setCostTarget] = useState<string | null>(null);
   const [costAmount, setCostAmount] = useState("");
   const [feedback, setFeedback] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  // P2-7: 현재 입력란의 유효성. 하나가라도 활성 입력이 invalid면 draft의 오래된
+  // 유효값으로 적용/확정이 허용되지 않는다.
+  const [fieldErrors, setFieldErrors] = useState<{ income?: string; oneOff?: string }>({});
+  const inputsValid = !fieldErrors.income && !fieldErrors.oneOff;
 
   const monthWindow = useMemo(() => monthWindowFor(asOf), [asOf]);
   const coverage = useMemo(() => (monthWindow ? weeksForWindow(planning.weeks, monthWindow) : null), [planning.weeks, monthWindow]);
@@ -66,24 +70,27 @@ export function MonthReviewPanel({ planning, fixedCosts, monthlyIncome, scopeKey
     setOneOffDraft("");
     setCostTarget(null);
     setCostAmount("");
+    setFieldErrors({});
     setFeedback(null);
     setBaseline(captureBaseline(scopeKey, fixedCosts, monthlyIncome));
   }
 
   function setIncome(value: string) {
     setIncomeDraft(value);
-    if (value.trim() === "") { setDraft(d => ({ ...d, newIncome: null })); setFeedback(null); return; }
+    if (value.trim() === "") { setDraft(d => ({ ...d, newIncome: null })); setFieldErrors(e => ({ ...e, income: undefined })); setFeedback(null); return; }
     const parsed = parseKrwInput(value);
-    if (!parsed.ok) { setFeedback({ text: parsed.message, tone: "error" }); return; }
+    if (!parsed.ok) { setFieldErrors(e => ({ ...e, income: parsed.message })); return; }
+    setFieldErrors(e => ({ ...e, income: undefined }));
     setDraft(d => ({ ...d, newIncome: parsed.value }));
     setFeedback(null);
   }
 
   function setOneOff(value: string) {
     setOneOffDraft(value);
-    if (value.trim() === "") { setDraft(d => ({ ...d, oneOff: 0 })); setFeedback(null); return; }
+    if (value.trim() === "") { setDraft(d => ({ ...d, oneOff: 0 })); setFieldErrors(e => ({ ...e, oneOff: undefined })); setFeedback(null); return; }
     const parsed = parseKrwInput(value);
-    if (!parsed.ok) { setFeedback({ text: parsed.message, tone: "error" }); return; }
+    if (!parsed.ok) { setFieldErrors(e => ({ ...e, oneOff: parsed.message })); return; }
+    setFieldErrors(e => ({ ...e, oneOff: undefined }));
     setDraft(d => ({ ...d, oneOff: parsed.value }));
     setFeedback(null);
   }
@@ -100,6 +107,7 @@ export function MonthReviewPanel({ planning, fixedCosts, monthlyIncome, scopeKey
 
   function applyDraft() {
     if (!canEdit) return;
+    if (!inputsValid) { setFeedback({ text: "입력 오류를 먼저 해결하세요 — 오류가 남아 있는 동안은 적용할 수 없습니다.", tone: "error" }); return; }
     if (comparison.invalidCostIds.length > 0 && draft.costs.length === comparison.invalidCostIds.length && draft.newIncome === null) {
       setFeedback({ text: "가정 항목이 모두 목록에서 사라져 적용할 재발 변경이 없습니다. 다시 비교하세요.", tone: "error" });
       return;
@@ -122,6 +130,7 @@ export function MonthReviewPanel({ planning, fixedCosts, monthlyIncome, scopeKey
     setDraft(EMPTY_DRAFT);
     setIncomeDraft("");
     setOneOffDraft("");
+    setFieldErrors({});
     setBaseline(captureBaseline(scopeKey, fixedCosts, monthlyIncome));
   }
 
@@ -200,6 +209,9 @@ export function MonthReviewPanel({ planning, fixedCosts, monthlyIncome, scopeKey
         <Text size="xs" c="dimmed">예측이 아니라 사용자가 입력한 가정의 대조입니다(AI·자동 예측 없음).</Text>
       </div>
 
+      {!inputsValid ? (
+        <Text size="xs" c="rose" role="alert">{fieldErrors.income ?? fieldErrors.oneOff} — 비교 숫자는 마지막 유효 값 기준이며, 오류가 있는 동안은 적용할 수 없습니다.</Text>
+      ) : null}
       {stale && comparison.hasChanges ? (
         <div role="alert">
           <Text size="xs" c="rose">비교 기준(현행 정본)이 바뀌었습니다. 아래 '이 변경 적용'은 비활성 — 재생성 후 다시 확인하세요.</Text>
@@ -212,7 +224,7 @@ export function MonthReviewPanel({ planning, fixedCosts, monthlyIncome, scopeKey
           variant="default"
           color="teal"
           mt="xs"
-          disabled={stale}
+          disabled={stale || !inputsValid}
           onClick={applyDraft}
         >
           이 변경 적용(재발 항목만)

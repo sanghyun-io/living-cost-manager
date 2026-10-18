@@ -102,12 +102,21 @@ describe("monthReview — what-if 순수 초안", () => {
     expect(patches.newIncome).toBeNull();
   });
 
-  test("baseline fingerprint: 스코프/수입/금액 변경 감지, 순서 재배열은 동일", () => {
+  test("baseline fingerprint: 스코프/수입/금액/주기/항목 추가·삭제·0수입을 감지, 순서 재배열만 면책", () => {
     const a = captureBaseline("s", fixedCosts, income);
     const b = captureBaseline("s", [...fixedCosts].reverse(), income);
     expect(baselineMatches(b, a)).toBe(true);
     expect(baselineMatches(captureBaseline("s", [cost("net", 17001), cost("ins", 90000, 12)], income), a)).toBe(false);
     expect(baselineMatches(captureBaseline("other-scope", fixedCosts, income), a)).toBe(false);
+    // 같은 id·같은 금액, periodMonths 1→12: 시나리오 월 환산이 바뀌므로 반드시 무효화
+    expect(baselineMatches(captureBaseline("s", [cost("net", 17000, 1), cost("ins", 90000, 12)], income),
+      captureBaseline("s", [cost("net", 17000, 12), cost("ins", 90000, 12)], income))).toBe(false);
+    // 항목 추가 / 삭제
+    expect(baselineMatches(captureBaseline("s", [...fixedCosts, cost("new", 5000)], income), a)).toBe(false);
+    expect(baselineMatches(captureBaseline("s", fixedCosts.slice(1), income), a)).toBe(false);
+    // 수입 0 ↔ 3백만
+    expect(baselineMatches(captureBaseline("s", fixedCosts, 0), a)).toBe(false);
+    expect(baselineMatches(captureBaseline("s", fixedCosts, 0), captureBaseline("s", fixedCosts, 0))).toBe(true);
   });
 
   test("일회성만 있으면 적용 시 재발 패치 없음(빈 배치)", () => {

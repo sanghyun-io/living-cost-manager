@@ -89,7 +89,8 @@ export type ScenarioDraft = {
 export type BaselineSnapshot = {
   scopeKey: string;
   monthlyIncome: number;
-  /** id:amount| 정렬된 스냅샷 — 기준 변경 감지용. */
+  /** 시나리오가 의존하는 모든 정본 필드(id/amount/periodMonths/billingDay/
+   * isEndOfMonth)를 id 순 정렬로 포함 — 기준 변경 감지용. */
   costFingerprint: string;
 };
 
@@ -101,7 +102,7 @@ export function monthlyEquivalentLocal(item: Pick<FixedCost, "amount" | "periodM
 export function captureBaseline(scopeKey: string, fixedCosts: readonly FixedCost[], monthlyIncome: number): BaselineSnapshot {
   const costFingerprint = [...fixedCosts]
     .sort((a, b) => (a.id < b.id ? -1 : 1))
-    .map(item => `${item.id}:${item.amount}`)
+    .map(item => `${item.id}:${item.amount}:${item.periodMonths}:${item.billingDay}:${item.isEndOfMonth ? 1 : 0}`)
     .join("|");
   return { scopeKey, monthlyIncome, costFingerprint };
 }

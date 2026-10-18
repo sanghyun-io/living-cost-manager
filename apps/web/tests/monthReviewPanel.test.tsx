@@ -85,6 +85,31 @@ describe("MonthReviewPanel — 사용자 개시 · 순수 초안 · 가드 적�
     expect(handle.view.container.textContent).toContain("다음 달 가정");
   });
 
+  test("P2-7 — 유효값 다음 invalid 입력: 적용 버튼 비활성·클릭 0호출, 재입력 후에만 적용 가능", () => {
+    const handle = harness();
+    fireEvent.change(screen.getByLabelText("가정 월수입"), { target: { value: "300000" } }); // 유효
+    let apply = screen.getByText("이 변경 적용(재발 항목만)").closest("button") as HTMLButtonElement;
+    expect(apply.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("가정 월수입"), { target: { value: "500만" } }); // invalid
+    apply = screen.getByText("이 변경 적용(재발 항목만)").closest("button") as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+    fireEvent.click(apply);
+    expect(handle.applyCalls.length).toBe(0); // 오래된 유효 draft 값으로 적용 금지
+    expect(handle.view.container.textContent).toContain("오류");
+    // overflow
+    fireEvent.change(screen.getByLabelText("가정 월수입"), { target: { value: "99999999999999" } });
+    fireEvent.click(screen.getByText("이 변경 적용(재발 항목만)").closest("button") as HTMLButtonElement);
+    expect(handle.applyCalls.length).toBe(0);
+    // blank → 가정 없음(유효), 0 재입력 → 유효
+    fireEvent.change(screen.getByLabelText("가정 월수입"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("가정 월수입"), { target: { value: "0" } });
+    apply = screen.getByText("이 변경 적용(재발 항목만)").closest("button") as HTMLButtonElement;
+    expect(apply.disabled).toBe(false);
+    fireEvent.click(apply);
+    expect(handle.applyCalls).toHaveLength(1);
+    expect((handle.applyCalls[0] as { newIncome: number | null }).newIncome).toBe(0);
+  });
+
   test("수입 가정 적용 시 재발 패치만 전달(일회성 제외), 항목 미선택 추가 버튼 비활성", () => {
     const handle = harness();
     const addButton = screen.getByText("가정에 추가").closest("button") as HTMLButtonElement;
