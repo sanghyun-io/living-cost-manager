@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# GNU stat shim (only the `stat -c %s FILE` form used by the helper).
+if [ "${1:-}" = "-c" ] && [ "${2:-}" = "%s" ]; then
+  wc -c <"${3:?}" | tr -d ' '
+  exit 0
+fi
+echo "fake stat: unsupported form: $*" >&2
+exit 1

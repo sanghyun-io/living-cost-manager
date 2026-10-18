@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# GNU timeout shim: drop the duration and exec the command (tests never hang).
+shift
+exec "$@"

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# GNU sha256sum shim for macOS (BSD host has shasum).
+exec shasum -a 256 "$@"

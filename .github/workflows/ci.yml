@@ -41,6 +41,34 @@ name: CI (Mac Mini self-hosted)
 # pnpm은 서드파티 action 없이 corepack(Node 동봉) + 루트 packageManager
 # 필드(pnpm@11.1.3)로 활성화한다. Actions cache는 재현성과 저장소 캐시 잔존
 # 회피를 위해 사용하지 않는다.
+#
+# API stages (2026-10-19 확장, 계획 단계 — 아직 실런/프로덕션 적용 없음):
+#   - needs-api-detect: push 이벤트의 base..head compare(정확 SHA 바인딩)로
+#     apps/api·prisma·packages_shared·Docker 빌드입력 변경을 판정. 근거가
+#     없거나 잘리면 fail-closed로 needs_api=true(조용한 skip 금지).
+#   - api-image(needs_api일 때만): Mac Mini의 colima engine에서 exact SHA
+#     이미지를 빌드하고 synthetic 전용 DB(--internal 네트워크, 호스트 포트
+#     없음, 런타임 시크릿은 그 자리 생성·인쇄 안 함)로 health 정체성까지
+#     검증 후 `docker save <imageID>` 아카이브+메타데이터를 same-run
+#     아티팩트(retention 1일)로 올린다. OCI registry push는 미검증 자격로
+#     우회가 아니라 부재라서 쓰지 않는다(archive handoff). 아카이브/imageID
+#     digest는 OCI RepoDigest가 아니다(metadata note에 명시).
+#   - api-deploy(needs_api일 때만, production environment Reviewer 승인):
+#     같은 run 아티팩트 검증 → SHA-pinned host helper 설치 → preflight(CAS)
+#     → rollback 아카이브 ensure/reuse → 전송·load(해시 불일치 시 load 거부)
+#     → fresh pg_dump 백업(0600, ≤1GiB 가드, 오프호스트 사본은 GitHub
+#     아티팩트로 올리지 않음) → 격리 temp DB restore 리허설(즉시 drop) →
+#     승인된 단일 pending migration만 적용 → compose backend.image 단일
+#     라인 CAS 교체 → 헬스 정체성 → verify(테이블/카탈로그/기존 구조 불변
+#     지문) → 공개 health → opskv BACKEND_IMAGE CAS 등록. 실패 코드로
+#     정지하며 블라인드 재시도 없음; 재시도는 라이브 상태를 다시 분류한다.
+#   - deploy(FE)는 build-test 성공 AND (needs_api=false OR api-image·
+#     api-deploy 성공)일 때만 실행 — API 실패/미승인을 skip으로 위장하지
+#     않는다. API가 필요하면 FE는 항상 새 API 배포 "뒤에만" 배포된다.
+#   - SSH는 owner 계정의 기존 gamja-oci 설정(전용 known_hosts 파일 pinning,
+#     StrictHostKeyChecking 완화 없음)을 러너에서 그대로 사용; 개인키를
+#     GitHub·저장소·아티팩트에 복사하지 않고, 시크릿은 environment 승인
+#     이후에도 이 잡들에 노출되지 않는다(값 아님). packages:write 없음.
 
 on:
   push:
@@ -52,7 +80,15 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # cancel-in-progress was true until 2026-10-19. With the gated API stages
+  # added below, a queued push could previously CANCEL a run that was mid
+  # production migration — cancellation cannot interrupt a committed SQL
+  # transaction cleanly at the workflow level. The remote helper's CAS checks
+  # already halt a stale run against drifted production state, but the
+  # minimal safety fix is to serialize instead of cancel: later runs queue.
+  # This is a documented change, not a leak: pushes to main are Owner-paced
+  # and runs are short.
+  cancel-in-progress: false
 
 env:
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
@@ -100,6 +136,58 @@ jobs:
             exit 1
           fi
           echo "✓ SHA: ${{ github.sha }}"
+
+  # Classify whether this push can change the API. Evidence = the push event
+  # payload's own base..head SHAs (bounded and exact; never a mutable HEAD
+  # reference), compared through the GitHub API with the run token
+  # (contents: read only). Missing or truncated evidence fail-CLOSED to
+  # needs_api=true — a pure-web push that is misclassified merely costs a
+  # rebuild + an Owner-declinable gated deploy, while a skipped API change is
+  # the expensive direction. No checkout content is executed here beyond the
+  # pinned detection script at this exact SHA.
+  needs-api-detect:
+    name: Classify API impact (fail-closed)
+    needs: [preflight]
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      needs_api: ${{ steps.classify.outputs.needs_api }}
+      reason: ${{ steps.classify.outputs.reason }}
+    steps:
+      - name: Checkout exact event SHA (detection script only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+
+      - name: Setup Node (pinned exact 24.18.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+
+      - name: Compare base..head and classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.before }}"
+          HEAD="${{ github.sha }}"
+          say() { echo "$1" >> "$GITHUB_OUTPUT"; echo "needs-api-detect: $1"; }
+          if ! printf '%s' "$BASE" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$BASE" | grep -Eq '^0+$'; then
+            say "needs_api=true"; say "reason=no-base"; exit 0
+          fi
+          if ! gh api \
+               "repos/${{ github.repository }}/compare/${BASE}...${HEAD}" \
+               > needs-api-compare.json; then
+            say "needs_api=true"; say "reason=compare-unavailable"; exit 0
+          fi
+          node scripts/ci/api/paths.mjs detect \
+            --compare needs-api-compare.json --base "$BASE" --head "$HEAD" \
+            --output "$GITHUB_OUTPUT"
+          rm -f needs-api-compare.json
 
   build-test:
     name: Build + tests (ephemeral test Postgres)
@@ -170,6 +258,13 @@ jobs:
         # pre-cached on the host (skipped otherwise). No system paths, no
         # network, no registration.
 
+      - name: Run API pipeline behavioural tests (fixture trees + PATH shims)
+        working-directory: apps/web
+        run: pnpm exec vitest run --root ../../scripts/ci/api
+        # Same architecture as the runner kit: real bash/node logic against
+        # temp fixture trees; fake docker/ssh/curl/opskv shims; no engine,
+        # no network, no SSH, no production paths (see scripts/ci/api/tests).
+
       # verify:pricing·public-smoke·브라우저 스크립트는 운영자 로컬 검증으로 유지
       # (Playwright browser 바이너리/pwsh 의존 → CI 계정 홈에 다운로드하지 않는다;
       # §docs/ci-self-hosted-runner-20261016.md §3).
@@ -209,6 +304,232 @@ jobs:
         if: always()
         run: node scripts/ci/ephemeral-postgres.mjs stop || true
 
+  # ---- API image build + synthetic health test (Mac Mini engine ONLY) ----
+  # The OCI host stays runtime/deploy-only: no `docker build` on OCI as a CI
+  # bypass. This job touches ONLY its own resources on the shared colima
+  # engine (exact `lcm-ci-*` names keyed by the 40-hex SHA, removed by the
+  # always()-teardown) — the engine itself is never started, reconfigured,
+  # reset or pruned, and no other container is contacted. The synthetic boot
+  # uses a dedicated --internal Docker network (no host port published, no
+  # egress) with a throwaway database and per-run random secrets that are
+  # generated in-memory and never printed. Registry re-pull of the current
+  # production image is NOT established and no registry credentials exist in
+  # opskv, so promotion is delivered as a same-run artifact archive (docker
+  # save of the immutable image ID) instead of a push — with no new paid
+  # resource (public repo artifact storage, retention pinned to 1 day).
+  api-image:
+    name: Build + test + archive candidate API image
+    needs: [preflight, build-test, needs-api-detect]
+    if: needs.needs-api-detect.outputs.needs_api == 'true'
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Verify repository and ref
+        run: |
+          set -eu
+          if [ "${{ github.repository }}" != "sanghyun-io/living-cost-manager" ]; then
+            echo "error: wrong repository: ${{ github.repository }}" >&2; exit 1
+          fi
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "error: ref is not main: ${{ github.ref }}" >&2; exit 1
+          fi
+
+      - name: Checkout exact event SHA (no credentials persisted)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+
+      - name: Docker engine reachable (existing colima context; never (re)started here)
+        run: |
+          set -eu
+          command -v docker
+          docker version --format 'engine={{.Server.Version}} os={{.Server.Os}} arch={{.Server.Architecture}}'
+          # Fail closed if the context is not the arm64 Linux engine that
+          # matches the OCI aarch64 host (buildx default platform follows it).
+          docker version --format '{{.Server.Os}}/{{.Server.Architecture}}' | grep -qx linux/arm64
+
+      - name: Capacity budget (floor 15GiB + measured peak budget, never lowered)
+        run: node scripts/ci/api/image.mjs capacity
+
+      - name: Build exact-SHA candidate image (RELEASE_SHA label pinned, linux/arm64)
+        run: node scripts/ci/api/image.mjs build --sha "${{ github.sha }}"
+
+      - name: Synthetic health test (internal network, throwaway DB, no production reach)
+        run: node scripts/ci/api/image.mjs synthetic --sha "${{ github.sha }}"
+
+      - name: Tear down owned synthetic resources (always)
+        if: always()
+        run: node scripts/ci/api/image.mjs teardown --sha "${{ github.sha }}"
+
+      - name: Save immutable image ID + metadata (artifact digests are NOT OCI RepoDigests)
+        run: |
+          set -eu
+          mkdir -p dist-api
+          node scripts/ci/api/image.mjs archive --sha "${{ github.sha }}" \
+            --out dist-api/image.tar.gz --metadata dist-api/metadata.json
+
+      - name: Upload API image artifact (1-day retention, quota-bounded)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lcm-api-image-${{ github.sha }}
+          path: dist-api
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---- Gated API promotion: backup → rehearse → migrate → promote → verify ----
+  # Runs ONLY for needs_api pushes and ONLY after Owner approval of the
+  # `production` environment (required Reviewer + main-only policy unchanged).
+  # No GitHub secrets are used: the runner drives its existing owner SSH
+  # identity to the OCI host; the remote helper is byte-pinned by SHA256 from
+  # this checkout; every remote stage compares against pinned production
+  # identity (CAS) and halts with a stable code on drift — no blind retry
+  # (a later run RE-CLASSIFIES live state instead). The approved additive
+  # migration is applied only when the candidate image's pending inventory is
+  # exactly `20261018110000_workspace_planning_state`. Rollback (manual-only,
+  # see runbook) never drops the table or restores over new writes.
+  api-deploy:
+    name: Backup-rehearse-migrate-promote API (production gate)
+    needs: [preflight, build-test, needs-api-detect, api-image]
+    if: needs.needs-api-detect.outputs.needs_api == 'true'
+    runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    environment:
+      name: production
+      url: https://api.gamja.top/living-cost-manager/v1/health
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read   # read this run's artifact only (same-run scope)
+    steps:
+      - name: Verify repository, ref and actor
+        run: |
+          set -eu
+          if [ "${{ github.repository }}" != "sanghyun-io/living-cost-manager" ]; then
+            echo "error: wrong repository: ${{ github.repository }}" >&2; exit 1
+          fi
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "error: ref is not main: ${{ github.ref }}" >&2; exit 1
+          fi
+          if [ "${{ github.actor }}" != "sanghyun-io" ]; then
+            echo "error: actor is not Owner: ${{ github.actor }}" >&2; exit 1
+          fi
+          echo "✓ repository/ref/actor verified"
+
+      - name: Checkout exact event SHA (scripts + pinned helper; no build)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+
+      - name: Setup Node (pinned exact 24.18.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+
+      - name: Download this-run API image artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lcm-api-image-${{ github.sha }}
+          path: dist-api
+
+      - name: Verify archive hash + metadata binding before anything touches OCI
+        run: |
+          set -eu
+          node scripts/ci/api/image.mjs verify-archive \
+            --sha "${{ github.sha }}" \
+            --metadata dist-api/metadata.json \
+            --archive dist-api/image.tar.gz
+          # source↔image binding: the pinned planning SQL hash must match the
+          # file in THIS checkout (the archive's copy is re-checked remotely).
+          sha256sum prisma/migrations/20261018110000_workspace_planning_state/migration.sql |
+            awk -v want="$(node -e 'const m=require("./dist-api/metadata.json");process.stdout.write(m.migrationSqlSha256)')" \
+              'BEGIN{if($1!=want){print "metadata/sql drift";exit 1}}'
+
+      - name: Install SHA-pinned host helper (never executes unpinned bytes)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs install-helper \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Preflight (production identity CAS, capacity, timer inventory)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs preflight \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Ensure retained rollback archive of the current production image (reuse-if-valid)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs ensure-rollback \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Transfer + load image (digest-mismatch refuses docker load)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs send-archive \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --metadata dist-api/metadata.json --archive dist-api/image.tar.gz
+
+      - name: Fresh protected backup (pg_dump custom, 0600, size-guarded)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs backup \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Off-host verified copy (protected runner file — never an artifact)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs fetch-backup-copy \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --out-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup"
+
+      - name: Restore rehearsal (isolated temp database, dropped in the same op)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs rehearse \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Apply the single approved pending migration (halts on extras/failures)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs migrate \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Promote backend image only (single compose line, CAS, auto-revert on up-failure)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs promote \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Verify remote state (additive-only table delta, catalog, structure fingerprints)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs verify \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Verify public health identity through the gateway
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs verify-public --sha "${{ github.sha }}"
+
+      - name: Register promoted reference in the existing opskv key (CAS on version)
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs register-opskv \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --tmp-dir "$GITHUB_WORKSPACE/.lcm-opskv-tmp"
+
+      - name: Remove large transient files and off-host backup copy (always)
+        if: always()
+        run: |
+          set -eu
+          node scripts/ci/api/deploy.mjs cleanup-copy --out-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup" || true
+          rm -rf "$GITHUB_WORKSPACE/.lcm-opskv-tmp" "$GITHUB_WORKSPACE/dist-api"
+
   # Production Pages deploy — SAME run as the tested build. The artifact
   # (lcm-release-<sha>) uploaded by build-test is downloaded by this run's own
   # GITHUB_TOKEN (download-artifact's default scoping sees the current run),
@@ -223,6 +544,14 @@ jobs:
   # fix chosen is same-run integration, not a PAT. Same-run needs() also
   # enforces CI success for this exact SHA, replacing the old verify-ci gate.
   #
+  # FE deploy ordering gate (2026-10-19): when a push requires the API
+  # stage, the FE must deploy only AFTER a successful api-deploy — never
+  # before, and never masked as "skipped" when the API stage failed or was
+  # left unapproved. The result checks are explicit: build-test must be a
+  # real success, and the API pair must each be exactly 'success' whenever
+  # needs_api=true (pure-web pushes: both API jobs are skipped and the FE
+  # condition short-circuits on needs_api — no API rebuild per phase).
+  #
   # CF delivery scope (2026-10-18, staged — NOT yet narrowed): the two names
   # below resolve from the `production` environment secrets (2 delivered from
   # the opskv baselines /living-cost-manager/production/CLOUDFLARE_*, provider
@@ -235,7 +564,14 @@ jobs:
   # approval). Do not read this as narrowing completed.
   deploy:
     name: Deploy verified artifact to Cloudflare Pages
-    needs: [preflight, build-test]
+    needs: [preflight, build-test, needs-api-detect, api-image, api-deploy]
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      needs.build-test.result == 'success' &&
+      needs.needs-api-detect.result == 'success' &&
+      (needs.needs-api-detect.outputs.needs_api != 'true' ||
+       (needs.api-image.result == 'success' && needs.api-deploy.result == 'success'))
     runs-on: [self-hosted, macOS, ARM64, lcm-production]
     environment:
       name: production

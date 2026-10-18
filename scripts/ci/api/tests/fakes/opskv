@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Fake opskv: show returns canned JSON; set enforces version CAS and stores
+# the value read from --value-file (never argv).
+set -u
+S="${FAKE_HOST:?}/state"
+printf 'opskv %s\n' "$*" >>"$S/calls.log"
+sub="${1:-}"
+case "$sub" in
+  show) cat "$S/opskv_show.txt" ;;
+  set)
+    want=""; vf=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "--expected-version" ] && want="$a"
+      [ "$prev" = "--value-file" ] && vf="$a"
+      prev="$a"
+    done
+    cur="$(cat "$S/opskv_version.txt")"
+    if [ "$want" != "$cur" ]; then
+      echo "conflict: expected version $want, have $cur" >&2
+      exit 1
+    fi
+    v="$(cat "$vf")"
+    case "$v" in
+      *lcm-ci-api-*) printf '%s' "$v" >"$S/opskv_stored.txt"; printf '{"ok":true}\n' ;;
+      *) echo "unexpected value shape" >&2; exit 1 ;;
+    esac
+    echo $((cur+1)) >"$S/opskv_version.txt"
+    ;;
+  *) echo "fake opskv: $sub unsupported" >&2; exit 1 ;;
+esac

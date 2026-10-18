@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake df: available KiB from fixture state (defaults to a large value).
+avail=$(cat "${FAKE_HOST:?}/state/df_avail_k.txt" 2>/dev/null || echo 999999999)
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf 'fakefs 2000000000 %s %s 1%% /fake\n' $((2000000000-avail)) "$avail"

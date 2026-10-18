@@ -612,7 +612,11 @@ describe("workflow + plist specification-level guards", () => {
     expect(ci).not.toContain("needs: [verify-ci");
     expect(ci.split("\n").filter((l) => /^\s*workflow_dispatch:/.test(l))).toHaveLength(0);
     // deploy waits on this run's tests and gates behind the production env.
-    expect(ci).toContain("needs: [preflight, build-test]");
+    // (2026-10-19: the chain additionally serializes FE behind the gated API
+    // stages when a push is API-impacting — see scripts/ci/api spec/tests.)
+    expect(ci).toContain(
+      "needs: [preflight, build-test, needs-api-detect, api-image, api-deploy]",
+    );
     expect(deployJob).toContain("environment:");
     expect(deployJob).toContain("name: production");
     expect(deployJob).toContain("url: https://living-cost-manager.gamja.top");

@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Fake docker CLI for LCM API pipeline behaviour tests.
+# State: $FAKE_HOST/state/<files> (see tests/README.md). Prints no secret
+# values; bulk data only flows through the designed byte paths (dump→restore).
+set -u
+FH="${FAKE_HOST:?fake docker needs FAKE_HOST}"
+S="$FH/state"
+mkdir -p "$S"
+printf 'docker %s\n' "$*" >>"$S/calls.log"
+
+read_state() { [ -f "$S/$1" ] && cat "$S/$1" || echo ""; }
+has() { [ -f "$S/$1" ]; }
+getafter() { # value following a flag, from intact "$@"
+  local want="$1"; shift; local prev=""
+  for a in "$@"; do
+    if [ "$prev" = "$want" ]; then echo "$a"; return 0; fi
+    prev="$a"
+  done
+}
+getlast() { local a=("$@"); echo "${a[$((${#a[@]}-1))]}"; }
+
+CMD="${1:-}"; shift || true
+J="$*"
+
+case "$CMD" in
+  inspect) # docker inspect -f FMT CONTAINER
+    fmt=$(getafter "-f" "$@"); target=$(getlast "$@")
+    case "$fmt" in
+      *State.Running*) v=$(read_state container_running.txt); echo "${v:-true}" ;;
+      *.Image*) read_state container_image.txt ;;
+      *) exit 1 ;;
+    esac
+    ;;
+
+  image) # docker image inspect [-f FMT] TARGET
+    fmt=$(getafter "-f" "$@"); target=$(getlast "$@")
+    if [ -n "$fmt" ]; then
+      case "$fmt" in
+        *.Id*)
+          id=$(awk -F'\t' -v t="$target" '$1==t{print $2}' "$S/images.tsv" 2>/dev/null | head -1)
+          [ -n "$id" ] || exit 1; echo "$id" ;;
+        *.Size*) v=$(read_state image_size.txt); [ -n "$v" ] || v=660000000; echo "$v" ;;
+        *Labels*)
+          rv=$(awk -F'\t' -v t="$target" '$1==t{print $3}' "$S/images.tsv" 2>/dev/null | head -1)
+          [ -n "$rv" ] || exit 1; echo "$rv" ;;
+        *) exit 1 ;;
+      esac
+    else
+      if [[ "$target" != sha256:* ]] && [ -f "$S/image.json" ]; then
+        cat "$S/image.json"; exit 0
+      fi
+      grep -qF "$target" "$S/images.tsv" 2>/dev/null || { echo "Error: No such image: $target" >&2; exit 1; }
+      echo "{}"
+    fi
+    ;;
+
+  exec)
+    if [[ "$J" == *pg_dump* ]]; then
+      has dump_fail && { echo "pg_dump: error: aborted (injected)" >&2; exit 1; }
+      n=$(read_state dump_bytes.txt); n=${n:-90867}
+      printf 'SENTINEL_PGDUMP_ROW_8866\n'
+      rest=$((n-25)); [ "$rest" -lt 0 ] && rest=0
+      head -c "$rest" /dev/zero | tr '\0' 'x'
+      exit 0
+    fi
+    if [[ "$J" == *pg_restore* ]]; then
+      sql="$(cat)"
+      printf 'restored_stdin_bytes=%s\n' "$(printf '%s' "$sql" | wc -c | tr -d ' ')" >>"$S/restore_note.txt"
+      grep -q SENTINEL_PGDUMP_ROW_8866 <<<"$sql" || { echo "pg_restore: payload missing" >&2; exit 4; }
+      has restore_fail && { echo "pg_restore: error: injected failure" >&2; exit 1; }
+      exit 0
+    fi
+    if [[ "$J" == *"node -e"* ]]; then read_state health_local.txt; exit 0; fi
+    if [[ "$J" == *"pg_isready"* ]]; then exit 0; fi
+    if [[ "$J" == *psql* ]]; then
+      # -c form (inline SQL) vs -i heredoc form (SQL on stdin)
+      sql=""
+      case "$J" in
+        *-c\ *|*-Atc\ *) sql=$(getlast "$@");;
+        *) [ -t 0 ] || sql="$(cat)";;
+      esac
+      tmpdb=0
+      [[ "$J" == *lcm_rehearse* ]] && tmpdb=1
+      case "$sql" in
+        *"finished_at IS NOT NULL ORDER"*) cat "$S/applied.txt" ;;
+        *"finished_at IS NULL AND rolled_back_at IS NULL"*)
+          [ -f "$S/aborted.txt" ] && cat "$S/aborted.txt" ;;
+        *"CREATE DATABASE"*)
+          printf '%s\n' "$sql" >>"$S/createdb.log"
+          has fail_createdb && exit 1 ;;
+        *"DROP DATABASE"*)
+          printf '%s\n' "$sql" >>"$S/droppedb.log" ;;
+        *"information_schema.tables"*)
+          if [ "$tmpdb" = 1 ]; then read_state restore_tables.txt
+          else read_state tables.txt; fi ;;
+        *"FROM lcm._prisma_migrations;"*)
+          if [ "$tmpdb" = 1 ]; then read_state restore_migrows.txt
+          else read_state migrows.txt; fi ;;
+        *to_regclass*) read_state planning_present.txt ;;
+        *"md5(string_agg"*columns*) read_state cols_hash.txt ;;
+        *"md5(string_agg"*conname*) read_state cons_hash.txt ;;
+        *"count(*)=0 FROM"*) read_state planning_zero.txt ;;
+        *) echo "fake-docker: unmatched psql: $sql" >&2; exit 5 ;;
+      esac
+      exit 0
+    fi
+    echo "fake-docker: unmatched exec: $J" >&2; exit 6
+    ;;
+
+  run)
+    if [[ "$J" == *"migrate deploy"* ]]; then
+      ef=$(getafter "--env-file" "$@")
+      { [ -n "$ef" ] && [ -f "$ef" ]; } || { echo "env-file missing" >&2; exit 7; }
+      if has migrate_fail; then
+        echo "Error: Prisma migrate deploy failed (injected lock timeout)" >&2
+        exit 1
+      fi
+      grep -qx 20261018110000_workspace_planning_state "$S/applied.txt" || \
+        { { cat "$S/applied.txt"; echo 20261018110000_workspace_planning_state; } | sort >"$S/applied.txt.n"; mv "$S/applied.txt.n" "$S/applied.txt"; }
+      t=$(read_state tables.txt); echo $((t+1)) >"$S/tables.txt"
+      m=$(read_state migrows.txt); echo $((m+1)) >"$S/migrows.txt"
+      echo t >"$S/planning_present.txt"
+      echo t >"$S/planning_zero.txt"
+      echo "Applying migration 20261018110000_workspace_planning_state"
+      exit 0
+    fi
+    if [[ "$J" == *"sha256sum"* ]]; then
+      printf '%s  prisma/migrations/20261018110000_workspace_planning_state/migration.sql\n' \
+        "$(read_state image_sql_sha.txt)"
+      exit 0
+    fi
+    if [[ "$J" == *basename* ]]; then cat "$S/migration_dirs.txt"; exit 0; fi
+    echo "fake-docker: unmatched run: $J" >&2; exit 8
+    ;;
+
+  load)
+    has load_fail && { echo "load failed (injected)" >&2; exit 1; }
+    tag=$(read_state load_tag.txt)
+    [ -n "$tag" ] || { echo "no image staged" >&2; exit 1; }
+    if has load_id_form; then
+      id=$(awk -F'\t' -v t="$tag" '$1==t{print $2}' "$S/images.tsv" | head -1)
+      echo "Loaded image ID: $id"
+    else
+      echo "Loaded image: $tag"
+    fi
+    ;;
+
+  save)
+    has save_fail && { echo "docker save: error (injected)" >&2; exit 1; }
+    out=$(getafter "-o" "$@")
+    if [ -n "$out" ]; then
+      n=$(read_state archive_bytes.txt); n=${n:-1048576}
+      head -c "$n" /dev/zero >"$out"
+    else
+      n=$(read_state rollback_bytes.txt); n=${n:-262144}
+      head -c "$n" /dev/zero
+    fi
+    ;;
+
+  compose)
+    if [[ "$J" == *"up -d --no-deps backend"* ]]; then
+      has compose_up_fail && { echo "compose up failed (injected)" >&2; exit 1; }
+      f=$(getafter "-f" "$@")
+      ref=$(awk '
+        /^services:[[:space:]]*$/ {insvc=1; next}
+        /^[^[:space:]]/ {insvc=0}
+        insvc && /^  backend:[[:space:]]*$/ {inb=1; next}
+        inb && /^[[:space:]]{4,}/ { if ($1=="image:") { sub(/^[[:space:]]*image:[[:space:]]*/,""); print; exit } next }
+      ' "$f")
+      id=$(awk -F'\t' -v t="$ref" '$1==t{print $2}' "$S/images.tsv" 2>/dev/null | head -1)
+      [ -n "$id" ] || { echo "no such image $ref (injected)" >&2; exit 1; }
+      echo "$id" >"$S/container_image.txt"
+      echo "Recreated"
+      exit 0
+    fi
+    ;;
+
+  network|rm|tag|build|container) exit 0 ;;
+  *) echo "fake-docker: unmatched: $CMD" >&2; exit 9 ;;
+esac

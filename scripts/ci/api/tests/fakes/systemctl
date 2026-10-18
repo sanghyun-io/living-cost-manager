@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake systemctl: canned timer state.
+echo "$(cat "${FAKE_HOST:?}/state/timer_active.txt" 2>/dev/null || echo active)"

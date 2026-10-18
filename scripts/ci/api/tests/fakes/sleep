@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# sleep shim for tests (never wait in fixtures)
+exit 0
