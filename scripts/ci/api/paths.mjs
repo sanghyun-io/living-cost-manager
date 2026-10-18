@@ -18,37 +18,60 @@ import {
   SHA_RE,
 } from "./constants.mjs";
 
-export function classifyCompare(compare, { base, head }) {
+export function classifyCompare(compare, { base, head } = {}) {
   if (!SHA_RE.test(String(base)) || !SHA_RE.test(String(head)) ||
-      /^0+$/.test(String(base))) {
+      /^0+$/.test(String(base)) || /^0+$/.test(String(head))) {
     return { needsApi: true, reason: "no-base" };
   }
-  if (!compare || typeof compare !== "object") {
+  if (!compare || typeof compare !== "object" || Array.isArray(compare)) {
     return { needsApi: true, reason: "compare-unreadable" };
   }
-  if (compare.base_commit?.sha !== base || compare.compare_from_sha !== base ||
-      compare.compare_to_sha !== head) {
-    // The JSON must describe exactly base...head we asked for; anything else
-    // is unbounded evidence.
+  if (compare.base_commit?.sha !== base) {
     return { needsApi: true, reason: "compare-identity-mismatch" };
   }
   if (!Array.isArray(compare.files)) {
     return { needsApi: true, reason: "compare-files-missing" };
   }
-  let matched = null;
-  for (const f of compare.files) {
-    const p = String(f?.filename ?? "");
-    if (
-      API_IMPACTING_PREFIXES.some((pref) => p.startsWith(pref)) ||
-      API_IMPACTING_FILES.includes(p)
-    ) {
-      matched = p;
-      break;
-    }
+  // GitHub compare has NO compare_from_sha/compare_to_sha or total_count.
+  // Without pagination, commits are capped at 250 and files at 300. At either
+  // boundary we cannot prove completeness, even if every visible path is web.
+  if (compare.files.length >= 300) return { needsApi: true, reason: "compare-truncated" };
+  const { commits, total_commits: total, status } = compare;
+  if (!Array.isArray(commits) || !Number.isSafeInteger(total) || total < 0 ||
+      total >= 250 || commits.length !== total) {
+    return { needsApi: true, reason: "compare-commits-incomplete" };
   }
-  if (matched) return { needsApi: true, reason: "api-path", path: matched };
-  if (compare.total_count !== undefined && compare.total_count !== compare.files.length) {
-    return { needsApi: true, reason: "compare-truncated" };
+  if (commits.some(c => !SHA_RE.test(c?.sha ?? '') || /^0+$/.test(c.sha) || c.sha === base) ||
+      new Set(commits.map(c => c.sha)).size !== commits.length) {
+    return { needsApi: true, reason: "compare-identity-mismatch" };
+  }
+  if ((compare.behind_by !== undefined && compare.behind_by !== 0) ||
+      (compare.ahead_by !== undefined && compare.ahead_by !== total) ||
+      (compare.merge_base_commit !== undefined && compare.merge_base_commit?.sha !== base)) {
+    return { needsApi: true, reason: "compare-status-inconsistent" };
+  }
+  if (status === 'identical' && base === head && total === 0 && compare.files.length === 0) {
+    return { needsApi: false, reason: "web-only" };
+  }
+  // For an ahead comparison, a complete chronological commit list ending in
+  // the exact immutable event head positively binds the requested destination.
+  if (status !== 'ahead' || base === head || total === 0 || commits.at(-1)?.sha !== head) {
+    return { needsApi: true, reason: "compare-identity-mismatch" };
+  }
+  const validPath = p => typeof p === 'string' && p.length > 0 &&
+    !/[\x00-\x1f\x7f\\]/.test(p) && !p.split('/').some(s => s === '' || s === '.' || s === '..');
+  const apiPath = p => API_IMPACTING_PREFIXES.some(pref => p.startsWith(pref)) ||
+    API_IMPACTING_FILES.includes(p) || p.startsWith('scripts/ci/api/');
+  const statuses = new Set(['added','removed','modified','renamed','copied','changed','unchanged']);
+  for (const f of compare.files) {
+    if (!f || !validPath(f.filename) || !statuses.has(f.status) ||
+        (f.previous_filename !== undefined && !validPath(f.previous_filename)) ||
+        (['renamed','copied'].includes(f.status) && f.previous_filename === undefined)) {
+      return { needsApi: true, reason: "compare-file-malformed" };
+    }
+    for (const p of [f.filename, f.previous_filename].filter(p => p !== undefined)) {
+      if (apiPath(p)) return { needsApi: true, reason: "api-path", path: p };
+    }
   }
   return { needsApi: false, reason: "web-only" };
 }
@@ -63,7 +86,7 @@ export function classifyCompare(compare, { base, head }) {
 if (process.argv[2] === "detect") {
   const { appendFileSync } = await import("node:fs");
   const args = process.argv.slice(3);
-  const flag = (n) => args[args.indexOf(`--${n}`) + 1];
+  const flag = (n) => { const i = args.indexOf(`--${n}`); return i < 0 ? undefined : args[i + 1]; };
   const emit = (needsApi, reason) => {
     const out = flag("output");
     if (out) appendFileSync(out, `needs_api=${needsApi ? "true" : "false"}\nreason=${reason}\n`);

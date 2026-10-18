@@ -791,14 +791,14 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
 describe("needs-API detection", () => {
   const cmp = (files: string[], extra = {}) => ({
     base_commit: { sha: "a".repeat(40) },
-    compare_from_sha: "a".repeat(40),
-    compare_to_sha: "b".repeat(40),
-    total_count: files.length,
-    files: files.map((filename) => ({ filename })),
+    merge_base_commit: { sha: "a".repeat(40) },
+    status: 'ahead', ahead_by: 1, behind_by: 0, total_commits: 1,
+    commits: [{sha:'b'.repeat(40)}],
+    files: files.map((filename) => ({ filename, status:'modified' })),
     ...extra,
   });
   it("detects api/prisma/shared/docker-input paths", () => {
-    for (const f of ["apps/api/src/app.ts", "prisma/schema.prisma", "packages/shared/src/x.ts", "pnpm-lock.yaml"]) {
+    for (const f of ["apps/api/src/app.ts", "prisma/schema.prisma", "packages/shared/src/x.ts", "pnpm-lock.yaml", "scripts/ci/api/paths.mjs"]) {
       expect(classifyCompare(cmp([f]), { base: "a".repeat(40), head: "b".repeat(40) }).needsApi).toBe(true);
     }
   });
@@ -810,9 +810,9 @@ describe("needs-API detection", () => {
     expect(classifyCompare(cmp([]), { base: "0".repeat(40), head: "b".repeat(40) }).reason).toBe("no-base");
   });
   it("fail-closes on truncated or mismatched compare evidence", () => {
-    expect(classifyCompare(cmp(["apps/web/a.tsx"], { total_count: 999 }),
+    expect(classifyCompare(cmp(Array.from({length:300},(_,i)=>`apps/web/${i}.tsx`)),
       { base: "a".repeat(40), head: "b".repeat(40) }).needsApi).toBe(true);
-    expect(classifyCompare(cmp(["apps/web/a.tsx"], { compare_to_sha: "z".repeat(40) }),
+    expect(classifyCompare(cmp(["apps/web/a.tsx"], { commits:[{sha:'c'.repeat(40)}] }),
       { base: "a".repeat(40), head: "b".repeat(40) }).needsApi).toBe(true);
     expect(classifyCompare({} as never, { base: "a".repeat(40), head: "b".repeat(40) }).needsApi).toBe(true);
   });
@@ -872,6 +872,14 @@ describe("image.mjs guards (Mac Mini side)", () => {
 
 describe("workflow structure (spec-as-content)", () => {
   const yml = fs.readFileSync(path.join(REPO, ".github/workflows/ci.yml"), "utf8");
+  it('binds compare to the fixed repository/event SHAs and publishes the referenced step output',()=>{
+    expect(yml).toMatch(/name: Compare base\.\.head and classify\n\s+id: classify/);
+    expect(yml).toContain('repos/sanghyun-io/living-cost-manager/compare/${BASE}...${HEAD}');
+    expect(yml).toContain('BASE="${{ github.event.before }}"');
+    expect(yml).toContain('HEAD="${{ github.sha }}"');
+    expect(yml).toContain('--compare needs-api-compare.json --base "$BASE" --head "$HEAD"');
+    expect(yml).toContain('needs_api: ${{ steps.classify.outputs.needs_api }}');
+  });
   it("serializes production deploys (no cancel mid-migration)", () => {
     expect(yml).toMatch(/cancel-in-progress:\s*false/);
   });

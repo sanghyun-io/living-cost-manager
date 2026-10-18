@@ -169,6 +169,7 @@ jobs:
           node-version: 24.18.0
 
       - name: Compare base..head and classify
+        id: classify
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -179,8 +180,12 @@ jobs:
           if ! printf '%s' "$BASE" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$BASE" | grep -Eq '^0+$'; then
             say "needs_api=true"; say "reason=no-base"; exit 0
           fi
+          if ! printf '%s' "$HEAD" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$HEAD" | grep -Eq '^0+$'; then
+            say "needs_api=true"; say "reason=invalid-head"; exit 0
+          fi
+          trap 'rm -f needs-api-compare.json' EXIT
           if ! gh api \
-               "repos/${{ github.repository }}/compare/${BASE}...${HEAD}" \
+               "repos/sanghyun-io/living-cost-manager/compare/${BASE}...${HEAD}" \
                > needs-api-compare.json; then
             say "needs_api=true"; say "reason=compare-unavailable"; exit 0
           fi

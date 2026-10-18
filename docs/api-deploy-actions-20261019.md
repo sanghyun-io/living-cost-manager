@@ -335,3 +335,38 @@ current-image proof. No push, trigger, SSH mutation, production DB operation or
 real credential access occurred. Independent security re-review remains pending.
 All test-owned clusters/data/socket directories and fixture trees are removed in
 finally/afterEach; no shared image, volume, VM or other worktree was cleaned.
+
+## 9. Compare classifier P2 follow-up (local only)
+
+The prior classifier incorrectly required `compare_from_sha`/`compare_to_sha`,
+which GitHub compare REST does not supply. Invented fixture fields masked the
+problem: real web-only responses always selected the release-specific API job.
+New realistic REST-shape tests first reproduced five failures against a969.
+
+The fixed route uses the validated immutable push `before` and event SHA, not
+mutable refs. The response must bind `base_commit.sha` exactly to before, have
+consistent ahead/identical status and a complete, valid, unique commit list whose
+last SHA is the exact event head. `total_commits` must equal that list's size and
+remain **below 250**. Files must be present and **below 300**: absence of a
+nonexistent `total_count` is not evidence that a 300-file response is complete.
+Missing/malformed/error/truncated evidence remains `needs_api=true`. An exact
+identical comparison may skip only with equal before/head and empty lists.
+Both `filename` and `previous_filename` are checked; API→web renames and API
+deletions cannot silently skip API work. Pipeline helper sources under
+`scripts/ci/api/` themselves are API-impacting. The workflow now also declares
+the missing `id: classify`, so its existing job output references resolve.
+
+Verification: **131 API tests** (the prior 72 plus 59 additional cases), runner
+kit **48/48**, Python restore/metadata proof **10/10**, clean-build proof **5/5**;
+Node syntax, Ruby YAML parse and diff checks. Fixtures use REST fields only,
+including CLI consumption of unchanged JSON, exact SHA mismatches, 249/250
+commit and 299/300 file boundaries, rename/deletion and malformed/error inputs.
+No live compare fetch was necessary; these are explicitly synthetic source
+metadata fixtures, not fabricated claims of a GitHub response being fetched.
+
+The fixed OLD-image production CAS guard is deliberately unchanged. This is a
+first-release pipeline: a later API upgrade needs a separately verified rebaseline,
+not guard removal. Pure web pushes can skip API only with complete positive
+evidence; the full public99→current source range still includes API foundation
+changes and must select API. Capacity gates/floors remain unchanged and blocked;
+no image build, push, workflow trigger or production application occurred here.
