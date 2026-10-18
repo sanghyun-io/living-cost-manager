@@ -38,6 +38,7 @@ import { usePlanningData } from './lib/usePlanningData';
 import type { PlanningDataApi } from './lib/usePlanningData';
 import type { PlanningImportAdapter } from './lib/planningStorage';
 import { WeeklyBudgetPanel } from './components/WeeklyBudgetPanel';
+import { ReservePanel } from './components/ReservePanel';
 import { combinePlanningStorageState, getHeaderStorageView } from './lib/syncStatus';
 import { createFocusIntentController, type FocusDestination, type FocusIntentHandler } from './lib/focusIntent';
 import { buildHomePlan } from './lib/homePlan';
@@ -301,6 +302,15 @@ export default function Home() {
           conflict={planning.conflict}
           saveError={planning.saveError}
           actions={planning}
+        />
+      ) : null}
+      {planning.loaded ? (
+        <ReservePanel
+          planning={planning.data}
+          fixedCosts={budget.fixedCosts}
+          asOf={referenceInstant}
+          canEdit={planning.canEdit}
+          actions={{ editReserve: planning.editReserve, deleteReserve: planning.deleteReserve, linkReserve: planning.linkReserve }}
         />
       ) : null}
       {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}

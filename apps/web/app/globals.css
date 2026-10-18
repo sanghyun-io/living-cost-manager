@@ -848,6 +848,10 @@ body {
 .weekly-budget-basis, .weekly-budget-storage { display: block; margin-top: 8px; }
 .reserve-panel { padding: 16px 0 8px; border-top: 1px solid var(--line); }
 .reserve-panel-row { border-bottom: 1px solid var(--line); padding: 10px 0; display: grid; gap: 6px; }
+.reserve-row-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; justify-content: space-between; }
+.reserve-row-facts { display: flex; gap: 12px; flex-wrap: wrap; }
+.reserve-row-edit { display: grid; gap: 6px; margin-top: 4px; }
+.reserve-row-edit-line { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
 .reserve-progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .reserve-progress-bar { height: 100%; background: var(--mantine-color-teal-6, #167761); }
 .month-review-panel { padding: 16px 0 8px; border-top: 1px solid var(--line); }
