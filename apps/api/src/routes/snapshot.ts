@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { requireWorkspaceRole } from "../services/membership.js";
+import { PlanningStorageUnavailableError } from "../services/planning-storage.js";
 import {
   getSnapshotHistory,
   getWorkspaceSnapshot,
@@ -107,6 +108,9 @@ export async function snapshotRoutes(app: FastifyInstance) {
       try {
         return await replaceWorkspaceSnapshot(app.prisma, parsedBody.data);
       } catch (error) {
+        if (error instanceof PlanningStorageUnavailableError) {
+          throw app.httpErrors.serviceUnavailable("Planning unavailable; keep local financial data");
+        }
         if (isSnapshotVersionConflictError(error)) {
           // 동시 편집 충돌: 클라이언트가 보낸 syncVersion 이 서버보다 뒤처짐.
           // 409 + 현재 버전을 실어 클라이언트가 최신을 다시 받아가게 한다.

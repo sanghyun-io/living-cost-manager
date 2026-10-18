@@ -8,8 +8,10 @@ export const planningDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine
 const timestamp = z.iso.datetime({ offset: true });
 const amount = z.number().int().min(0).max(MAX_INT).nullable();
 const id = z.string().trim().min(1).max(200);
+// A full inclusive seven-day period must fit the supported four-digit year range.
+const planningWeekStartSchema = planningDateSchema.refine(value => value <= "9999-12-25", "Week end exceeds supported calendar range");
 export const planningWeekSchema = z.object({
-  weekStart: planningDateSchema,
+  weekStart: planningWeekStartSchema,
   budgetAmount: amount,
   spentAmount: amount,
   recordedAt: timestamp.nullable()
@@ -63,7 +65,7 @@ export function createDefaultWorkspacePlanningData(): WorkspacePlanningData {
 }
 /** Inclusive calendar period; UTC arithmetic avoids DST/local timezone shifts. */
 export function planningWeekEnd(weekStart: string): string {
-  const valid = planningDateSchema.parse(weekStart);
+  const valid = planningWeekStartSchema.parse(weekStart);
   const date = new Date(`${valid}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + 6);
   return planningDateSchema.parse(date.toISOString().slice(0, 10));

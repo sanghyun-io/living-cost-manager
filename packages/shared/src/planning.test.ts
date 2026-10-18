@@ -29,6 +29,18 @@ test("UTC week boundaries handle leap days, year changes and explicit ISO weekda
   expect(planningWeekEnd("2026-12-27")).toBe("2027-01-02");
   expect(workspacePlanningDataSchema.safeParse({ ...createDefaultWorkspacePlanningData(), weekStartDay: 1, weeks: [week] }).success).toBe(false);
 });
+test("accepted week starts have a four-digit-year end; reserve due dates keep their full date range", () => {
+  const data = createDefaultWorkspacePlanningData();
+  expect(workspacePlanningDataSchema.parse({ ...data, weeks: [{ ...week, weekStart: "9999-12-20" }] }).weeks[0]?.weekStart).toBe("9999-12-20");
+  expect(planningWeekEnd("9999-12-20")).toBe("9999-12-26");
+  expect(workspacePlanningDataSchema.parse({ ...data, weekStartDay: 6, weeks: [{ ...week, weekStart: "9999-12-25" }] }).weeks[0]?.weekStart).toBe("9999-12-25");
+  expect(planningWeekEnd("9999-12-25")).toBe("9999-12-31");
+  for (const weekStart of ["9999-12-26", "9999-12-27", "9999-12-31"]) {
+    expect(() => planningWeekEnd(weekStart)).toThrow("Week end exceeds supported calendar range");
+    expect(workspacePlanningDataSchema.safeParse({ ...data, weekStartDay: new Date(`${weekStart}T00:00:00Z`).getUTCDay() || 7, weeks: [{ ...week, weekStart }] }).success).toBe(false);
+  }
+  expect(workspacePlanningDataSchema.parse({ ...data, reserves: [{ ...reserve, targetDueDate: "9999-12-31" }] }).reserves[0]?.targetDueDate).toBe("9999-12-31");
+});
 test("strict version, nested fields, uniqueness, timestamps, bounds and actual pairing", () => {
   const data = { ...createDefaultWorkspacePlanningData(), weekStartDay: 7 };
   const invalid = [

@@ -133,6 +133,33 @@ test("corrupt/future stored planning fails closed without overwriting or leaking
   }
   expect(await prisma.backupSnapshot.count({ where: { workspaceId: f.workspace.id } })).toBe(0);
 });
+test("planning PUT rejects an overflowing week even when it matches the Monday setting", async () => {
+  const f = await fixture();
+  const input = payload();
+  input.data.weekStartDay = 1;
+  input.data.weeks[0]!.weekStart = "9999-12-27";
+  const response = await app.inject({ method: "PUT", url: f.url, headers: f.headers, payload: input });
+  expect(response.statusCode).toBe(400);
+  expect(response.json().message).toBe("Invalid planning request");
+  expect(await prisma.workspacePlanningState.count({ where: { workspaceId: f.workspace.id } })).toBe(0);
+  expect(await prisma.backupSnapshot.count({ where: { workspaceId: f.workspace.id } })).toBe(0);
+});
+test.each([{}, { schemaVersion: 999, sensitive: "synthetic-private-sentinel" }])("snapshot PUT maps only corrupt planning storage to safe 503 and rolls back every financial row: %j", async corrupt => {
+  const f = await fixture();
+  await prisma.category.create({ data: { workspaceId: f.workspace.id, id: "other", label: "Synthetic" } });
+  await prisma.fixedCost.create({ data: { workspaceId: f.workspace.id, id: "cost", categoryId: "other", name: "Synthetic cost", paymentMethodId: "bank-transfer", amount: 10000, billingDay: 10 } });
+  expect((await app.inject({ method: "PUT", url: f.url, headers: f.headers, payload: payload() })).statusCode).toBe(200);
+  await prisma.workspacePlanningState.update({ where: { workspaceId: f.workspace.id }, data: { payloadJson: corrupt } });
+  const include = { categories: true, cards: true, fixedCosts: true, planningState: true, backups: true } as const;
+  const before = await prisma.workspace.findUniqueOrThrow({ where: { id: f.workspace.id }, include });
+  const url = `/workspaces/${f.workspace.id}/snapshot`;
+  const snapshot = (await app.inject({ method: "GET", url, headers: f.headers })).json();
+  const response = await app.inject({ method: "PUT", url, headers: f.headers, payload: { ...snapshot, monthlyIncome: 123, categories: [], cards: [], fixedCosts: [] } });
+  expect(response.statusCode).toBe(503);
+  expect(response.json().message).toBe("Planning unavailable; keep local financial data");
+  expect(response.body).not.toMatch(/sentinel|schemaVersion|payloadJson|Prisma|SQL|WorkspacePlanningState/);
+  expect(await prisma.workspace.findUniqueOrThrow({ where: { id: f.workspace.id }, include })).toEqual(before);
+});
 test("archive failure rolls back state, maps safe errors; unrelated unique error is not mislabeled conflict", async () => {
   const f = await fixture();
   // Real SQL failure in backup creation (transaction client interceptor).

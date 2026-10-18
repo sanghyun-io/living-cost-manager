@@ -38,8 +38,11 @@ Shared exports in `packages/shared/src/planning.ts`:
   `weekStart` must match it. Changing this setting with history requires explicit
   reconciliation; no automatic history remapping/deletion.
 - `weeks` (max 520): `{weekStart, budgetAmount, spentAmount, recordedAt}`.
-  Dates are real four-digit-year `YYYY-MM-DD`. End date is inclusive start+6 UTC
-  calendar days. Amounts: null or integer KRW 0..2147483647. Null actual means
+  Dates are real four-digit-year `YYYY-MM-DD`; week starts must be no later than
+  `9999-12-25`, so their inclusive start+6 UTC calendar-day end stays within that
+  range. `planningWeekEnd` checks the same start bound before arithmetic. Reserve
+  due dates retain the full date range through `9999-12-31`.
+  Amounts: null or integer KRW 0..2147483647. Null actual means
   **unknown**, not zero; zero actual requires an ISO timestamp. `recordedAt` must
   be null iff `spentAmount` is null. Budget zero is valid. Unique starts required.
 - `reserves` (max 1000): `{id, costId, savedAmount, targetAmount, targetDueDate,
@@ -78,7 +81,7 @@ membership metadata or credentials are copied into shared archives. Backup failu
 rolls back the complete write. Existing archive retention is unchanged; growth must
 be capacity-monitored, never silently pruned by this foundation.
 
-## Production DB approval gate — NOT EXECUTED
+## Production DB approval gate — CONDITIONALLY APPROVED, NOT EXECUTED BY THIS TASK
 
 SQL: `prisma/migrations/20261018110000_workspace_planning_state/migration.sql`.
 It wraps CREATE TABLE + Workspace FK in one transaction, with `lock_timeout=5s`
@@ -86,8 +89,11 @@ and `statement_timeout=30s`. Workspace FK acquisition can block writers; this is
 not a zero-lock/zero-downtime guarantee. On lock failure stop and inspect migration
 state/locks; do not loop retries or mark a failed migration applied without proof.
 
-Main must request **one explicit Owner approval** for the exact reviewed SQL and
-production target after independent review and the local rehearsal evidence:
+On 2026-10-19 Owner explicitly approved this reviewed single additive migration and
+API promotion through GitHub Actions, conditional on fresh backup/restore and the
+reviewed gates. **Do not request the same-scope approval again.** Approval is not
+evidence of execution or fulfilled gates; this backend subagent performs no
+production writes/infrastructure changes. The approved boundaries remain:
 
 > Approve only the additive WorkspacePlanningState migration on the confirmed LCM
 > production database through the reviewed GitHub Actions + Mac Mini pipeline,
@@ -113,7 +119,13 @@ the actual generated `260c8d4` client remains writable beside the new table and
 cannot clear planning during cost replacement. This does **not** verify production
 capacity, privileges, backup freshness, lock contention, or remote image re-pull.
 
-## Actions API deployment feasibility — plan only
+## Actions API deployment feasibility — historical foundation plan
+
+The following records the original foundation assessment. A separate CI implementer
+subsequently committed `93bd2fd1e267fbe630a6c95a6de14098d0f4afcd`; that pipeline
+change is outside this backend follow-up's edit/review scope. Any earlier image or
+artifact proof for that SHA does not establish identity for the newer backend fixes.
+Main must use freshly built/tested exact-SHA artifacts and recheck conditional gates.
 
 Read-only source evidence: `.github/workflows/ci.yml`, `apps/api/Dockerfile`,
 `DEPLOYMENT_MIGRATION.md`, and the gamja-ops runner worktree `assets/services.yaml`
@@ -143,9 +155,13 @@ No workflow, SSH, registry or provider call was made by this backend task.
 
 ## Local verification
 
-- Shared: 209 passing (197 existing + 12 new).
-- API: 475 passing (461 existing + 14 new, including two migration rehearsals).
-- Shared/API TypeScript builds pass. No dependency installs or new dependencies.
+- Shared: 210 passing (197 existing + 13 new), rerun on the edge-fix follow-up.
+- Last full API regression: 475 passing on the Monday-default revision (including
+  two migration rehearsals). Current edge-fix focused API regression: 47 passing
+  across planning, snapshot and billing-unit tests, including three new cases.
+  The full updated API suite has not been rerun locally; it remains for fresh CI.
+- Shared/API TypeScript builds passed on the Monday-default revision; no new build
+  was run for the capacity-constrained edge follow-up. No dependency installs or new dependencies.
 - API tests use only a dedicated Unix-socket peer-auth ephemeral PostgreSQL cluster,
   TCP disabled, synthetic data. No production DB or real user browser touched.
 - Independent read-only reviewer/security review remains the main session's duty;
@@ -180,3 +196,21 @@ and both TypeScript builds were rerun successfully. The follow-up's owned peer-a
 test cluster `p1d7` was stopped and its data/socket removed; 48 KiB of evidence is
 retained there. Free space before/after was 25 GiB, within the same approved budget.
 No migration, archive/locking policy, CI, frontend or production change was made.
+
+2026-10-19 edge follow-up: bounded weekly end dates and a typed backend-only
+`PlanningStorageUnavailableError` now make corrupt/future planning return the same
+safe 503 during budget snapshot PUT, while the transaction rolls back all budget,
+planning and archive rows. Only this error is mapped; unrelated authorization,
+version-conflict and database errors keep their existing behavior. Tests compare
+the entire pre/post workspace financial graph, including timestamps and archives.
+
+Capacity precheck measured 17,619,860 KiB available (~16.80 GiB), exceeding the
+focused 0.2 GiB peak ×1.2 + 1 GiB recovery reserve + 15 GiB floor (=16.24 GiB).
+Only one owned peer-auth socket-only test cluster `p5b1` was started. The focused
+test run used a task-owned temporary Vitest alias to the shared **source** exports,
+avoiding a dist build and ensuring the new boundary validation was exercised.
+The cluster was stopped and data/socket removed after tests; the temporary test
+configuration was removed too. Remaining logs occupy 20 KiB. Final free space was
+17,617,860 KiB (~16.80 GiB), not an exact task-attributed delta. No image, dependency, generator, full build,
+production operation or other actor's files/cache were touched. Independent
+review/security recheck and fresh exact-SHA CI remain Main's next steps.
