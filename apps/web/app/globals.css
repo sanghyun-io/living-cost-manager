@@ -861,6 +861,8 @@ body {
 .management-panel[hidden] { display: none; }
 .forecast-help { position: relative; font-size: 12px; color: var(--muted); }
 .forecast-help summary { cursor: pointer; padding-block: 6px; }
+.payday-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16ch), 1fr)); gap: 8px 16px; margin: 8px 0; padding: 8px 0; border-top: 1px dashed var(--line); }
+.payday-group { display: grid; gap: 2px; }
 .forecast-help[open] > p { position: absolute; z-index: 5; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px; width: 280px; right: 0; color: var(--text); }
 .quiet-home .workspace { gap: 16px; }
 .quiet-home .cost-list { padding: 16px 20px; }

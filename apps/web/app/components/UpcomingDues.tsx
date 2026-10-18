@@ -4,6 +4,8 @@ import { getUpcomingDues } from "@living-cost-manager/shared";
 import type { FixedCost } from "../lib/budget";
 import { buildHomePlan, type HomePlanSummary } from "../lib/homePlan";
 import { formatWon } from "../lib/formatting";
+import { buildPaydayTimeline } from "../lib/paydayTimeline";
+import { formatCivilDateShort } from "../lib/planningTime";
 
 interface UpcomingDuesProps {
   fixedCosts: FixedCost[];
@@ -12,6 +14,8 @@ interface UpcomingDuesProps {
   plan?: HomePlanSummary;
   /** 항목 관리(접힌 섹션 포함)를 먼저 펼친 뒤 해당 행의 이름 입력으로 포커스한다. */
   onRevealItem?: (id: string) => void;
+  /** 계획의 급여일(1..31). 있으면 기존 목록을 급여 전후로 나눠 표시(새 패널 아님). */
+  paydayDay?: number | null;
 }
 
 const UPCOMING_MAX_DEFAULT = 3;
@@ -31,7 +35,7 @@ function formatDueDate(dueDate: Date): string {
 /** 첫 화면의 유일한 납부 예정 정본: 30일 예정 합계(확인된 일정만) + 일정 미확인
  * 건수 + 가까운 납부 전체 목록(전체 보기 포함). InsightsPanel/MetricGrid 는
  * 이 수식을 복제하지 않는다. */
-export function UpcomingDues({ fixedCosts, asOf, plan, onRevealItem }: UpcomingDuesProps) {
+export function UpcomingDues({ fixedCosts, asOf, plan, onRevealItem, paydayDay = null }: UpcomingDuesProps) {
   const overview = useMemo(
     () => plan ?? buildHomePlan(fixedCosts, 0, asOf ?? new Date()),
     [plan, fixedCosts, asOf]
@@ -40,6 +44,13 @@ export function UpcomingDues({ fixedCosts, asOf, plan, onRevealItem }: UpcomingD
     const [year, month, day] = overview.window.fromDate.split("-").map(Number);
     return getUpcomingDues(fixedCosts, new Date(year, month - 1, day), UPCOMING_WINDOW_DAYS);
   }, [fixedCosts, overview]);
+  // 급여일 계획이 있을 때만: 기존 목록 위에 급여 전후 분할 요약(발생 전체 열거 기준).
+  const timeline = useMemo(
+    () => (paydayDay === null || paydayDay < 1 || paydayDay > 31
+      ? null
+      : buildPaydayTimeline(fixedCosts, overview.window.fromDate, overview.window.untilDateExclusive, paydayDay)),
+    [fixedCosts, overview, paydayDay]
+  );
 
   const [showAll, setShowAll] = useState(false);
   const displayed = showAll ? upcoming : upcoming.slice(0, UPCOMING_MAX_DEFAULT);
@@ -72,6 +83,36 @@ export function UpcomingDues({ fixedCosts, asOf, plan, onRevealItem }: UpcomingD
           확인된 일정만 합산합니다. 일정 미확인 항목은 제외됩니다. 월 환산액은 비교용입니다.
         </Text>
       </details>
+
+      {timeline ? (
+        <div className="payday-groups" role="group" aria-label="급여 주기별 예정 청구">
+          <Text size="xs" c="dimmed">
+            급여 주기 분할 · 확인된 일정만({timeline.paydayDate ? `다음 급여일 ${formatCivilDateShort(timeline.paydayDate)}` : "표시 범위 내 급여일 없음"})
+          </Text>
+          <div className="payday-group">
+            <Text size="xs" fw={600}>급여 전</Text>
+            <Text size="xs" c="dimmed">{formatCivilDateShort(timeline.window.from)}~{timeline.paydayDate ? formatCivilDateShort(timeline.paydayDate) : formatCivilDateShort(timeline.window.untilExclusive)}</Text>
+            <Text size="sm" className="tnum" fw={600}>
+              {timeline.before.total === null
+                ? (timeline.before.occurrenceCount === 0 && timeline.unknownCount > 0 ? "확인 일정 없음(미확인 별도)" : "₩0")
+                : formatWon(timeline.before.total)}
+            </Text>
+            <Text size="xs" c="dimmed">{timeline.before.occurrenceCount}회 청구</Text>
+          </div>
+          {timeline.after.occurrenceCount > 0 ? (
+            <div className="payday-group">
+              <Text size="xs" fw={600}>급여 후</Text>
+              <Text size="xs" c="dimmed">{timeline.paydayDate ? formatCivilDateShort(timeline.paydayDate) : "—"}~{formatCivilDateShort(timeline.window.untilExclusive)}</Text>
+              <Text size="sm" className="tnum" fw={600}>
+                {timeline.after.total === null ? "확인 일정 없음" : formatWon(timeline.after.total)}
+              </Text>
+              <Text size="xs" c="dimmed">{timeline.after.occurrenceCount}회 청구</Text>
+            </div>
+          ) : null}
+          {timeline.unknownCount > 0 ? <Text size="xs" c="dimmed">일정 미확인 {timeline.unknownCount}개는 위 합계에 포함되지 않았습니다.</Text> : null}
+          <Text size="xs" c="dimmed">급여일까지 버틸 수 있는지의 답이 아니라, 확인된 납부의 기간 분할입니다. 실제 입금 보장·잔액 예측이 아닙니다.</Text>
+        </div>
+      ) : null}
 
       {upcoming.length === 0 && overview.unknownScheduleCount === 0 ? (
         <Text size="xs" c="dimmed" py="sm">

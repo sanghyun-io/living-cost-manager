@@ -279,6 +279,7 @@ export default function Home() {
           asOf={referenceInstant}
           plan={homePlan}
           onRevealItem={budget.revealItem}
+          paydayDay={planning.loaded ? planning.data.paydayDay : null}
         />
         {budget.fixedCosts.length === 0 && canEdit ? (
           <div className="home-onboarding">
