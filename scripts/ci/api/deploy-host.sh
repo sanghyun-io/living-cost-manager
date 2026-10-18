@@ -55,6 +55,9 @@ PENDING_SQL_SHA=229a1fa43233f74fef9110bf4d56307efbee93da1f8baeac3a3347588d1feb35
 TABLES_BEFORE=24
 MIG_ROWS_BEFORE=12
 APPLIED_BEFORE=11
+# P1 fix: trusted root-owned staging directory for temporary sensitive files
+# (dumps, rollback archives). mktemp-ONLY, exclusive open, no predictable paths.
+STAGING_DIR="/var/lib/gamja-lcm-ci"
 # Pinned known-applied set BEFORE promotion (names only; measured read-only
 # 2026-10-19: exactly these 11 finished rows + 12 total rows incl. one
 # pre-historical failed-marker of the initial migration which Prisma treats
@@ -69,9 +72,82 @@ NEW_REF_PREFIX=lcm-ci-api-
 status() { printf 'op=%s %s\n' "$OP" "$*"; }
 halt() { status "result=halt code=$1 detail=$2"; exit "$1"; }
 
+# ---------------- P1: secure staging directory (no predictable /tmp) ----------
+# Creates a root-owned 0700 staging directory under a ROOT-owned non-writable
+# ancestor. Uses mktemp -d with exclusive creation. All sensitive temp files
+# (dumps, rollback archives) are created here, never under /tmp.
+# Canonical Linux path: /var/lib/gamja-lcm-ci (root-owned, no group/other write).
+# Test mode: if LCM_STAGING_DIR is set, use it instead (for fixture tests).
+STAGING_DIR="${LCM_STAGING_DIR:-/var/lib/gamja-lcm-ci}"
+if [ -n "${LCM_STAGING_DIR:-}" ]; then
+  [ "${LCM_HELPER_ALLOW_NONROOT_TEST:-0}" = 1 ] && [ -n "${LCM_ROOT:-}" ] && [ "$LCM_ROOT" != /opt/livingcost ] || exit 20
+fi
+ensure_staging_dir() {
+  # Test mode: skip validation if using custom staging dir
+  if [ -n "${LCM_STAGING_DIR:-}" ]; then
+    mkdir -p "$STAGING_DIR" 2>>"${LOG:-/dev/null}" || halt 25 "staging-mkdir-failed"
+    chmod 700 "$STAGING_DIR" 2>>"${LOG:-/dev/null}" || halt 25 "staging-chmod-failed"
+    return
+  fi
+
+  # Production mode: validate the ancestor chain
+  local ancestor="/var/lib"
+  if [ ! -d "$ancestor" ]; then halt 25 "staging-ancestor-missing"; fi
+  local owner_uid
+  owner_uid=$(stat -c %u "$ancestor" 2>/dev/null || echo -1)
+  [ "$owner_uid" = "0" ] || halt 25 "staging-ancestor-not-root-owned"
+  local mode
+  mode=$(stat -c %a "$ancestor" 2>/dev/null || echo 000)
+  # Reject if group/other have write (0777 mask: no w for group/other)
+  if [ $(( 0$mode & 0022 )) -ne 0 ]; then halt 25 "staging-ancestor-world-writable"; fi
+  # Create the staging dir if missing (root-owned 0700)
+  if [ ! -d "$STAGING_DIR" ]; then
+    mkdir -p "$STAGING_DIR" 2>>"${LOG:-/dev/null}" || halt 25 "staging-mkdir-failed"
+    chmod 700 "$STAGING_DIR" || halt 25 "staging-chmod-failed"
+    chown root:root "$STAGING_DIR" 2>>"${LOG:-/dev/null}" || halt 25 "staging-chown-failed"
+  fi
+  # Verify the staging dir itself: root-owned, 0700, no symlinks
+  if [ -L "$STAGING_DIR" ]; then halt 25 "staging-is-symlink"; fi
+  owner_uid=$(stat -c %u "$STAGING_DIR" 2>/dev/null || echo -1)
+  [ "$owner_uid" = "0" ] || halt 25 "staging-not-root-owned"
+  mode=$(stat -c %a "$STAGING_DIR" 2>/dev/null || echo 000)
+  [ "$mode" = "700" ] || halt 25 "staging-mode-not-700"
+}
+# mktemp under staging dir with exclusive creation (O_EXCL via mktemp -d/-p).
+# Returns the created path. Caller must clean up on failure.
+secure_mktemp() {
+  local template="${1:-tmp.XXXXXXXXXX}"
+  ensure_staging_dir
+  mktemp -p "$STAGING_DIR" "$template" 2>>"${LOG:-/dev/null}" || halt 25 "mktemp-failed"
+}
+
+# ---------------- P2: DB connection identity verification ---------------------
+# Before ANY SQL mutation, verify the actual connection identity matches the
+# expected backup target metadata. Uses the ACTUAL DATABASE_URL from the
+# candidate env (same connection used by migrate), not a fixed container query.
+# Compares: database name, schema, server address, port.
+# Protected process: no URL/password/argv/log exposure.
+verify_db_identity() {
+  local candidate
+  candidate=$(cat "$RECEIPTS/candidate-image.txt" 2>>"$LOG") || halt 23 "candidate-image-not-loaded"
+  [[ "$candidate" =~ ^sha256:[a-f0-9]{64}$ ]] || halt 23 "candidate-image-malformed"
+  [ "$(docker image inspect -f '{{.Id}}' "$NEW_TAG" 2>>"$LOG")" = "$candidate" ] || halt 23 "candidate-image-drift"
+  [ -f "$RECEIPTS/execution.env" ] && [ ! -L "$RECEIPTS/execution.env" ] || halt 25 "sealed-env-missing"
+  local expected_ip actual
+  expected_ip=$(docker inspect -f '{{with index .NetworkSettings.Networks "gamja-data_default"}}{{.IPAddress}}{{end}}' "$PG_CONTAINER" 2>>"$LOG") || halt 25 "db-target-inspect"
+  [[ "$expected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || halt 25 "db-target-address"
+  # Docker --env-file semantics are used by BOTH probe and migration. No grep,
+  # URL in argv, credential digest, default-schema guess or fixed-PG proof.
+  actual=$(docker run --rm --env-file "$RECEIPTS/execution.env" --network "$BACKEND_DB_NETWORK" "$NEW_TAG" node -e '
+const {PrismaClient}=require("@prisma/client"); const p=new PrismaClient();
+p.$queryRawUnsafe("SELECT current_database() db,current_schema() schema,inet_server_addr()::text addr,inet_server_port() port").then(r=>{const x=r[0];process.stdout.write([x.db,x.schema,x.addr,x.port].join("|"))}).catch(()=>{process.exitCode=1}).finally(()=>p.$disconnect());
+' 2>>"$LOG") || halt 25 "db-identity-probe"
+  [ "$actual" = "$DB_NAME|$DB_SCHEMA|$expected_ip|5432" ] || halt 25 "db-identity-mismatch"
+}
+
 # ---------------- args ----------------
 OP="${1:-}"; shift || true
-SHA=""; RUN=""; ATTEMPT=""; IMAGE_ID=""; ARCHIVE_SHA=""
+SHA=""; RUN=""; ATTEMPT=""; IMAGE_ID=""; ARCHIVE_SHA=""; ARCHIVE_BYTES=""; IMAGE_BYTES=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --sha) SHA="${2:-}"; shift 2;;
@@ -79,6 +155,8 @@ while [ $# -gt 0 ]; do
     --attempt) ATTEMPT="${2:-}"; shift 2;;
     --image-id) IMAGE_ID="${2:-}"; shift 2;;
     --archive-sha) ARCHIVE_SHA="${2:-}"; shift 2;;
+    --archive-bytes) ARCHIVE_BYTES="${2:-}"; shift 2;;
+    --image-bytes) IMAGE_BYTES="${2:-}"; shift 2;;
     *) halt 20 "unknown-arg";;
   esac
 done
@@ -160,9 +238,61 @@ mkdir_receipts() {
   : >>"$LOG"; chmod 600 "$LOG"
 }
 manifest_get() { sed -n "s/^$1=//p" "$RECEIPTS/backup.manifest" | head -1; }
+capacity_bytes() {
+  local target="$1" peak="$2" avail
+  avail=$(df -Pk "$target" | awk 'NR==2{print $4}') || halt 24 "capacity-measure-failed"
+  [[ "$avail" =~ ^[0-9]+$ ]] && [ "$avail" -gt 0 ] || halt 24 "capacity-parse-failed"
+  [ "$avail" -ge $(( (peak*12/10+1073741824+OCI_FLOOR_GIB*1073741824+1023)/1024 )) ] || halt 24 "capacity-peak-not-met"
+}
+transfer_capacity() {
+  [[ "$ARCHIVE_BYTES" =~ ^[1-9][0-9]{0,10}$ ]] && [ "$ARCHIVE_BYTES" -le "$MAX_ARCHIVE_BYTES" ] || halt 24 "archive-size-invalid"
+  [[ "$IMAGE_BYTES" =~ ^[1-9][0-9]{0,10}$ ]] && [ "$IMAGE_BYTES" -le 4294967296 ] || halt 24 "image-size-invalid"
+  local root
+  root=$(docker info --format '{{.DockerRootDir}}' 2>>"$LOG") || halt 24 "docker-root-measure"
+  [[ "$root" =~ ^/[A-Za-z0-9/_-]+$ ]] || halt 24 "docker-root-invalid"
+  # Conservative combined peak even if the two paths are on different mounts.
+  capacity_bytes "$RECEIPTS" "$((ARCHIVE_BYTES+IMAGE_BYTES))"
+  capacity_bytes "$root" "$((ARCHIVE_BYTES+IMAGE_BYTES))"
+}
+receipt_expected() {
+  printf 'verified=true\nsource=%s\nrun=%s\nattempt=%s\ndumpSha=%s\nsqlSha=%s\nhelperSha=%s\nproof=%s\n' \
+    "$SHA" "$RUN" "$ATTEMPT" "$(manifest_get sha256)" "$PENDING_SQL_SHA" "$(sha256sum "$0" | cut -d' ' -f1)" "$1"
+}
+verify_restore_receipt() {
+  local f="$RECEIPTS/local-restore.receipt" proof
+  [ -f "$f" ] && [ ! -L "$f" ] || halt 25 "local-restore-receipt-missing"
+  if [ "$LCM_ROOT" = /opt/livingcost ]; then
+    [ "$(stat -c %u "$f")" = 0 ] && [ "$(stat -c %a "$f")" = 600 ] || halt 25 "receipt-not-root-private"
+  fi
+  proof=$(sed -n 's/^proof=//p' "$f")
+  [[ "$proof" =~ ^[a-f0-9]{64}$ ]] || halt 25 "local-restore-proof-invalid"
+  cmp -s "$f" <(receipt_expected "$proof") || halt 25 "local-restore-receipt-binding"
+  local dump
+  dump=$(manifest_get dump)
+  [[ "$dump" =~ ^[A-Za-z0-9._-]+$ ]] || halt 25 "dump-path-invalid"
+  [ "$(sha256sum "$RECEIPTS/$dump" 2>>"$LOG" | cut -d' ' -f1)" = "$(manifest_get sha256)" ] || halt 25 "receipt-dump-drift"
+}
 
 # ---------------- ops ----------------
 case "$OP" in
+  transfer-capacity)
+    mkdir_receipts
+    transfer_capacity
+    status "result=ok capacity=combined-peak"
+    ;;
+  accept-local-restore)
+    mkdir_receipts
+    # Authenticated existing operator SSH, trusted source-pinned owner workflow.
+    # No signature key added. Never accept hash-only rehearse.json as authority.
+    head -c 2048 >"$RECEIPTS/local-restore.receipt"
+    chmod 600 "$RECEIPTS/local-restore.receipt"
+    verify_restore_receipt
+    status "result=ok restore_verified=true"
+    ;;
+  cleanup-job)
+    rm -f "$RECEIPTS/execution.env"
+    status "result=ok sealed-env=removed"
+    ;;
   preflight)
     require_compose
     mkdir_receipts
@@ -202,9 +332,19 @@ SQL
     docker image inspect "$OLD_IMAGE_ID" >/dev/null 2>>"$LOG" \
       || halt 21 "rollback-image-absent-repull-not-established"
     img_sz=$(docker image inspect -f '{{.Size}}' "$OLD_IMAGE_ID" 2>/dev/null || echo 0)
+    [[ "$img_sz" =~ ^[1-9][0-9]+$ ]] || halt 24 "rollback-size-invalid"
     [ "${img_sz:-0}" -le $((MAX_ARCHIVE_BYTES + MAX_ARCHIVE_BYTES/4)) ] \
       || halt 24 "rollback-image-over-budget"
-    tmp="/tmp/lcm-rollback-$$.tar.gz"
+    # P2: verify OCI capacity can hold the rollback archive before writing
+    avail_k=$(df -Pk "$LCM_ROOT" | awk 'NR==2{print $4}')
+    img_sz_k=$(( (img_sz + 1023) / 1024 ))  # convert bytes to KB, rounded up
+    required_k=$(( img_sz_k * 12 / 10 + OCI_FLOOR_GIB * 1024 * 1024 ))
+    [ "${avail_k:-0}" -ge "$required_k" ] || halt 24 "oci-capacity-insufficient-for-rollback"
+    ensure_staging_dir
+    capacity_bytes "$STAGING_DIR" "$((img_sz*2))"
+    capacity_bytes "$ROLLBACK_DIR" "$((img_sz*2))"
+    # P1: use secure mktemp under trusted staging dir (no predictable /tmp)
+    tmp=$(secure_mktemp "lcm-rollback-XXXXXX.tar.gz")
     if ! docker save "$OLD_IMAGE_ID" | gzip -n >"$tmp" 2>>"$LOG"; then
       rm -f "$tmp"; halt 25 "rollback-save-failed"
     fi
@@ -227,10 +367,27 @@ SQL
     [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]] || halt 20 "archive-sha-malformed"
     [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || halt 20 "image-id-malformed"
     mkdir_receipts
+    # The locally validated current-run metadata is streamed over the existing
+    # authenticated SSH connection, then independently bound before docker load.
+    head -c 16384 >"$RECEIPTS/image.metadata.json"
+    if ! python3 - "$RECEIPTS/image.metadata.json" "$SHA" "$RUN" "$ATTEMPT" "$IMAGE_ID" "$ARCHIVE_SHA" "$ARCHIVE_BYTES" "$IMAGE_BYTES" "$PENDING_SQL_SHA" "$PENDING_EXPECTED" 2>>"$LOG" <<'PY'
+import json,sys,re
+try:
+    path,sha,run,attempt,image,archive,abytes,ibytes,sql,migration=sys.argv[1:]
+    m=json.load(open(path))
+    expected=dict(schema='lcm-api-archive-v1',repo='sanghyun-io/living-cost-manager',workflowPath='.github/workflows/ci.yml',sha=sha,runId=run,runAttempt=attempt,imageId=image,archiveSha256=archive,archiveBytes=int(abytes),imageBytes=int(ibytes),platform='linux/arm64',releaseShaLabel=sha,migrationName=migration,migrationSqlSha256=sql,archivePath='image.tar.gz')
+    assert all(type(m.get(k)) is type(v) and m[k]==v for k,v in expected.items())
+    assert re.fullmatch(r'[1-9][0-9]*',run) and re.fullmatch(r'[1-9][0-9]*',attempt)
+except Exception:
+    sys.exit(1)
+PY
+    then halt 23 "image-metadata-binding"; fi
+    transfer_capacity
     ARC="$RECEIPTS/image.tar.gz"
     [ -f "$ARC" ] || halt 23 "archive-not-staged"
     [ ! -L "$ARC" ] || halt 20 "archive-is-symlink"
     sz=$(stat -c %s "$ARC")
+    [ "$sz" = "$ARCHIVE_BYTES" ] || halt 23 "archive-bytes-drift"
     [ "$sz" -le "$MAX_ARCHIVE_BYTES" ] || halt 24 "archive-over-budget"
     got=$(sha256sum "$ARC" | cut -d' ' -f1)
     [ "$got" = "$ARCHIVE_SHA" ] || halt 23 "archive-sha-mismatch"
@@ -253,6 +410,8 @@ SQL
     [ "$id" = "$IMAGE_ID" ] || halt 23 "loaded-image-id-mismatch"
     lbl=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$NEW_TAG" 2>/dev/null || echo none)
     [ "$lbl" = "$SHA" ] || halt 23 "loaded-revision-label-mismatch"
+    [ "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$NEW_TAG" 2>>"$LOG")" = linux/arm64 ] || halt 23 "loaded-platform-mismatch"
+    [ "$(docker image inspect -f '{{.Size}}' "$NEW_TAG" 2>>"$LOG")" = "$IMAGE_BYTES" ] || halt 23 "loaded-size-mismatch"
     printf '%s\n' "$id" >"$RECEIPTS/candidate-image.txt"
     chmod 600 "$RECEIPTS/candidate-image.txt"
     status "result=ok tag=$NEW_TAG image_id=$id"
@@ -266,10 +425,29 @@ SQL
       halt:*) IFS=: read -r _ code reason <<<"$STATE"; halt "$code" "$reason";;
       promoted) status "result=ok state=promoted backup=skip-already-current"; exit 0;;
     esac
+    # P2: verify DB connection identity BEFORE any dump/mutation
+    [ ! -L "$API_ENV_FILE" ] || halt 25 "env-symlink"
+    # A root-private execution copy remains sealed for this job only. Both
+    # Prisma probe and migration use these identical bytes (no env TOCTOU).
+    if [ ! -f "$RECEIPTS/execution.env" ]; then install -m 600 "$API_ENV_FILE" "$RECEIPTS/execution.env"; fi
+    verify_db_identity
     df_ok || halt 24 "oci-capacity-below-floor"
+    # P2: verify OCI capacity can hold the dump + manifest + receipts
+    avail_k=$(df -Pk "$LCM_ROOT" | awk 'NR==2{print $4}')
+    db_sz=$(db <<'SQL'
+SELECT pg_database_size(current_database());
+SQL
+) || halt 25 "db-size-query"
+    [[ "$db_sz" =~ ^[1-9][0-9]+$ ]] || halt 25 "db-size-invalid"
+    ensure_staging_dir
+    capacity_bytes "$STAGING_DIR" "$((MAX_DUMP_BYTES*2+db_sz))"
+    capacity_bytes "$RECEIPTS" "$((MAX_DUMP_BYTES*2+db_sz))"
+    required_k=$(( MAX_DUMP_BYTES / 1024 * 24 / 10 + OCI_FLOOR_GIB * 1024 * 1024 ))
+    [ "${avail_k:-0}" -ge "$required_k" ] || halt 24 "oci-capacity-insufficient-for-backup"
     STAMP=$(date -u +%Y%m%dT%H%M%SZ)
     DUMP="$RECEIPTS/livingcost-$STAMP.dump"
-    tmp="/tmp/lcm-dump-$STAMP.dump"
+    # P1: use secure mktemp under trusted staging dir (no predictable /tmp)
+    tmp=$(secure_mktemp "lcm-dump-XXXXXX.dump")
     if ! docker exec "$PG_CONTAINER" pg_dump -U "$PG_SUPERUSER" -Fc "$DB_NAME" >"$tmp" 2>>"$LOG"; then
       rm -f "$tmp"; halt 25 "pg_dump-failed"
     fi
@@ -289,6 +467,7 @@ SQL
     {
       printf 'dump=%s\n' "$(basename "$DUMP")"
       printf 'bytes=%s\n' "$sz"
+      printf 'db_bytes=%s\n' "$db_sz"
       printf 'sha256=%s\n' "$ds"
       printf 'db=%s\nschema=%s\nstamp=%s\nstate=%s\n' "$DB_NAME" "$DB_SCHEMA" "$STAMP" "$STATE"
       printf 'tables=%s\nmig_rows=%s\napplied=%s\n' "$TABLES" "$HR" "$AP"
@@ -316,6 +495,10 @@ SQL
     ;;
 
   rehearse)
+    # P2 fix: REMOVED production CREATE/DROP DATABASE restore.
+    # The rehearsal is now performed on the Mac Mini isolated PG16 cluster
+    # (Unix socket, peer auth, no TCP) by deploy.mjs fetch-and-rehearse-local.
+    # This op now ONLY verifies the backup integrity (sha256 + size + manifest).
     require_compose
     mkdir_receipts
     STATE=$(classify)
@@ -335,38 +518,11 @@ SQL
     [ -f "$RECEIPTS/$DUMP" ] && [ ! -L "$RECEIPTS/$DUMP" ] || halt 25 "backup-file-missing"
     [ "$(sha256sum "$RECEIPTS/$DUMP" | cut -d' ' -f1)" = "$WANT_SHA" ] || halt 23 "backup-integrity"
     [ "$(stat -c %s "$RECEIPTS/$DUMP")" = "$WANT_BYTES" ] || halt 23 "backup-size-drift"
-    df_ok || halt 24 "oci-capacity-below-floor"
-    TMPDB="lcm_rehearse_${RUN}_${ATTEMPT}_$(date -u +%H%M%S)"
-    [[ "$TMPDB" =~ ^lcm_rehearse_[0-9_]{4,30}$ ]] || halt 20 "rehearse-db-name-invalid"
-    if ! db >/dev/null <<SQL
-CREATE DATABASE $TMPDB OWNER $PG_SUPERUSER;
-SQL
-    then halt 25 "rehearse-createdb-failed"; fi
-    rc=0
-    docker exec -i "$PG_CONTAINER" pg_restore -U "$PG_SUPERUSER" -d "$TMPDB" \
-      <"$RECEIPTS/$DUMP" >>"$RECEIPTS/restore.log" 2>>"$LOG" || rc=$?
-    rt=$(docker exec -i "$PG_CONTAINER" psql -U "$PG_SUPERUSER" -d "$TMPDB" -At -c \
-      "SELECT count(*) FROM information_schema.tables WHERE table_schema='lcm';" 2>>"$LOG" || echo -1)
-    rmq=$(docker exec -i "$PG_CONTAINER" psql -U "$PG_SUPERUSER" -d "$TMPDB" -At -c \
-      'SELECT count(*) FROM lcm._prisma_migrations;' 2>>"$LOG" || echo -1)
-    drop_rc=0
-    docker exec -i "$PG_CONTAINER" psql -U "$PG_SUPERUSER" -Atc \
-      "DROP DATABASE IF EXISTS $TMPDB WITH (FORCE);" >/dev/null 2>>"$LOG" || drop_rc=1
-    ok=1
-    [ "$rc" = 0 ] || ok=0
-    [ "$rt" = "$WANT_TABLES" ] || ok=0
-    [ "$rmq" = "$WANT_MIG" ] || ok=0
-    [ "$drop_rc" = 0 ] || ok=0
-    if [ "$ok" != 1 ]; then
-      # best-effort cleanup; NEVER leave rehearsal DB behind on failure either
-      docker exec -i "$PG_CONTAINER" psql -U "$PG_SUPERUSER" -Atc \
-        "DROP DATABASE IF EXISTS $TMPDB WITH (FORCE);" >/dev/null 2>>"$LOG" || true
-      halt 25 "rehearse-verification-failed rc=$rc tables=$rt/$WANT_TABLES mig=$rmq/$WANT_MIG drop=$drop_rc"
-    fi
-    printf 'restored_tables=%s\nrestored_mig_rows=%s\ntempdb=%s\ntempdb_dropped=true\nrehearsed_at=%s\n' \
-      "$rt" "$rmq" "$TMPDB" "$(date -u +%FT%TZ)" >"$RECEIPTS/rehearse.json"
+    # Record that backup verification passed; actual restore happens on Mac Mini
+    printf 'backup_verified=true\ntables=%s\nmig_rows=%s\nsha256=%s\nverified_at=%s\n' \
+      "$WANT_TABLES" "$WANT_MIG" "$WANT_SHA" "$(date -u +%FT%TZ)" >"$RECEIPTS/rehearse.json"
     chmod 600 "$RECEIPTS/rehearse.json"
-    status "result=ok restored_tables=$rt mig_rows=$rmq tempdb_dropped=true"
+    status "result=ok backup_verified=true rehearse_deferred_to_macmini"
     ;;
 
   migrate)
@@ -379,6 +535,9 @@ SQL
       promoted)     status "result=ok state=promoted migrate=skip-noop"; exit 0;;
     esac
     [ "$STATE" = fresh ] || halt 29 "unexpected-state"
+    verify_restore_receipt
+    # P2: verify DB connection identity BEFORE any SQL mutation
+    verify_db_identity
     REC_ID=$(sed -n '1p' "$RECEIPTS/candidate-image.txt" 2>/dev/null || echo none)
     [ "$REC_ID" != none ] || halt 23 "candidate-image-not-loaded"
     if [ -n "$IMAGE_ID" ] && [ "$IMAGE_ID" != "$REC_ID" ]; then halt 23 "candidate-image-id-arg-drift"; fi
@@ -404,7 +563,7 @@ SQL
     # single transaction bounded by lock_timeout=5s / statement_timeout=30s.
     rc=0
     timeout 240 docker run --rm \
-      --env-file "$API_ENV_FILE" \
+      --env-file "$RECEIPTS/execution.env" \
       --network "$BACKEND_DB_NETWORK" \
       --label "lcm-ci-op=migrate-${RUN}-${ATTEMPT}" \
       "$NEW_TAG" sh -c './node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma' \
@@ -431,7 +590,7 @@ SQL
       halt:*) IFS=: read -r _ code reason <<<"$STATE"; halt "$code" "$reason";;
       promoted) status "result=ok promote=skip-already-current"; exit 0;;
     esac
-    [ -s "$RECEIPTS/rehearse.json" ] || halt 25 "rehearse-evidence-missing"
+    verify_restore_receipt
     [ -s "$RECEIPTS/backup.manifest" ] || halt 25 "backup-evidence-missing"
     id=$(docker image inspect -f '{{.Id}}' "$NEW_TAG" 2>/dev/null || echo none)
     REC_ID=$(sed -n '1p' "$RECEIPTS/candidate-image.txt" 2>/dev/null || echo none)

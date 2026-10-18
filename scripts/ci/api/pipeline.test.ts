@@ -44,6 +44,8 @@ const APPLIED11 = [
 ].sort();
 const DIRS12 = [...APPLIED11, PENDING].sort();
 const DBPASS = "SENTINEL_DBPASS_4f2a";
+const ciEnv={GITHUB_SHA:TEST_SHA,GITHUB_REPOSITORY:'sanghyun-io/living-cost-manager',GITHUB_WORKFLOW_REF:'sanghyun-io/living-cost-manager/.github/workflows/ci.yml@refs/heads/main',GITHUB_RUN_ID:RUN,GITHUB_RUN_ATTEMPT:ATTEMPT};
+function boundMeta(run=RUN) {return {schema:'lcm-api-archive-v1',repo:ciEnv.GITHUB_REPOSITORY,workflowPath:'.github/workflows/ci.yml',platform:'linux/arm64',releaseShaLabel:TEST_SHA,migrationName:PENDING,runId:run,runAttempt:ATTEMPT,archivePath:'image.tar.gz',imageBytes:660000000};}
 
 beforeAll(() => {
   for (const f of fs.readdirSync(FAKES)) {
@@ -166,6 +168,9 @@ function makeHost(opts: HostOpts = {}) {
   const rd = path.join(lcm, "backups", `actions-${RUN}-${ATTEMPT}-${SHA12}`);
   fs.mkdirSync(rd, { recursive: true });
   fs.copyFileSync(path.join(API, "deploy-host.sh"), path.join(rd, "deploy-host.sh"));
+  // Unit fixtures start with the known candidate already installed; explicit
+  // load-image tests still exercise archive hashing, platform and ID checks.
+  fs.writeFileSync(path.join(rd,'candidate-image.txt'),CAND_ID+'\n');
   return { base, fh, lcm, st, rd };
 }
 
@@ -176,6 +181,7 @@ function helperEnv(fh: string) {
     FAKE_HOST: fh,
     LCM_ROOT: path.join(fh, "opt", "livingcost"),
     LCM_HELPER_ALLOW_NONROOT_TEST: "1",
+    LCM_STAGING_DIR: path.join(fh, "staging"), // P1: test mode staging dir
   };
 }
 function helper(fhObj: ReturnType<typeof makeHost>, op: string, extra: string[] = [], attempt = ATTEMPT) {
@@ -186,9 +192,21 @@ function helper(fhObj: ReturnType<typeof makeHost>, op: string, extra: string[] 
   );
   fs.mkdirSync(path.dirname(helperPath), { recursive: true });
   fs.copyFileSync(path.join(API, "deploy-host.sh"), helperPath);
+  if(op==='load-image') extra=[...extra,'--archive-bytes',String(fs.statSync(path.join(path.dirname(helperPath),'image.tar.gz')).size),'--image-bytes','660000000'];
+  const metadata=op==='load-image'?JSON.stringify({...boundMeta(),runAttempt:attempt,sha:TEST_SHA,imageId:extra[extra.indexOf('--image-id')+1],archiveSha256:extra[extra.indexOf('--archive-sha')+1],archiveBytes:fs.statSync(path.join(path.dirname(helperPath),'image.tar.gz')).size,migrationSqlSha256:MIGRATION.sqlSha256}):undefined;
   return spawnSync("bash", [helperPath, op, "--sha", TEST_SHA, "--run", RUN, "--attempt", attempt, ...extra], {
-    encoding: "utf8", env: helperEnv(fh), stdin: "ignore",
+    encoding: "utf8", env: helperEnv(fh), input:metadata,
   });
+}
+// Host unit fixture represents a SUCCESSFUL trusted local operator receipt.
+// Real restoration and failure/no-handoff paths are tested separately.
+function authorizeRestore(h:ReturnType<typeof makeHost>,attempt=ATTEMPT,run=RUN) {
+ const rd=path.join(h.lcm,'backups',`actions-${run}-${attempt}-${SHA12}`);
+ const m=fs.readFileSync(path.join(rd,'backup.manifest'),'utf8');
+ const ds=m.match(/^sha256=(.+)$/m)![1];
+ const helperSha=createHash('sha256').update(fs.readFileSync(path.join(API,'deploy-host.sh'))).digest('hex');
+ const receipt=`verified=true\nsource=${TEST_SHA}\nrun=${run}\nattempt=${attempt}\ndumpSha=${ds}\nsqlSha=${MIGRATION.sqlSha256}\nhelperSha=${helperSha}\nproof=${'a'.repeat(64)}\n`;
+ fs.writeFileSync(path.join(rd,'local-restore.receipt'),receipt,{mode:0o600});
 }
 function readCalls(fh: string) {
   const p = path.join(fh, "state", "calls.log");
@@ -271,7 +289,7 @@ describe("host helper — rollback archive", () => {
   it("creates once and reuses when identical+valid (no giant duplicates)", () => {
     const h = makeHost();
     const r1 = helper(h, "ensure-rollback");
-    expect(r1.status).toBe(0);
+    expect(r1.status, `stdout: ${r1.stdout}\nstderr: ${r1.stderr}`).toBe(0);
     expect(r1.stdout).toContain("rollback=created");
     const dir = path.join(h.lcm, "backups", "rollback");
     const files = fs.readdirSync(dir);
@@ -335,7 +353,7 @@ describe("host helper — archive load + backup + rehearse", () => {
     expect(helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", arcSha(h)]).status).toBe(0);
     const before = fs.readFileSync(path.join(h.lcm, "docker-compose.yml"));
     const r = helper(h, "backup");
-    expect(r.status).toBe(0);
+    expect(r.status, `stdout: ${r.stdout}\nstderr: ${r.stderr}`).toBe(0);
     const man = fs.readFileSync(path.join(h.rd, "backup.manifest"), "utf8");
     expect(man).toContain("bytes=90867");
     expect(man).toContain("tables=24");
@@ -351,30 +369,28 @@ describe("host helper — archive load + backup + rehearse", () => {
     expect(r.status).toBe(25);
     expect(fs.readFileSync(path.join(h.lcm, "docker-compose.yml"), "utf8")).toContain(OLD_REF);
   });
-  it("rehearse restores into an isolated temp db and drops it", () => {
+  it("rehearse verifies backup integrity (no production DB mutation)", () => {
     const h = makeHost();
     stageArchive(h);
     helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", arcSha(h)]);
     helper(h, "backup");
     const r = helper(h, "rehearse");
     expect(r.status).toBe(0);
-    const created = fs.readFileSync(path.join(h.st, "createdb.log"), "utf8");
-    const dropped = fs.readFileSync(path.join(h.st, "droppedb.log"), "utf8");
-    expect(created).toMatch(/CREATE DATABASE lcm_rehearse_/);
-    expect(dropped).toMatch(/DROP DATABASE IF EXISTS lcm_rehearse_/);
-    expect(r.stdout).toContain("tempdb_dropped=true");
+    // P2 fix: no CREATE DATABASE in production PG container
+    const calls = readCalls(h.fh);
+    expect(calls).not.toContain("CREATE DATABASE");
+    expect(calls).not.toContain("DROP DATABASE");
+    expect(r.stdout).toContain("backup_verified=true");
+    expect(r.stdout).toContain("rehearse_deferred_to_macmini");
+    // Verify rehearse.json was created with backup verification
+    const rehearseJson = fs.readFileSync(path.join(h.rd, "rehearse.json"), "utf8");
+    expect(rehearseJson).toContain("backup_verified=true");
+    expect(rehearseJson).toContain("sha256=");
   });
-  it("failed restore still cleans the temp db and halts", () => {
-    const h = makeHost({ touchFlags: ["restore_fail"] });
-    stageArchive(h);
-    helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", arcSha(h)]);
-    helper(h, "backup");
-    const r = helper(h, "rehearse");
-    expect(r.status).toBe(25);
-    const dropped = fs.readFileSync(path.join(h.st, "droppedb.log"), "utf8");
-    expect(dropped).toMatch(/DROP DATABASE IF EXISTS lcm_rehearse_/);
-  });
-  it("rehearse refuses a tampered backup before restoring", () => {
+  // P2 fix: removed test for failed restore cleanup — production CREATE/DROP
+  // DATABASE restore is no longer performed. Rehearsal is deferred to Mac Mini
+  // isolated PG16 cluster (Unix socket, peer auth, no TCP).
+  it("rehearse refuses a tampered backup before verification", () => {
     const h = makeHost();
     stageArchive(h);
     helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", arcSha(h)]);
@@ -384,6 +400,7 @@ describe("host helper — archive load + backup + rehearse", () => {
     fs.appendFileSync(path.join(h.rd, dump), "TAMPERED");
     const r = helper(h, "rehearse");
     expect(r.status).toBe(23);
+    // P2 fix: no DB operations attempted when backup integrity fails
     expect(fs.existsSync(path.join(h.st, "createdb.log"))).toBe(false);
   });
 });
@@ -398,6 +415,7 @@ function fullFreshToMigrated(opts: HostOpts = {}) {
     ["load-image", ["--image-id", CAND_ID, "--archive-sha", asha]],
     ["backup", []], ["rehearse", []], ["migrate", []],
   ] as const) {
+    if(op==='migrate')authorizeRestore(h);
     const r = helper(h, op, extra as string[]);
     const rej = path.join(h.rd, "pending-rejection.json");
     expect(
@@ -409,12 +427,59 @@ function fullFreshToMigrated(opts: HostOpts = {}) {
 }
 
 describe("host helper — migrate / promote / verify / rollback", () => {
+  it('authenticated receipt handoff validates bytes before recording authority',()=>{
+    const h=makeHost();expect(helper(h,'backup').status).toBe(0);authorizeRestore(h);
+    const f=path.join(h.rd,'local-restore.receipt'),receipt=fs.readFileSync(f,'utf8');fs.unlinkSync(f);
+    const accept=(input:string)=>spawnSync('bash',[path.join(h.rd,'deploy-host.sh'),'accept-local-restore','--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT],{encoding:'utf8',env:helperEnv(h.fh),input});
+    expect(accept(receipt).status).toBe(0);expect(fs.statSync(f).mode&0o777).toBe(0o600);
+    expect(accept(receipt.replace('verified=true','verified=false')).status).toBe(25);
+    expect(helper(h,'migrate').status).toBe(25);expect(readCalls(h.fh)).not.toContain('migrate deploy');
+  });
+  it('missing/changed candidate cannot receive sealed env credentials for a probe',()=>{
+    const h=makeHost();fs.unlinkSync(path.join(h.rd,'candidate-image.txt'));
+    expect(helper(h,'backup').status).toBe(23);
+    expect(readCalls(h.fh)).not.toContain('current_database');
+  });
+  it('combined OCI transfer/load capacity gate blocks before load',()=>{
+    const h=makeHost({extraState:{df_avail_k:'1048576'}});const arc=path.join(h.rd,'image.tar.gz');fs.writeFileSync(arc,'x');
+    const r=helper(h,'load-image',['--image-id',CAND_ID,'--archive-sha',createHash('sha256').update('x').digest('hex')]);
+    expect(r.status).toBe(24);expect(readCalls(h.fh)).not.toContain('docker load');
+  });
+  it.each(['missing','replayed-attempt','different-dump','hash-only'])('rejects %s restore authority before SQL',mode=>{
+    const h=makeHost();helper(h,'backup');
+    if(mode==='hash-only')helper(h,'rehearse');
+    if(mode==='replayed-attempt'||mode==='different-dump') {
+      authorizeRestore(h);
+      const f=path.join(h.rd,'local-restore.receipt');
+      fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(mode==='replayed-attempt'?'attempt=1':'dumpSha=',mode==='replayed-attempt'?'attempt=2':'dumpSha=bad'));
+    }
+    expect(helper(h,'migrate').status).toBe(25);
+    expect(readCalls(h.fh)).not.toContain('migrate deploy');
+    expect(readCalls(h.fh)).not.toContain('compose -p');
+  });
+  it.each(['missing-schema','wrong-server'])('checks the actual sealed Prisma connection: %s',mode=>{
+    const h=makeHost();
+    const f=path.join(h.lcm,'api','.env');
+    const text=fs.readFileSync(f,'utf8');
+    fs.writeFileSync(f,mode==='missing-schema'?text.replace('?schema=lcm',''):text.replace('@gamja-data-postgres:', '@other-server:'));
+    const r=helper(h,'backup');
+    expect(r.status).toBe(25);expect(r.stdout).toContain('db-identity-mismatch');
+    expect(readCalls(h.fh)).not.toContain('pg_dump');expect(readCalls(h.fh)).not.toContain('migrate deploy');
+    expect(r.stdout+r.stderr+readCalls(h.fh)).not.toContain(DBPASS);
+  });
+  it('sealed env prevents source env changes from redirecting migration',()=>{
+    const {h}=fullFreshToMigrated();
+    expect(fs.readFileSync(path.join(h.rd,'execution.env'),'utf8')).toContain('@gamja-data-postgres:');
+    fs.writeFileSync(path.join(h.lcm,'api','.env'),'DATABASE_URL=postgresql://other@other/other\n');
+    expect(readCalls(h.fh)).toContain(`--env-file ${h.rd}/execution.env`);
+  });
   it("migrate rejects pending inventory with extra migrations (no auto-apply)", () => {
     const h = makeHost({ dirs: [...DIRS12, "20991231000000_not_approved"] });
     const arc = path.join(h.rd, "image.tar.gz");
     fs.writeFileSync(arc, "x");
     helper(h, "preflight");
     helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", createHash("sha256").update("x").digest("hex")]);
+    helper(h,'backup');authorizeRestore(h);
     const r = helper(h, "migrate");
     expect(r.status).toBe(22);
     expect(readCalls(h.fh)).not.toContain("migrate deploy");
@@ -425,6 +490,7 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     fs.writeFileSync(arc, "x");
     helper(h, "preflight");
     helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", createHash("sha256").update("x").digest("hex")]);
+    helper(h,'backup');authorizeRestore(h);
     const r = helper(h, "migrate");
     expect(r.status).toBe(23);
     expect(readCalls(h.fh)).not.toContain("migrate deploy");
@@ -437,6 +503,7 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", createHash("sha256").update("x").digest("hex")]);
     helper(h, "backup");
     helper(h, "rehearse");
+    authorizeRestore(h);
     const before = fs.readFileSync(path.join(h.lcm, "docker-compose.yml"), "utf8");
     const r = helper(h, "migrate");
     expect(r.status).toBe(26);
@@ -477,10 +544,11 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     expect(rv.status, rv.stdout + rv.stderr).toBe(0);
     expect(rv.stdout).toContain("tables=25");
     expect(rv.stdout).toContain("applied=12");
-    // the ONLY destructive SQL verb ever executed is the rehearsal temp db
+    // P2 fix: the ONLY destructive SQL verb ever executed is the rehearsal temp db
+    // which is now deferred to Mac Mini. Production PG has NO CREATE/DROP DATABASE.
     const calls = readCalls(h.fh);
     expect(calls).not.toMatch(/DROP TABLE|TRUNCATE|DELETE FROM|UPDATE /);
-    expect((fs.readFileSync(path.join(h.st, "droppedb.log"), "utf8").match(/DROP DATABASE/g) ?? []).length).toBe(1);
+    expect(calls).not.toMatch(/CREATE DATABASE|DROP DATABASE/);
   });
   it("verify fails when pre-existing structure or counts drifted", () => {
     const { h } = fullFreshToMigrated();
@@ -500,6 +568,7 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", asha]);
     helper(h, "backup");
     helper(h, "rehearse");
+    authorizeRestore(h);
     expect(helper(h, "migrate").status).toBe(0);
     // the post-migrate world: a fresh dump now contains 25 tables / 13 rows
     fs.writeFileSync(path.join(h.st, "restore_tables.txt"), "25\n");
@@ -516,6 +585,7 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     expect(helper(h, "load-image", ["--image-id", CAND_ID, "--archive-sha", asha], "2").status).toBe(0);
     expect(helper(h, "backup", [], "2").status).toBe(0);
     expect(helper(h, "rehearse", [], "2").status).toBe(0);
+    authorizeRestore(h,'2');
     const rm = helper(h, "migrate", [], "2");
     expect(rm.stdout).toContain("migrate=skip-already-applied");
     expect(helper(h, "promote", [], "2").status).toBe(0);
@@ -562,7 +632,7 @@ describe("host helper — secret hygiene", () => {
     const dbpassFiles = files.filter((p) => {
       try { return fs.readFileSync(p, "utf8").includes(DBPASS); } catch { return false; }
     });
-    expect(dbpassFiles).toEqual([path.join(h.lcm, "api", ".env")]);
+    expect(dbpassFiles.sort()).toEqual([path.join(h.lcm, "api", ".env"),path.join(h.rd,'execution.env')].sort());
     const rowFiles = files.filter((p) => {
       try { return fs.readFileSync(p, "utf8").includes("SENTINEL_PGDUMP_ROW_8866"); } catch { return false; }
     });
@@ -580,8 +650,10 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
       encoding: "utf8",
       env: {
         ...process.env, PATH: `${FAKES}:${process.env.PATH}`, FAKE_HOST: fh,
+        ...ciEnv, GITHUB_RUN_ID:args[args.indexOf('--run')+1]??RUN,
         LCM_ROOT: path.join(fh, "opt/livingcost"),
         LCM_HELPER_ALLOW_NONROOT_TEST: "1",
+        LCM_STAGING_DIR: path.join(fh, "staging"), // P1: test mode staging dir
         LCM_SSH_BIN: path.join(FAKES, "ssh"),
         LCM_CURL_BIN: path.join(FAKES, "curl"),
         OPS_KV_BIN: path.join(FAKES, "opskv"),
@@ -606,19 +678,43 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
     const calls = readCalls(h2.fh);
     expect(calls).not.toContain("install-check"); // never executed unpinned bytes
   });
+  it.each(['1;touch bad','1 space','../2'])('rejects unsafe run tokens before SSH: %s',run=>{
+    const h=makeHost();
+    expect(node(h.fh,['install-helper','--sha',TEST_SHA,'--run',run,'--attempt','1']).status).toBe(1);
+    expect(readCalls(h.fh)).toBe('');
+  });
+  it('failed actual restore sends no receipt/migrate/promote and exposes no child stderr',()=>{
+    const h=makeHost();const base=['--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT];
+    helper(h,'backup');
+    const b=path.join(h.base,'backup');
+    expect(node(h.fh,['fetch-backup-copy',...base,'--out-dir',b]).status).toBe(0);
+    const r=node(h.fh,['fetch-and-rehearse-local',...base,'--backup-dir',b,'--state-dir',path.join(h.base,'r')]);
+    expect(r.status).toBe(1);
+    expect(r.stdout+r.stderr).not.toMatch(/SENTINEL|pg_restore:|error:.*archive/);
+    const calls=readCalls(h.fh);
+    expect(calls).not.toContain('accept-local-restore');expect(calls).not.toContain('migrate deploy');expect(calls).not.toContain('compose -p');
+  });
+  it('send-archive rejects missing metadata before ANY remote transfer/load call',()=>{
+    const h=makeHost(),arc=path.join(h.base,'a'),m=path.join(h.base,'m');fs.writeFileSync(arc,'x');
+    fs.writeFileSync(m,JSON.stringify({sha:TEST_SHA,imageId:CAND_ID,archiveBytes:1,archiveSha256:createHash('sha256').update('x').digest('hex'),migrationSqlSha256:MIGRATION.sqlSha256}));
+    const r=node(h.fh,['send-archive','--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT,'--metadata',m,'--archive',arc]);
+    expect(r.status).toBe(1);expect(readCalls(h.fh)).toBe('');
+  });
 
   it("runs the gated sequence end-to-end then registers opskv with CAS", () => {
     const h = makeHost();
     const base = ["--sha", TEST_SHA, "--run", "4000", "--attempt", ATTEMPT];
     expect(node(h.fh, ["install-helper", ...base]).status).toBe(0);
     expect(node(h.fh, ["preflight", ...base]).status).toBe(0);
-    expect(node(h.fh, ["ensure-rollback", ...base]).status).toBe(0);
+    const er = node(h.fh, ["ensure-rollback", ...base]);
+    expect(er.status, `stdout: ${er.stdout}\nstderr: ${er.stderr}`).toBe(0);
     // build a real archive+metadata the way image.mjs would
     const arc = path.join(h.base, "image.tar.gz");
     fs.writeFileSync(arc, "archived-image-bytes");
     const asha = createHash("sha256").update(fs.readFileSync(arc)).digest("hex");
     const meta = path.join(h.base, "metadata.json");
     fs.writeFileSync(meta, JSON.stringify({
+      ...boundMeta('4000'),
       sha: TEST_SHA, imageId: CAND_ID, archiveSha256: asha,
       archiveBytes: fs.statSync(arc).size,
       migrationSqlSha256: MIGRATION.sqlSha256,
@@ -628,6 +724,7 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
     expect(node(h.fh, ["send-archive", ...base, "--metadata", meta, "--archive", arc]).status).toBe(0);
     expect(node(h.fh, ["backup", ...base]).status).toBe(0);
     expect(node(h.fh, ["rehearse", ...base]).status).toBe(0);
+    authorizeRestore(h,ATTEMPT,'4000');
     expect(node(h.fh, ["migrate", ...base]).status).toBe(0);
     expect(node(h.fh, ["promote", ...base]).status).toBe(0);
     expect(node(h.fh, ["verify", ...base]).status).toBe(0);
@@ -658,10 +755,11 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
     fs.writeFileSync(arc, "z");
     const asha = createHash("sha256").update("z").digest("hex");
     const meta = path.join(h.base, "metadata.json");
-    fs.writeFileSync(meta, JSON.stringify({ sha: TEST_SHA, imageId: CAND_ID, archiveSha256: asha, archiveBytes: 1, migrationSqlSha256: MIGRATION.sqlSha256 }));
+    fs.writeFileSync(meta, JSON.stringify({ ...boundMeta('4001'),sha: TEST_SHA, imageId: CAND_ID, archiveSha256: asha, archiveBytes: 1, migrationSqlSha256: MIGRATION.sqlSha256 }));
     node(h.fh, ["send-archive", ...base, "--metadata", meta, "--archive", arc]);
     node(h.fh, ["backup", ...base]);
     node(h.fh, ["rehearse", ...base]);
+    authorizeRestore(h,ATTEMPT,'4001');
     const composeBefore = fs.readFileSync(path.join(h.lcm, "docker-compose.yml"), "utf8");
     const rm = node(h.fh, ["migrate", ...base]);
     expect(rm.status).toBe(1);
@@ -675,6 +773,7 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
     const rd2 = path.join(h.lcm, "backups", `actions-4002-${ATTEMPT}-${SHA12}`);
     node(h.fh, ["install-helper", ...base]);
     node(h.fh, ["preflight", ...base]);
+    fs.writeFileSync(path.join(rd2,'candidate-image.txt'),CAND_ID+'\n');
     node(h.fh, ["backup", ...base]);
     const man = fs.readFileSync(path.join(rd2, "backup.manifest"), "utf8");
     const dump = man.match(/^dump=(.+)$/m)![1];
@@ -724,6 +823,7 @@ describe("image.mjs guards (Mac Mini side)", () => {
     spawnSync("node", [path.join(API, "image.mjs"), ...args], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${FAKES}:${process.env.PATH}`, FAKE_HOST: fh,
+        ...ciEnv,
         LCM_CI_API_STATE_DIR: path.join(fh, "imgstate") },
       stdin: "ignore",
     });
@@ -735,17 +835,33 @@ describe("image.mjs guards (Mac Mini side)", () => {
     const h2 = makeHost({ extraState: { df_avail_k: "26000000" } }); // ~24.8 GiB
     expect(node(["capacity", "--sha", TEST_SHA], h2.fh).status).toBe(0);
   });
+  it.each(['vm_measure_fail','vm_parse_fail'])('measurement failure halts capacity AND direct build: %s',flag=>{
+    const h=makeHost({extraState:{df_avail_k:'26000000'},touchFlags:[flag]});
+    expect(node(['capacity'],h.fh).status).toBe(1);
+    expect(node(['build','--sha',TEST_SHA],h.fh).status).toBe(1);
+    expect(readCalls(h.fh)).not.toContain('docker build');expect(readCalls(h.fh)).not.toContain('docker load');
+  });
+  it('every required archive field and replayed identity fails in the real CLI',()=>{
+    const h=makeHost(),arc=path.join(h.base,'image.tar.gz'),file=path.join(h.base,'m.json');fs.writeFileSync(arc,'one');
+    const m={...boundMeta(),sha:TEST_SHA,imageId:CAND_ID,archiveSha256:createHash('sha256').update('one').digest('hex'),archiveBytes:3,migrationSqlSha256:MIGRATION.sqlSha256};
+    const check=(v:unknown)=>{fs.writeFileSync(file,JSON.stringify(v));return node(['verify-archive','--sha',TEST_SHA,'--metadata',file,'--archive',arc],h.fh).status;};
+    expect(check(m)).toBe(0);
+    for(const k of Object.keys(m)){const v={...m};delete v[k];expect(check(v),k).toBe(1);expect(check({...m,[k]:''}),k+' empty').toBe(1);}
+    for(const [k,v]of Object.entries({runId:'99',runAttempt:'2',repo:'other/repo',workflowPath:'other.yml',platform:'linux/amd64',archiveBytes:NaN,imageBytes:0}))expect(check({...m,[k]:v}),k).toBe(1);
+  });
   it("verify-archive refuses tampered archives and unbound metadata", () => {
     const h = makeHost();
     const arc = path.join(h.base, "a.gz");
     fs.writeFileSync(arc, "one");
     const meta = path.join(h.base, "m.json");
     fs.writeFileSync(meta, JSON.stringify({
+      ...boundMeta(),
       sha: TEST_SHA, imageId: `sha256:${"c".repeat(64)}`,
       archiveSha256: createHash("sha256").update("one").digest("hex"),
       archiveBytes: 3, migrationSqlSha256: MIGRATION.sqlSha256,
     }));
-    expect(node(["verify-archive", "--sha", TEST_SHA, "--metadata", meta, "--archive", arc], h.fh).status).toBe(0);
+    const r1 = node(["verify-archive", "--sha", TEST_SHA, "--metadata", meta, "--archive", arc], h.fh);
+    expect(r1.status, `stdout: ${r1.stdout}\nstderr: ${r1.stderr}`).toBe(0);
     fs.writeFileSync(arc, "two");
     expect(node(["verify-archive", "--sha", TEST_SHA, "--metadata", meta, "--archive", arc], h.fh).status).toBe(1);
     fs.writeFileSync(arc, "one");

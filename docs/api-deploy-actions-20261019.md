@@ -26,7 +26,7 @@ Do not re-ask for this same scope; do not extend past it.
   matches the OCI host platform. Existing engine left untouched: never
   started/reconfigured/reset/pruned; only `lcm-ci-*`-named owned resources
   are created and torn down.
-- Free space measured 25 GiB at session start (22.4 GiB at build time —
+- Historical free space measured 25 GiB at the earlier session start (22.4 GiB at build time —
   concurrent sessions move this; the budget gate is evaluated at RUN time):
   required ≥ floor 15 + peak 4×1.2 + reserve 1 = 20.8 GiB. Floor is policy
   and is never lowered here.
@@ -100,35 +100,63 @@ queued push can never cancel a run mid-migration.
 
 Remote stages (`scripts/ci/api/deploy-host.sh`, named ops):
 preflight → ensure-rollback → load-image → backup → fetch off-host copy →
-rehearse → migrate → promote → verify → public verify → opskv BACKEND_IMAGE
+actual local restore/migration/invariants/cleanup → authenticated receipt handoff →
+migrate → promote → verify → public verify → opskv BACKEND_IMAGE
 CAS registration. Each op is idempotent-classified against LIVE state
 (`fresh` / `promote-only` / `promoted` / halt) so a re-run INSPECTS instead
 of blind-replaying; halt codes 20–29 are stable and abort the job.
 
-Key guarantees encoded and behaviour-tested (46 tests):
+Key guarantees encoded and behaviour-tested (current results in §8):
 - capacity fail → zero writes; digest/sha mismatch → no docker load, no
   migration; stale prod identity → no overwrite; extra/aborted/unexpected
   migrations → refuse; failed backup/restore/migrate/lock → stop before any
   compose change; failed compose-up → immediate single-file revert (service
   level); verify drift → halt; rollback op reverts the image ONLY and is
   never wired into the workflow; secrets never in argv/stdout/stderr/logs
-  (sentinel-injection tests); off-host backup copy is a 0600 runner file
+  (sentinel-injection tests; raw child errors only in protected 0600 local logs);
+  off-host backup copy is a 0600 runner file
   removed at job end — customer financial rows are NEVER uploaded to
   artifact storage on a public repository; opskv registration is CAS'd.
 - Helper bytes are SHA-pinned from the trusted main SHA before execution;
   remote ops accept only regex-validated `--sha/--run/--attempt` plus
-  digests; the rehearsal is a `CREATE DATABASE`/`pg_restore`/`DROP DATABASE`
-  of a job-owned temp database (the only destructive verb anywhere, against
-  the object the job itself created, never against `livingcost`).
+  digests; **P1 fix**: all sensitive temp files (dumps, rollback archives)
+  are created via mktemp-ONLY under a trusted root-owned 0700 staging
+  directory (`/var/lib/gamja-lcm-ci`), never under predictable `/tmp`
+  paths; **P2 fix**: DB connection identity is verified before any SQL
+  mutation (actual candidate Prisma connection: database/schema/server address/port
+  against the physical backup container's network address; sealed job-only env copy);
+  **P2 fix**: OCI capacity gates verify actual filesystem free
+  space before each phase (backup/tempfile/rollbacktar/candidatearchive)
+  using expected peak×1.2 + reserve + floor per policy.
+- **P2 fix**: Restore rehearsal is REMOVED from production PG container.
+  The backup is verified for integrity (sha256 + size + manifest) on OCI,
+  then the actual restore rehearsal is performed on the Mac Mini isolated
+  PG16 cluster (Unix socket, peer auth, no TCP, 0700 permissions) by
+  `deploy.mjs fetch-and-rehearse-local`. No CREATE/DROP DATABASE in
+  production PG. The protected dump does cross the existing SSH connection to
+  the operator's Mac Mini; no customer data is uploaded to GitHub artifacts.
+- **P2 fix**: SSH quoting uses SINGLE validated remote command via POSIX
+  shell-quoting (`shellQuote()` function). All paths are from pinned
+  constants or regex-validated tokens. No secrets on the command line.
+- **P2 fix**: CI metadata/sql binding verification uses Node crypto (not
+  broken awk `BEGIN{$1...}` which always fails before input). Direct hash
+  compare with proper error reporting.
+- **ADDITIONAL fix**: Metadata verification enforces binding against
+  expected inputs (runId/runAttempt/repo/workflow/platform). Rejects
+  missing/mismatched/replayed attempt/cross-run/cross-repo. Verifies
+  actual loaded image matches metadata (platform + revision label + image ID).
 
-Restore-rehearsal location: the fresh dump is restored on the OCI host into
-an isolated owned temp database inside the existing PG16 container (network
-untouched, no app startup, metadata/count queries only, dropped in the same
-op). Rationale: zero customer-data egress across SSH for a rehearsal, and
-it matches the recorded precedent ("isolated_owned_local_postgresql16_-
-database_schema_lcm", gamja-ops backups.yaml). The Mac Mini peer-auth
-Unix-socket cluster remains reserved for the CI unit suites. This is a
-stated design choice, not a silent substitution.
+Restore-rehearsal location: **P2 fix — CHANGED from OCI to Mac Mini**. The
+fresh dump is verified for integrity (sha256 + size + manifest) on the OCI
+host, then transferred to the runner workspace as a 0600 protected file
+(never uploaded to GitHub artifact storage — customer financial rows stay
+in protected operator storage). The actual restore rehearsal is performed
+on the Mac Mini isolated PG16 cluster (Unix socket, peer auth, no TCP,
+0700 permissions) by `deploy.mjs fetch-and-rehearse-local`. No
+CREATE/DROP DATABASE in production PG container. The protected dump crosses
+the existing SSH connection, not GitHub artifact storage. The Mac Mini peer-auth Unix-socket cluster is
+reserved for the CI unit suites and restore rehearsal. This is a stated
+design change, not a silent substitution.
 
 ## 4. Rollback target recipe (provided in advance, per approval)
 
@@ -208,7 +236,7 @@ stated design choice, not a silent substitution.
 - Deleted: 599 pipeline-test mkdtemp fixtures (≈121 MiB, class #1); the
   147MB readiness archive FILE only (class #2 — its sha256 `db1088d2…`,
   imageID `0aff72c39ae2…`, source SHA 29f8d0b and build method remain
-  documented here, superseded as head-proof by HEAD a8d5206; unique
+  documented here as historical evidence ONLY, not proof for the current revision; unique
   `metadata.json` RETAINED 896 B); `lcm-ci-kit-llVJML` closed test copy
   (439 MiB, class #3 — real runner untouched, no listener referenced it);
   `lcm-usability-test-dr2nU4` closed synthetic PGDATA (64 MiB, class #4 —
@@ -232,3 +260,78 @@ stated design choice, not a silent substitution.
   build until shared-space recovery; the gate was NOT lowered or modified.
   Small/text work and the fixture-only test suites (own budget
   0.5×1.2+1+15 < actual) remain allowed.
+
+## 8. Manual quality escalation — local-only correction (2026-10-19)
+
+Root causes reproduced: hash-only OCI rehearsal was incorrectly usable as
+authority; the actual local restore function was unwired and used incompatible
+helper output/URL/schema assumptions; optional metadata checks accepted missing
+identity; SSH fake skipped the real outer shell; VM capacity returned a synthetic
+999 GiB on measurement failures. A red regression confirmed missing metadata
+was accepted (47 existing tests passed, the new regression failed).
+Separately, the current regression tests run against a disposable copy of
+committed pre-fix `fc0a1ad` helpers produced 10 expected failures: four restore
+authority cases, two connection identity cases, outer-shell helper installation,
+two VM measurement cases, and mandatory metadata. That source-copy fixture was
+removed by an EXIT trap; the working checkout was never reset or overwritten.
+
+Current call graph is explicit in ci.yml: fetch the dump **and** 0600 manifest,
+then `fetch-and-rehearse-local`, then migration. `local-restore.mjs` owns a fresh
+0700 PG16 cluster, peer-only Unix socket, no TCP, dedicated `lcm_restore_test_db`.
+libpq receives explicit socket/port/OS user/database arguments; installed local
+Prisma receives a separate URL with `schema=lcm`. Restore nonzero always fails.
+The exactly pinned SQL and pending inventory are checked. Existing table rows,
+columns/constraints and pre-existing migration history are fingerprinted before
+and after; only the approved table/history delta is accepted. No app, billing,
+reminder or outreach worker is started. Finally stops/removes the owned cluster
+on failure as well as success; a cleanup failure denies the receipt.
+
+Only successful restore + migration invariants + cleanup submits a small receipt
+over the existing authenticated operator SSH path. No new signing key is needed:
+the trust boundary is the existing approved owner workflow/account, not arbitrary
+receipt writers. The root-private receipt binds exact source SHA, run, attempt,
+dump SHA, SQL SHA, helper source SHA and invariant proof. Migration/promotion
+reject missing/replayed/mismatched receipts; OCI `rehearse` is integrity-only and
+cannot grant permission. Production backup/rows/history remain untouched by cleanup;
+the unnecessary local dump is removed after receipt acceptance, sealed job env
+is removed by the always cleanup step. Private raw diagnostics are never artifacts.
+
+All SSH commands are one POSIX-quoted string; the fake joins post-host argv and
+executes an **outer** `sh -c` plus a normal sudo stub. Archive metadata is mandatory
+against actual GitHub repository/workflow/source/run/attempt, including image size;
+send, verify and remote load bind it before writes/load. Raw image revision,
+platform, image ID and size are rechecked (image config ID is NOT a registry digest).
+Docker free space is measured read-only via `colima ssh -- df -Pk <DockerRootDir>`;
+any command/parse/mount failure stops. Host **and** VM gate remain 20.8 GiB with
+15 GiB floor. OCI transfer/load, backup temporary+copy and rollback temporary+copy
+check combined peak×1.2 + reserve + floor on their target filesystems.
+
+Validation: API pipeline suite **72/72** includes actual synthetic custom-dump restore and
+Prisma migration, record/history invariants, invalid dump, missing state recovery,
+stop failure, missing/replayed/different-dump receipt, wrong-server/default schema,
+each missing/empty metadata field, VM measurement/parse failure, outer SSH
+installation/archive roundtrip and failure-output sentinels. Runner kit 48/48;
+Python restore proof 10/10 and clean-build proof 5/5; Node marketing kit 17/17.
+`verification-target.test.mjs` is **not standalone**: its two cases require the
+purpose-created verify-usability ownership marker; invoking it without that
+harness correctly refused before any fixture write. No out-of-scope fix was made.
+Node/Bash syntax, Ruby Psych YAML parse and `git diff --check` passed. Ruby emitted
+an existing optional ffi-extension warning but YAML parsing succeeded.
+
+Deployment also prepares only frozen/offline root dependencies (no lifecycle
+installers) after the unchanged capacity gate and checks the installed CLI version
+against pnpm-lock plus the existing Darwin ARM64 engine **before any OCI operation**.
+Rehearsal pins `PRISMA_SCHEMA_ENGINE_BINARY` to that local engine; its mirror is
+loopback-only so missing engine/cache cannot silently download. The checkout's
+node_modules are not assumed to survive earlier jobs. This offline cache preparation
+has NOT been exercised by an Actions deployment here; a missing cached engine is a
+fail-closed first-run prerequisite, not a claimed deployment success.
+
+Capacity measured during this correction: host ~18.9 GiB, actual Docker filesystem
+`/dev/vdb1` mounted at `/var/lib/docker` 7,837,496 KiB (~7.47 GiB), not VM `/`.
+The real `image.mjs capacity` command returns failure at the unchanged 20.8 GiB
+gate. No Docker image/archive was built or installed; old 29f8d0b evidence is not
+current-image proof. No push, trigger, SSH mutation, production DB operation or
+real credential access occurred. Independent security re-review remains pending.
+All test-owned clusters/data/socket directories and fixture trees are removed in
+finally/afterEach; no shared image, volume, VM or other worktree was cleaned.

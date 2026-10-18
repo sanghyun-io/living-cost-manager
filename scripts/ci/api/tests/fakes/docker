@@ -23,9 +23,11 @@ CMD="${1:-}"; shift || true
 J="$*"
 
 case "$CMD" in
+  info) echo /var/lib/docker ;;
   inspect) # docker inspect -f FMT CONTAINER
     fmt=$(getafter "-f" "$@"); target=$(getlast "$@")
     case "$fmt" in
+      *NetworkSettings*) echo 172.19.0.2 ;;
       *State.Running*) v=$(read_state container_running.txt); echo "${v:-true}" ;;
       *.Image*) read_state container_image.txt ;;
       *) exit 1 ;;
@@ -36,6 +38,7 @@ case "$CMD" in
     fmt=$(getafter "-f" "$@"); target=$(getlast "$@")
     if [ -n "$fmt" ]; then
       case "$fmt" in
+        *Architecture*) echo linux/arm64 ;;
         *.Id*)
           id=$(awk -F'\t' -v t="$target" '$1==t{print $2}' "$S/images.tsv" 2>/dev/null | head -1)
           [ -n "$id" ] || exit 1; echo "$id" ;;
@@ -50,7 +53,9 @@ case "$CMD" in
         cat "$S/image.json"; exit 0
       fi
       grep -qF "$target" "$S/images.tsv" 2>/dev/null || { echo "Error: No such image: $target" >&2; exit 1; }
-      echo "{}"
+      id=$(awk -F'\t' -v t="$target" '$1==t||$2==t{print $2;exit}' "$S/images.tsv")
+      rev=$(awk -F'\t' -v t="$target" '$1==t||$2==t{print $3;exit}' "$S/images.tsv")
+      printf '[{"Id":"%s","Os":"linux","Architecture":"arm64","Size":660000000,"Config":{"Labels":{"org.opencontainers.image.revision":"%s"}}}]\n' "$id" "$rev"
     fi
     ;;
 
@@ -82,6 +87,7 @@ case "$CMD" in
       tmpdb=0
       [[ "$J" == *lcm_rehearse* ]] && tmpdb=1
       case "$sql" in
+        *pg_database_size*) echo 10485760 ;;
         *"finished_at IS NOT NULL ORDER"*) cat "$S/applied.txt" ;;
         *"finished_at IS NULL AND rolled_back_at IS NULL"*)
           [ -f "$S/aborted.txt" ] && cat "$S/aborted.txt" ;;
@@ -108,6 +114,14 @@ case "$CMD" in
     ;;
 
   run)
+    if [[ "$J" == *current_database* ]]; then
+      ef=$(getafter '--env-file' "$@")
+      url=$(grep '^DATABASE_URL=' "$ef" | tail -1 | cut -d= -f2-)
+      schema=public; [[ "$url" == *schema=lcm* ]] && schema=lcm
+      ip=172.19.0.2; [[ "$url" == *@gamja-data-postgres:5432/livingcost* ]] || ip=172.19.0.99
+      printf 'livingcost|%s|%s|5432' "$schema" "$ip"
+      exit 0
+    fi
     if [[ "$J" == *"migrate deploy"* ]]; then
       ef=$(getafter "--env-file" "$@")
       { [ -n "$ef" ] && [ -f "$ef" ]; } || { echo "env-file missing" >&2; exit 7; }

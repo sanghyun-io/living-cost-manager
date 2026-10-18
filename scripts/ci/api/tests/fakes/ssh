@@ -1,54 +1,10 @@
 #!/usr/bin/env bash
-# Fake ssh for runner-side tests: maps the pinned prod path prefix onto the
-# fixture host tree, executes locally, records full argv (never stdin).
-set -u
-FH="${FAKE_HOST:?fake ssh needs FAKE_HOST}"
-S="$FH/state"
-printf 'ssh %s\n' "$*" >>"$S/calls.log"
-
-seen=0
-rest=()
-for a in "$@"; do
-  if [ "$seen" = 1 ]; then rest+=("$a"); continue; fi
-  [ "$a" = "gamja-oci" ] && seen=1
-done
-[ "$seen" = 1 ] || { echo "fake-ssh: host alias not found" >&2; exit 1; }
-
-rw() { printf '%s' "${1//\/opt\/livingcost/$FH/opt/livingcost}"; }
-J="${rest[*]}"
-
-case "$J" in
-  "sudo bash -c "*)
-    script="${rest[$((${#rest[@]}-1))]}"
-    exec bash -c "$(rw "$script")"
-    ;;
-  "sudo sha256sum "*)
-    f=$(rw "${rest[$((${#rest[@]}-1))]}")
-    if [ -f "$S/hashes_bad" ]; then
-      printf '0000000000000000000000000000000000000000000000000000000000000000  x\n'
-      exit 0
-    fi
-    shasum -a 256 "$f"
-    ;;
-  "sudo cat "*)
-    f=$(rw "${rest[$((${#rest[@]}-1))]}")
-    exec cat "$f"
-    ;;
-  "sudo bash "*deploy-host.sh*)
-    # drop the "sudo bash" prefix; locate the helper path element (index 2+)
-    out=(); replaced=0
-    for ((i=2; i<${#rest[@]}; i++)); do
-      a="${rest[i]}"
-      if [ "$replaced" = 0 ] && [[ "$a" == *deploy-host.sh* ]]; then
-        out+=("$(rw "$a")"); replaced=1
-      else
-        out+=("$a")
-      fi
-    done
-    exec bash "${out[@]}"
-    ;;
-  *)
-    echo "fake-ssh: command not in allowlist: $J" >&2
-    exit 1
-    ;;
-esac
+set -eu
+FH="${FAKE_HOST:?}"
+printf 'ssh %s\n' "$*" >>"$FH/state/calls.log"
+while [ "$#" -gt 0 ] && [ "$1" != gamja-oci ]; do shift; done
+[ "$#" -gt 0 ]; shift
+# Exactly OpenSSH: join ALL post-host argv, then OUTER shell parses it.
+joined="$*"
+joined="${joined//\/opt\/livingcost/$FH/opt/livingcost}"
+exec sh -c "$joined"

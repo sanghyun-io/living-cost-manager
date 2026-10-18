@@ -258,12 +258,11 @@ jobs:
         # pre-cached on the host (skipped otherwise). No system paths, no
         # network, no registration.
 
-      - name: Run API pipeline behavioural tests (fixture trees + PATH shims)
+      - name: Run API pipeline tests (fixtures + one sequential synthetic PG16 proof)
         working-directory: apps/web
         run: pnpm exec vitest run --root ../../scripts/ci/api
-        # Same architecture as the runner kit: real bash/node logic against
-        # temp fixture trees; fake docker/ssh/curl/opskv shims; no engine,
-        # no network, no SSH, no production paths (see scripts/ci/api/tests).
+        # Fake docker/ssh/curl/opskv, plus sequential local PG16 peer-only
+        # synthetic restore. No Docker engine, network, SSH or production DB.
 
       # verify:pricing·public-smoke·브라우저 스크립트는 운영자 로컬 검증으로 유지
       # (Playwright browser 바이너리/pwsh 의존 → CI 계정 홈에 다운로드하지 않는다;
@@ -443,11 +442,32 @@ jobs:
             --sha "${{ github.sha }}" \
             --metadata dist-api/metadata.json \
             --archive dist-api/image.tar.gz
-          # source↔image binding: the pinned planning SQL hash must match the
-          # file in THIS checkout (the archive's copy is re-checked remotely).
-          sha256sum prisma/migrations/20261018110000_workspace_planning_state/migration.sql |
-            awk -v want="$(node -e 'const m=require("./dist-api/metadata.json");process.stdout.write(m.migrationSqlSha256)')" \
-              'BEGIN{if($1!=want){print "metadata/sql drift";exit 1}}'
+          # P2 fix: source↔image binding via Node crypto (not broken awk).
+          # The old awk `BEGIN{$1!=want}` always fails because $1 is empty in
+          # BEGIN block (no input read yet). Replace with direct Node hash verify.
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const meta = JSON.parse(fs.readFileSync("dist-api/metadata.json", "utf8"));
+            const sql = fs.readFileSync("prisma/migrations/20261018110000_workspace_planning_state/migration.sql");
+            const got = crypto.createHash("sha256").update(sql).digest("hex");
+            if (got !== meta.migrationSqlSha256) {
+              console.error("metadata/sql drift: source hash " + got + " != metadata " + meta.migrationSqlSha256);
+              process.exit(1);
+            }
+            console.log("metadata/sql binding verified");
+          '
+
+      - name: Prepare locked offline local restore CLI before any OCI operation
+        run: |
+          set -eu
+          # Checkout cleans node_modules: never assume an earlier job's CLI survived.
+          # No network installer or engine download fallback. Missing cache stops here.
+          node scripts/ci/api/image.mjs capacity
+          corepack enable pnpm
+          pnpm install --offline --frozen-lockfile --ignore-scripts --filter living-cost-manager
+          node scripts/ci/api/deploy.mjs check-local-tools \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
 
       - name: Install SHA-pinned host helper (never executes unpinned bytes)
         run: |
@@ -487,11 +507,13 @@ jobs:
             --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
             --out-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup"
 
-      - name: Restore rehearsal (isolated temp database, dropped in the same op)
+      - name: Actual local PG16 restore, pinned migration, invariants, cleanup, receipt handoff
         run: |
           set -eu
-          node scripts/ci/api/deploy.mjs rehearse \
-            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+          node scripts/ci/api/deploy.mjs fetch-and-rehearse-local \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --backup-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup" \
+            --state-dir "$RUNNER_TEMP/lcm-restore-${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Apply the single approved pending migration (halts on extras/failures)
         run: |
@@ -527,8 +549,12 @@ jobs:
         if: always()
         run: |
           set -eu
-          node scripts/ci/api/deploy.mjs cleanup-copy --out-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup" || true
+          rc=0
+          node scripts/ci/api/deploy.mjs cleanup-job \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" || rc=1
+          node scripts/ci/api/deploy.mjs cleanup-copy --out-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup" || rc=1
           rm -rf "$GITHUB_WORKSPACE/.lcm-opskv-tmp" "$GITHUB_WORKSPACE/dist-api"
+          exit "$rc"
 
   # Production Pages deploy — SAME run as the tested build. The artifact
   # (lcm-release-<sha>) uploaded by build-test is downloaded by this run's own

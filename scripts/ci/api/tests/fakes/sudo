@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Do not parse/drop bash -c: outer sh already did the real SSH parsing.
+exec "$@"

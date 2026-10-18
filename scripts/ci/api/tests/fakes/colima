@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+[ ! -f "$FAKE_HOST/state/vm_measure_fail" ] || exit 1
+if [ -f "$FAKE_HOST/state/vm_parse_fail" ]; then echo invalid; exit 0; fi
+exec df -Pk /var/lib/docker
