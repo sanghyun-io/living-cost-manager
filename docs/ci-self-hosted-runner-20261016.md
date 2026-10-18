@@ -12,6 +12,18 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
 > 미지원(404)"는 **모두 잘못**이었다. 각각의 근거 없는 주장과 실제 재검증 결과를
 > §7에 기록하고 문서 자체는 삭제했다.
 
+> **2026-10-18 실효 상태(단일 원본: gamja-ops
+> `runbooks/lcm-macmini-ci-runner-20261017.md` §6)** — 본 문서의 나머지 서술(lcm-ci
+> 전용 계정·LaunchDaemon·root 절차 01→04)은 **설계/계획(2026-10-16~17) 기록**
+> 으로 보존하며, 현재와 혼동하지 않는다. 실제: runner `lcm-macmini`(repo-scoped
+> id 21)은 **owner uid sanghyun의 user-scope LaunchAgent**로 실행 중 — 전용
+> OS계정 경로는 미실행이므로 **실행 격리 미확보**(편차 기록, Owner 결정 대기).
+> 워크플로 `ci.yml` 단일 공개(api-tests.yml 제거), run 39048745412 push main
+> success로 FE 배포 CI 전환됨(API는 의도적 a2c7bd9 유지). CF 배포 시크릿:
+> `production` environment 2개 이름 전달 완료(opskv baseline 등록·provider
+> 읽기 검증) + repository 스코프 2개 유지 — **gated deploy 기능 증명 전
+> narrowing 미완료**(staged), 제거는 별개 승인.
+
 ## 1. 실행 상태 요약 (2026-10-17 00:20 KST 시점)
 
 | 항목 | 상태 |
@@ -157,11 +169,14 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
   실측 대조. CF 시크릿은 deploy step env에만 주입, argv·stdout 무복사.
 - runner 키트: `scripts/ci/runner/README.md` 절차(01→02→03→04→05, 롤백 06).
 
-> **2026-10-18 통합 정정**: `.github/workflows/deploy-pages.yml`과 분리 `verify-ci`
-> 크로스-run 게이트는 **폐기**됐다. download-artifact의 기본 GITHUB_TOKEN 스코프는
-> 자기 run의 아티팩트만 읽을 수 있어, 다른 run(별도 workflow)의 아티팩트에는 elevated
-> PAT가 필요한데 새 토큰 발급은 승인 범위 밖이었다(실배포에서 "Artifact not found"로
-> 실패 확인). 따라서 배포를 ci.yml의 `deploy` job으로 **같은 run에 통합**했다 —
+> **2026-10-18 통합 정정(2026-10-18 2차 수정 포함)**: `.github/workflows/deploy-pages.yml`과
+> 분리 `verify-ci` 크로스-run 게이트는 **폐기**됐다. 실제 관찰된 실패는 "Artifact not
+> found"였고 원인은 download-artifact의 **기본 스코프가 자기 run을 보는 것**이었다.
+> 이 때문에 "다른 run 아티팩트에 elevated PAT가 필요하다"는 보편 요구가 **있는 것처럼
+> 쓰인 이전 서술은 부정확**하다 — 동일 저장소에서 GITHUB_TOKEN에 `actions: read`
+> 권한과 run-id 지정이 있으면 크로스-run 읽기는 기술적으로 가능하다. 다만 본 설계는
+> 같은 run 전달로 충분하므로 크로스-run도 PAT도 **불필요**하며, 그래서 배포를 ci.yml의
+> `deploy` job으로 **같은 run에 통합**했다 —
 > `needs: [preflight, build-test]`, `environment: production`(required Reviewer=Owner
 > + main-only 정책)으로 승인 전 대기, 같은 run 아티팩트를 기본 토큰으로 내려받아
 > release-gate.mjs verify(digest·attempt·workflow-meta) 후 재빌드 없이 배포, 양 Origin

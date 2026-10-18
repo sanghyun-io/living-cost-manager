@@ -16,16 +16,23 @@ name: CI (Mac Mini self-hosted)
 #   - 배포 산출물: 이 워크플로 한 run 안에서 프로덕션 API origin용 정적 FE를
 #     빌드해 아티팩트(lcm-release-<sha>)로 올리고, 같은 run의 `deploy` job이
 #     재빌드 없이 그 아티팩트만 검증·배포한다(build-info.json + content digest,
-#     scripts/ci/release-gate.mjs). 기본 GITHUB_TOKEN은 현재 run의 아티팩트만
-#     읽을 수 있으므로 크로스-run 배포(deploy-pages.yml 분리)는 elevated PAT가
-#     필요해 폐기하고 same-run으로 통합했다. API base URL은 퍼블릭 값이라 CI에서
+#     scripts/ci/release-gate.mjs). download-artifact의 기본 스코프는 현재 run을
+#     본다 — 동일 저장소 cross-run 읽기는 actions:read 권한·run-id 지정으로
+#     기술적으로 가능하지만, 본 설계는 같은 run 전달이므로 cross-run도 elevated
+#     PAT도 불필요하다("크로스-run에 PAT 필요"는 보편 요구가 아니었고 분리형은
+#     불필요한 요건을 전제했기에 폐기·통합). API base URL은 퍼블릭 값이라 CI에서
 #     bake하는 것이 시크릿과 무관하다. `deploy` job은 `production` 환경의
 #     required Reviewer(Owner) + main-only 정책으로 승인 전 대기하며 시크릿은
 #     승인 후에만 노출된다.
 #
 # runs-on 라벨 4종은 job 라우팅 조건일 뿐 보안 격리 수단이 아니다. 실제 경계는
-# repository-scoped 등록(sanghyun-io/living-cost-manager 전용 runner)과 Mac Mini
-# 위의 전용 비관리자 OS 계정(lcm-ci) 실행 격리다.
+# repository-scoped 등록(sanghyun-io/living-cost-manager 전용 runner)과 OS 실행
+# 격리인데, **2026-10-18 현재 후자는 미확보**: 설계된 전용 비관리자 OS 계정
+# (lcm-ci)+LaunchDaemon 키트(`scripts/ci/runner` root 절차 01→04)는 미실행이며
+# 실러너는 owner uid(sanghyun)의 user-scope LaunchAgent로 실행된다(편차·후속은
+# gamja-ops runbooks/lcm-macmini-ci-runner-20261017.md §6.4). 현행 실효 경계는
+# repo-scoped 등록 + 리뷰된 main push만 유입되는 신뢰 모델(Owner) + environment
+# 승인 게이트다.
 #
 # Action pin: third-party 금지, GitHub 공식 actions만 commit SHA로 고정.
 #   actions/checkout@3d3c42e5... = v7.0.1 (release 2026-07-20)
@@ -204,15 +211,25 @@ jobs:
 
   # Production Pages deploy — SAME run as the tested build. The artifact
   # (lcm-release-<sha>) uploaded by build-test is downloaded by this run's own
-  # GITHUB_TOKEN (download-artifact's default scoping only sees the current
-  # run), so NO cross-run elevation / PAT is required and there is NO rebuild.
+  # GITHUB_TOKEN (download-artifact's default scoping sees the current run),
+  # so NO cross-run access and NO elevated PAT is needed here — a cross-run
+  # read is technically possible for a same-repo token granted actions:read,
+  # it is simply not part of this design, and there is NO rebuild.
   # The `production` environment keeps the gate: required Reviewer (Owner) +
   # main-only deployment branch policy, so this job PAUSES for explicit Owner
   # approval of an already-green SHA and secrets are only exposed after approval.
-  # deploy-pages.yml was retired: cross-workflow artifact handoff cannot read a
-  # different run's artifact with the default token, which is exactly why it
-  # failed "Artifact not found". Same-run needs() also enforces CI success for
-  # this exact SHA, replacing the old verify-ci gate.
+  # deploy-pages.yml was retired because its cross-workflow handoff left the
+  # default-scoped download without the artifact ("Artifact not found") — the
+  # fix chosen is same-run integration, not a PAT. Same-run needs() also
+  # enforces CI success for this exact SHA, replacing the old verify-ci gate.
+  #
+  # CF delivery scope (2026-10-18, staged — NOT yet narrowed): the two names
+  # below resolve from the `production` environment secrets (2 delivered from
+  # the opskv baselines /living-cost-manager/production/CLOUDFLARE_*, provider
+  # read-verified) and also still exist at repository scope (2, kept as the
+  # working fallback until a gated deploy of a new exact SHA succeeds and the
+  # repo-scope names are removed by separate approval). Do not read this as
+  # narrowing completed.
   deploy:
     name: Deploy verified artifact to Cloudflare Pages
     needs: [preflight, build-test]
