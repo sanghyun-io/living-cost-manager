@@ -17,13 +17,14 @@ async function fixture(role: "owner" | "editor" | "viewer" = "owner") {
   const workspace = await prisma.workspace.create({ data: { name: "Synthetic", monthlyIncome: 1000000, members: { create: { userId: user.id, role } } } });
   return { user, workspace, headers: { authorization: `Bearer ${app.signTokens(user).accessToken}` }, url: `/workspaces/${workspace.id}/planning` };
 }
-const data = () => ({ ...createDefaultWorkspacePlanningData(), weeks: [{ weekStart: "2026-10-18", budgetAmount: 0, spentAmount: 0, recordedAt: "2026-10-18T12:00:00.000Z" }], reserves: [{ id: "reserve-1", costId: "orphan", savedAmount: 0, targetAmount: 10000, targetDueDate: null, recordedAt: "2026-10-18T12:00:00.000Z", costLabel: "Synthetic reserve" }] });
+const data = () => ({ ...createDefaultWorkspacePlanningData(), weekStartDay: 7, weeks: [{ weekStart: "2026-10-18", budgetAmount: 0, spentAmount: 0, recordedAt: "2026-10-18T12:00:00.000Z" }], reserves: [{ id: "reserve-1", costId: "orphan", savedAmount: 0, targetAmount: 10000, targetDueDate: null, recordedAt: "2026-10-18T12:00:00.000Z", costLabel: "Synthetic reserve" }] });
 const payload = (expectedRevision = 0, expectedSnapshotVersion = 0) => ({ expectedRevision, expectedSnapshotVersion, data: data() });
 test("GET requires auth, never creates defaults; no-store and explicit version", async () => {
   const f = await fixture();
   expect((await app.inject({ method: "GET", url: f.url })).statusCode).toBe(401);
   const r = await app.inject({ method: "GET", url: f.url, headers: f.headers });
   expect(r.json()).toEqual({ workspaceId: f.workspace.id, revision: 0, currentSnapshotVersion: 0, data: createDefaultWorkspacePlanningData() });
+  expect(r.json().data.weekStartDay).toBe(1);
   expect(r.headers["cache-control"]).toBe("private, no-store");
   expect(await prisma.workspacePlanningState.count({ where: { workspaceId: f.workspace.id } })).toBe(0);
 });

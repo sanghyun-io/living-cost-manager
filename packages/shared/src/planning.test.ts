@@ -5,8 +5,15 @@ const date = "2026-10-18";
 const at = "2026-10-18T12:00:00.000Z";
 const week = { weekStart: date, budgetAmount: 0, spentAmount: null, recordedAt: null };
 const reserve = { id: "r", costId: "orphan", savedAmount: 0, targetAmount: null, targetDueDate: null, recordedAt: at };
-test("default planning is explicit and fresh; zero budget, unknown actual, recorded zero remain distinct", () => {
+test("new empty planning defaults to ISO Monday and accepts a Monday week without remapping Sunday history", () => {
   const data = createDefaultWorkspacePlanningData();
+  expect(data).toEqual({ schemaVersion: 1, paydayDay: null, weekStartDay: 1, weeks: [], reserves: [] });
+  expect(workspacePlanningDataSchema.parse({ ...data, weeks: [{ ...week, weekStart: "2026-10-19" }] }).weeks[0]?.weekStart).toBe("2026-10-19");
+  expect(workspacePlanningDataSchema.safeParse({ ...data, weeks: [week] }).success).toBe(false);
+  expect(workspacePlanningDataSchema.parse({ ...data, weekStartDay: 7, weeks: [week] }).weeks[0]?.weekStart).toBe(date);
+});
+test("default planning is explicit and fresh; zero budget, unknown actual, recorded zero remain distinct", () => {
+  const data = { ...createDefaultWorkspacePlanningData(), weekStartDay: 7 };
   expect(workspacePlanningDataSchema.parse(data)).toEqual(data);
   data.weeks.push(week);
   expect(createDefaultWorkspacePlanningData().weeks).toEqual([]);
@@ -23,7 +30,7 @@ test("UTC week boundaries handle leap days, year changes and explicit ISO weekda
   expect(workspacePlanningDataSchema.safeParse({ ...createDefaultWorkspacePlanningData(), weekStartDay: 1, weeks: [week] }).success).toBe(false);
 });
 test("strict version, nested fields, uniqueness, timestamps, bounds and actual pairing", () => {
-  const data = createDefaultWorkspacePlanningData();
+  const data = { ...createDefaultWorkspacePlanningData(), weekStartDay: 7 };
   const invalid = [
     { ...data, schemaVersion: 2 }, { ...data, unknown: true }, { ...data, paydayDay: 0 }, { ...data, paydayDay: 32 }, { ...data, weekStartDay: 0 },
     { ...data, weeks: [{ ...week, extra: true }] }, { ...data, weeks: [week, week] },
@@ -40,7 +47,7 @@ test("strict version, nested fields, uniqueness, timestamps, bounds and actual p
   expect(workspacePlanningDataSchema.parse({ ...data, reserves: [reserve] }).reserves[0]?.savedAmount).toBe(0);
 });
 test("520 weeks allowed without auto expiry; 521 rejected; strict CAS envelopes", () => {
-  const data = createDefaultWorkspacePlanningData();
+  const data = { ...createDefaultWorkspacePlanningData(), weekStartDay: 7 };
   const start = new Date("2016-01-03T00:00:00Z");
   const weeks = Array.from({ length: 521 }, (_, index) => ({ ...week, weekStart: new Date(start.getTime() + index * 7 * 86400000).toISOString().slice(0, 10) }));
   expect(workspacePlanningDataSchema.parse({ ...data, weeks: weeks.slice(0, 520) }).weeks).toHaveLength(520);

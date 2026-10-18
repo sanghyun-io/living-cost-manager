@@ -27,7 +27,7 @@ export const planningReserveSchema = z.object({
 export const workspacePlanningDataSchema = z.object({
   schemaVersion: z.literal(1),
   paydayDay: z.number().int().min(1).max(31).nullable(),
-  // ISO weekday: Monday=1 ... Sunday=7. Default Sunday; never locale-dependent.
+  // ISO weekday: Monday=1 ... Sunday=7. Default Monday; never locale-dependent.
   weekStartDay: z.number().int().min(1).max(7),
   weeks: z.array(planningWeekSchema).max(520),
   reserves: z.array(planningReserveSchema).max(1000)
@@ -59,7 +59,7 @@ export type WorkspacePlanningData = z.infer<typeof workspacePlanningDataSchema>;
 export type WorkspacePlanning = z.infer<typeof workspacePlanningSchema>;
 export type PutWorkspacePlanning = z.infer<typeof putWorkspacePlanningSchema>;
 export function createDefaultWorkspacePlanningData(): WorkspacePlanningData {
-  return { schemaVersion: 1, paydayDay: null, weekStartDay: 7, weeks: [], reserves: [] };
+  return { schemaVersion: 1, paydayDay: null, weekStartDay: 1, weeks: [], reserves: [] };
 }
 /** Inclusive calendar period; UTC arithmetic avoids DST/local timezone shifts. */
 export function planningWeekEnd(weekStart: string): string {

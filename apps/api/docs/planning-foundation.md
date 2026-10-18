@@ -14,7 +14,7 @@ viewers. Does not create a row. Returns:
   "workspaceId": "workspace-id",
   "revision": 0,
   "currentSnapshotVersion": 0,
-  "data": { "schemaVersion": 1, "paydayDay": null, "weekStartDay": 7, "weeks": [], "reserves": [] }
+  "data": { "schemaVersion": 1, "paydayDay": null, "weekStartDay": 1, "weeks": [], "reserves": [] }
 }
 ```
 
@@ -34,7 +34,7 @@ Shared exports in `packages/shared/src/planning.ts`:
 `PutWorkspacePlanning`, `createDefaultWorkspacePlanningData`, `planningWeekEnd`.
 
 - `paydayDay`: null or integer 1..31 (calendar clamping belongs to the future UI).
-- `weekStartDay`: ISO Monday=1 through Sunday=7, default **7**. Every weekly
+- `weekStartDay`: ISO Monday=1 through Sunday=7, default **1 (Monday)**. Every weekly
   `weekStart` must match it. Changing this setting with history requires explicit
   reconciliation; no automatic history remapping/deletion.
 - `weeks` (max 520): `{weekStart, budgetAmount, spentAmount, recordedAt}`.
@@ -143,7 +143,7 @@ No workflow, SSH, registry or provider call was made by this backend task.
 
 ## Local verification
 
-- Shared: 208 passing (197 existing + 11 new).
+- Shared: 209 passing (197 existing + 12 new).
 - API: 475 passing (461 existing + 14 new, including two migration rehearsals).
 - Shared/API TypeScript builds pass. No dependency installs or new dependencies.
 - API tests use only a dedicated Unix-socket peer-auth ephemeral PostgreSQL cluster,
@@ -171,3 +171,12 @@ generated clients self-cleaned. Existing small shared/API dist outputs (204/572
 KiB) are retained for main-session handoff/tests; phase-1 web output/node_modules
 were not deleted. No remaining task-owned large artifact, new installation,
 browser profile, Docker image or global cache cleanup.
+
+Monday-default follow-up: new empty planning now defaults to ISO 1 (Monday).
+Explicit Sunday (7) remains supported and Sunday fixtures select it deliberately;
+no persisted history is remapped. The future MVP UI must not expose weekday changes
+with existing history without explicit reconciliation. Shared 209/API 475 tests
+and both TypeScript builds were rerun successfully. The follow-up's owned peer-auth
+test cluster `p1d7` was stopped and its data/socket removed; 48 KiB of evidence is
+retained there. Free space before/after was 25 GiB, within the same approved budget.
+No migration, archive/locking policy, CI, frontend or production change was made.
