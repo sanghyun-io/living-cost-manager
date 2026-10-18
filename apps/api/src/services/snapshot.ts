@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { billingFieldsSchema } from "@living-cost-manager/shared";
+import { planningArchive } from "./planning-storage.js";
 import type {
   FixedCostDto,
   SnapshotHistoryEntry,
@@ -260,10 +261,11 @@ export async function replaceWorkspaceSnapshot(
       });
     }
 
+    const planning = await tx.workspacePlanningState.findUnique({ where: { workspaceId: snapshot.workspaceId } });
     await tx.backupSnapshot.create({
       data: {
         workspaceId: snapshot.workspaceId,
-        payload: effectiveSnapshot as Prisma.InputJsonValue
+        payload: { ...effectiveSnapshot, syncVersion: snapshot.syncVersion + 1, ...planningArchive(planning) } as Prisma.InputJsonValue
       }
     });
 

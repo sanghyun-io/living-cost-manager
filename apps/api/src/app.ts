@@ -20,6 +20,7 @@ import { pushRoutes } from "./routes/push.js";
 import { productTourRoutes } from "./routes/product-tour.js";
 import { coachingPreferenceRoutes } from "./routes/coaching-preferences.js";
 import { snapshotRoutes } from "./routes/snapshot.js";
+import { planningRoutes } from "./routes/planning.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { templateRoutes } from "./routes/templates.js";
 import { createEmailProvider, type EmailProvider } from "./services/email.js";
@@ -136,6 +137,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await api.register(invitationRoutes);
     await api.register(memberRoutes);
     await api.register(snapshotRoutes);
+    await api.register(planningRoutes);
     await api.register(pushRoutes);
     // 익명 마케팅 이벤트 수집(default off — env 게이트 안에서만 등록된다).
     await api.register(marketingRoutes);

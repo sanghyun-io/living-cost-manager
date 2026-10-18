@@ -283,6 +283,7 @@ model Workspace {
   cards         PaymentCard[]
   fixedCosts    FixedCost[]
   backups       BackupSnapshot[]
+  planningState WorkspacePlanningState?
   coachingPreferences UserWorkspaceCoachingPreference[]
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
@@ -300,6 +301,16 @@ model UserWorkspaceCoachingPreference {
 
   @@id([userId, workspaceId])
   @@index([workspaceId])
+}
+
+// Shared financial state. Cost references are stable strings, NOT FixedCost FKs.
+model WorkspacePlanningState {
+  workspaceId String @id
+  revision Int @default(1)
+  payloadJson Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model WorkspaceMember {

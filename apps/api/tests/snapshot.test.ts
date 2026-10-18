@@ -338,8 +338,8 @@ describe("workspace snapshot routes", () => {
       where: { workspaceId: owner.workspace.id }
     });
     const payloads = backups.map((backup) => backup.payload as unknown as WorkspaceSnapshot);
-    expect(payloads).toContainEqual(snapshot);
-    expect(payloads).toContainEqual({ ...legacy, fixedCosts: [...expectedCosts].reverse() });
+    expect(payloads).toContainEqual({ ...snapshot, syncVersion: 1 });
+    expect(payloads).toContainEqual({ ...legacy, syncVersion: 2, fixedCosts: [...expectedCosts].reverse() });
     expect(entries.map((entry) => entry.id).sort()).toEqual(backups.map((backup) => backup.id).sort());
   });
 

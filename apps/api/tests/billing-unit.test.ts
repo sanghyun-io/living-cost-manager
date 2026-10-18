@@ -32,7 +32,8 @@ test("API read and write preserve anchor and renewal fields", async () => {
   const tx = {
     workspace: { findUniqueOrThrow: vi.fn(async () => ({ id: "w", monthlyIncome: 1, syncVersion: 1, categories: [], cards: [], fixedCosts: [cost] })), updateMany: vi.fn(async () => ({ count: 1 })) },
     fixedCost: { findMany: vi.fn(async () => [cost]), deleteMany: vi.fn(), createMany: vi.fn() },
-    paymentCard: { deleteMany: vi.fn() }, category: { deleteMany: vi.fn() }, backupSnapshot: { create: vi.fn() }
+    paymentCard: { deleteMany: vi.fn() }, category: { deleteMany: vi.fn() }, backupSnapshot: { create: vi.fn() },
+    workspacePlanningState: { findUnique: vi.fn(async () => null) }
   };
   const prisma = { ...tx, $transaction: async (fn: (value: typeof tx) => unknown) => fn(tx) } as unknown as PrismaClient;
   const snapshot = await getWorkspaceSnapshot(prisma, "w");
