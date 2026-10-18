@@ -21,8 +21,11 @@ Owner 승인(qa): "기존 Mac Mini에 별도 실행계정으로 분리한 LCM �
 > 워크플로 `ci.yml` 단일 공개(api-tests.yml 제거), run 39048745412 push main
 > success로 FE 배포 CI 전환됨(API는 의도적 a2c7bd9 유지). CF 배포 시크릿:
 > `production` environment 2개 이름 전달 완료(opskv baseline 등록·provider
-> 읽기 검증) + repository 스코프 2개 유지 — **gated deploy 기능 증명 전
-> narrowing 미완료**(staged), 제거는 별개 승인.
+> 읽기 검증) + repository 스코프 2개 유지 — environment 같은 이름 키가 repo
+> 키를 **shadow**하며 자동 fallback은 없다(env 값 오류 시 job 실패, 무음
+> 강등 없음). repo 2개는 **수동 롤백 수단**(env 사본 의도적 제거 시 repo로
+> 복귀)으로만 온존하며, **gated deploy 기능 증명 전 narrowing 미완료**
+> (staged), 제거는 별개 승인.
 
 ## 1. 실행 상태 요약 (2026-10-17 00:20 KST 시점)
 

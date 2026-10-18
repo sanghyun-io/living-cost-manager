@@ -226,10 +226,13 @@ jobs:
   # CF delivery scope (2026-10-18, staged — NOT yet narrowed): the two names
   # below resolve from the `production` environment secrets (2 delivered from
   # the opskv baselines /living-cost-manager/production/CLOUDFLARE_*, provider
-  # read-verified) and also still exist at repository scope (2, kept as the
-  # working fallback until a gated deploy of a new exact SHA succeeds and the
-  # repo-scope names are removed by separate approval). Do not read this as
-  # narrowing completed.
+  # read-verified), which SHADOW same-named repository secrets. The repository
+  # scope pair (2) is NOT an automatic fallback — an invalid environment value
+  # fails this job with no silent downgrade; it is retained only so a
+  # deliberate manual rollback (removing the environment copies) restores
+  # repo-scope resolution. Removal of the repo names requires a successful
+  # gated deploy of a new exact SHA + public identity check (separate
+  # approval). Do not read this as narrowing completed.
   deploy:
     name: Deploy verified artifact to Cloudflare Pages
     needs: [preflight, build-test]
