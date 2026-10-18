@@ -10,6 +10,9 @@ import { createDefaultWorkspacePlanningData, type WorkspacePlanning, type Worksp
 import { usePlanningData } from "../app/lib/usePlanningData";
 import { planningStorageKey, serializePlanning } from "../app/lib/planningStorage";
 import { ServerApiError, type ServerApiClient, type ServerSession } from "../app/lib/serverApi";
+import { combinePlanningStorageState } from "../app/lib/syncStatus";
+
+const profileB = 'ledger:' + JSON.stringify(["acct-2", "ws-2"]);
 
 const monday = "2026-10-19";
 const profileA = 'ledger:' + JSON.stringify(["acct-1", "ws-1"]);
@@ -226,5 +229,80 @@ describe("P2-5 — final-record deletion still reports server-pending empty stat
     expect(view.result.current.planningActive).toBe(false);
     expect(view.result.current.planningServerDirty).toBe(false);
     expect(view.result.current.savePending).toBe(false);
+  });
+});
+
+describe("P2-1 — 마지막 기록 삭제 후 재불러오기: 서버 확인 전 '저장됨' 주장 금지", () => {
+  const payday25 = { ...createDefaultWorkspacePlanningData(), paydayDay: 25 };
+
+  test("동기화된 payday25 → 삭제 → 기기 저장 → 재마운트: unknown 유지, 발산 확인 전 일반 업로드 차단, empty==empty 확인 후에만 agree", async () => {
+    window.localStorage.setItem(planningStorageKey(profileA), serializePlanning(payday25));
+    const first = setup();
+    (first.api.getWorkspacePlanning as ReturnType<typeof vi.fn>).mockResolvedValue(remote(2, payday25));
+    await act(async () => { await first.view.result.current.checkRemote(); });
+    expect(first.view.result.current.baseConfirmed).toBe(true);
+    act(() => { first.view.result.current.setPayday(null); });
+    expect(first.view.result.current.planningServerDirty).toBe(true); // 같은 세션에서는 기존 규칙으로 truthfully dirty
+    await act(async () => { first.view.result.current.retrySave(); });
+    expect(window.localStorage.getItem(planningStorageKey(profileA))).toBe(serializePlanning(createDefaultWorkspacePlanningData()));
+    first.view.unmount();
+    cleanup();
+
+    // 재마운트: 캐시는 '의미 있게 비워진' 상태지만 base/staged가 사라졌다 — 확인 전 healthy 금지
+    const second = setup();
+    (second.api.getWorkspacePlanning as ReturnType<typeof vi.fn>).mockResolvedValue(remote(2, payday25));
+    expect(second.view.result.current.planningActive).toBe(true);
+    expect(second.view.result.current.planningServerUnknown).toBe(true);
+    expect(second.view.result.current.savePending).toBe(false); // '저장 중' 루프 오염 금지
+    const header = combinePlanningStorageState("server-saved", {
+      saveError: false,
+      savePending: second.view.result.current.savePending,
+      active: second.view.result.current.planningActive,
+      serverDirty: second.view.result.current.planningServerDirty,
+      serverUnknown: second.view.result.current.planningServerUnknown
+    });
+    expect(header).toBe("server-unknown");
+
+    // 확인: 서버는 여전히 payday25 → 발산 staging, 일반 업로드는 PUT 없이 차단
+    await act(async () => { await second.view.result.current.checkRemote(); });
+    expect(second.view.result.current.remoteStaged?.data.paydayDay).toBe(25);
+    const out = await act(async () => second.view.result.current.uploadNow());
+    expect(out.status).toBe("diverged");
+    expect(second.api.putWorkspacePlanning).not.toHaveBeenCalled();
+    second.view.unmount();
+    cleanup();
+
+    // 서버가 이미 empty@rev3(교체 저장 후 상태)와 일치 확인 → agree, no-op로 조용해짐
+    const third = setup();
+    (third.api.getWorkspacePlanning as ReturnType<typeof vi.fn>).mockResolvedValue(remote(3, createDefaultWorkspacePlanningData()));
+    await act(async () => { await third.view.result.current.checkRemote(); });
+    expect(third.view.result.current.planningActive).toBe(false);
+    expect(third.view.result.current.planningServerDirty).toBe(false);
+    expect(third.view.result.current.planningServerUnknown).toBe(false);
+    expect(third.view.result.current.remoteStaged).toBeNull();
+  });
+
+  test("캐시 없는 새 empty 계획은 가계부 주장을 막지 않는다(게스트 포함) · 스코프 간 마커 누수 없음", () => {
+    const fresh = setup();
+    expect(fresh.view.result.current.planningActive).toBe(false);
+    fresh.view.unmount();
+    cleanup();
+    const guest = setup({ serverSession: null, serverApi: null });
+    expect(guest.view.result.current.planningActive).toBe(false);
+    expect(guest.view.result.current.planningServerUnknown).toBe(false);
+    guest.view.unmount();
+    cleanup();
+    // ws-1에만 empty 캐시가 있는 상태로 ws-2 열기 → ws-2는 영향 없음(마커 스코프 격리)
+    window.localStorage.setItem(planningStorageKey(profileA), serializePlanning(createDefaultWorkspacePlanningData()));
+    const other = setup({ profileId: profileB });
+    expect(other.view.result.current.planningActive).toBe(false);
+    expect(other.view.result.current.planningServerUnknown).toBe(false);
+  });
+
+  test("existing persisted empty cache를 missing으로 오인하지 않는다(readPlanningCache 상태 구분)", () => {
+    window.localStorage.setItem(planningStorageKey(profileA), serializePlanning(createDefaultWorkspacePlanningData()));
+    const view = setup();
+    expect(view.view.result.current.planningActive).toBe(true);
+    expect(view.view.result.current.planningServerUnknown).toBe(true);
   });
 });

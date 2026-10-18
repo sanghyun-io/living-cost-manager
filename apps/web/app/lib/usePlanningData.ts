@@ -119,6 +119,9 @@ export function usePlanningData({
   const [data, setData] = useState<WorkspacePlanningData>(EMPTY_PLANNING);
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [cacheCorrupt, setCacheCorrupt] = useState(false);
+  // '의미 있게 비워진 캐시'와 '한 번도 안 쓴 캐시 없음'을 구별한다(reload 후
+  // 삭제 상태가 no-op로 위장되어 healthy 헤더를 오염시키는 것 방지).
+  const [hadCache, setHadCache] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [serverSupport, setServerSupport] = useState<PlanningServerSupport>("unknown");
@@ -160,8 +163,11 @@ export function usePlanningData({
   // 헤더가 '서버 저장됨'으로 오염되는 것을 막는다. 서버와 동기화된 빈 계획은 no-op.
   const baseWasMeaningful = base !== null && base.dataHash !== EMPTY_SERIALIZED;
   const stagedWasMeaningful = staged !== null && !isPlanningNoOp(staged.data);
+  // 캐시에 의미 있는(한 번이라도 작성된) 빈 계획이면서 아직 원격 대조 기준이
+  // 없으면 '확인 필요'로 활성 유지 — 재마운트 후 헤더가 임의 healthy 주장 금지.
+  const sealedEmptyUnverified = hadCache && isPlanningNoOp(data) && base === null && staged === null && !conflict;
   const planningActive = !!profileId && loadedScope === profileId &&
-    (!isPlanningNoOp(data) || baseWasMeaningful || stagedWasMeaningful);
+    (!isPlanningNoOp(data) || baseWasMeaningful || stagedWasMeaningful || sealedEmptyUnverified);
   const planningServerDirty = planningActive && hasSession &&
     (conflict || hasRemoteDivergence || (base !== null && currentHash !== base.dataHash));
   const planningServerUnknown = planningActive && hasSession && !conflict && !hasRemoteDivergence && base === null;
@@ -172,6 +178,7 @@ export function usePlanningData({
       setData(EMPTY_PLANNING);
       setLoadedScope(null);
       setCacheCorrupt(false);
+      setHadCache(false);
       setSaveError("");
       setStatusMessage("");
       cacheRaw.current = null;
@@ -203,6 +210,7 @@ export function usePlanningData({
     }
     const cache = readPlanningCache(store, profileId);
     if (!isActive(ticket)) return;
+    setHadCache(cache.raw !== null);
     if (cache.status === "corrupt") {
       // 손상 원본 보존: 화면에는 비운 상태로 보이고 어떤 자동 저장도 하지 않는다.
       corruptRaw.current = cache.raw;
@@ -232,6 +240,7 @@ export function usePlanningData({
     const result = commitPlanningWrite(store, profileId, data, cacheRaw.current);
     if (result.ok) {
       cacheRaw.current = result.value;
+      setHadCache(true);
       setSaveError("");
       return;
     }
@@ -655,6 +664,7 @@ export function usePlanningData({
       return false;
     }
     cacheRaw.current = result.value;
+    setHadCache(true);
     setData(stagedNow.data);
     setBase({ revision: stagedNow.revision, dataHash: planningHash(stagedNow.data) });
     setConflict(false);
@@ -700,6 +710,7 @@ export function usePlanningData({
         return { ok: false, message: result.reason === "quota" ? "저장 공간이 부족해 계획을 교체하지 않았습니다." : "다른 탭 변경으로 계획 교체를 중단했습니다." };
       }
       cacheRaw.current = result.value;
+      setHadCache(true);
       writeBlocked.current = false;
       setData(canonicalPlanning(imported));
       setCacheCorrupt(false);
