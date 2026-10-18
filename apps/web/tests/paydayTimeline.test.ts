@@ -52,6 +52,22 @@ describe("paydayTimeline — 전체 발생 열거 & 급여 전후 분할", () =>
     expect(leap.paydayDate).toBe("2028-02-29");
   });
 
+  test("individual-valid amounts whose sum exceeds the KRW domain flag overflow — never coerce to 0", () => {
+    const bigA = cost("big-a", 1_500_000_000, "2026-10-10", 1);
+    const bigB = cost("big-b", 1_600_000_000, "2026-10-20", 1);
+    const timeline = buildPaydayTimeline([bigA, bigB], "2026-10-10", "2026-11-09", 25);
+    expect(timeline.before.occurrenceCount).toBe(2); // 개별 발생은 유효
+    expect(timeline.before.overflow).toBe(true);    // 합 3.1b > 원 단위 영역
+    expect(timeline.before.total).toBeNull();
+  });
+
+  test("empty known group is honest 0; unknown-only keeps total honest", () => {
+    const timeline = buildPaydayTimeline([cost("far", 5000, "2027-06-15")], "2026-10-10", "2026-11-09", 25);
+    expect(timeline.before.occurrenceCount).toBe(0);
+    expect(timeline.before.total).toBe(0);
+    expect(timeline.before.overflow).toBe(false);
+  });
+
   test("모두 미확인면 총액 null(정확 0 위장 금지)", () => {
     const timeline = buildPaydayTimeline([cost("u", 30000, null)], "2026-10-10", "2026-11-09", 25);
     expect(timeline.before.total).toBeNull();

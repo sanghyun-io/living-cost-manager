@@ -93,8 +93,9 @@ export function UpcomingDues({ fixedCosts, asOf, plan, onRevealItem, paydayDay =
             <Text size="xs" fw={600}>급여 전</Text>
             <Text size="xs" c="dimmed">{formatCivilDateShort(timeline.window.from)}~{timeline.paydayDate ? formatCivilDateShort(timeline.paydayDate) : formatCivilDateShort(timeline.window.untilExclusive)}</Text>
             <Text size="sm" className="tnum" fw={600}>
-              {timeline.before.total === null
-                ? (timeline.before.occurrenceCount === 0 && timeline.unknownCount > 0 ? "확인 일정 없음(미확인 별도)" : "₩0")
+              {timeline.before.overflow ? "합계 범위 초과(계산 불가)"
+                : timeline.before.total === null ? "합계 확인 불가"
+                : timeline.before.occurrenceCount === 0 && timeline.unknownCount > 0 ? "확인 일정 없음(미확인 별도)"
                 : formatWon(timeline.before.total)}
             </Text>
             <Text size="xs" c="dimmed">{timeline.before.occurrenceCount}회 청구</Text>
@@ -104,7 +105,9 @@ export function UpcomingDues({ fixedCosts, asOf, plan, onRevealItem, paydayDay =
               <Text size="xs" fw={600}>급여 후</Text>
               <Text size="xs" c="dimmed">{timeline.paydayDate ? formatCivilDateShort(timeline.paydayDate) : "—"}~{formatCivilDateShort(timeline.window.untilExclusive)}</Text>
               <Text size="sm" className="tnum" fw={600}>
-                {timeline.after.total === null ? "확인 일정 없음" : formatWon(timeline.after.total)}
+                {timeline.after.overflow ? "합계 범위 초과(계산 불가)"
+                  : timeline.after.total === null ? "확인 일정 없음"
+                  : formatWon(timeline.after.total)}
               </Text>
               <Text size="xs" c="dimmed">{timeline.after.occurrenceCount}회 청구</Text>
             </div>

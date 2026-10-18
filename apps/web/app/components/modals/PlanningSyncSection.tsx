@@ -70,7 +70,9 @@ export function PlanningSyncSection({
 
       {!remoteStaged && hasRemoteDivergence ? (
         <Alert variant="light" color="yellow" mt="sm" title="서버 기록과 다릅니다(비교는 닫힘)">
-          <Text size="sm">발산이 남아 있어 일반 서버 저장은 막혀 있습니다. 서버 기록을 다시 확인한 뒤 '서버 기록 적용' 또는 '열린 비교에서의 명시적 교체'만 가능합니다.</Text>
+          <Text size="sm">{isViewer
+            ? "서버 기록이 이 기기의 마지막 확인과 다릅니다. 다시 확인한 뒤 '서버 기록 표시(읽기)'로 볼 수 있으며, 보기 전용이라 저장 수단은 없습니다."
+            : "발산이 남아 있어 일반 서버 저장은 막혀 있습니다. 서버 기록을 다시 확인한 뒤 '서버 기록 적용' 또는 '열린 비교에서의 명시적 교체'만 가능합니다."}</Text>
           <Button size="xs" variant="default" mt="xs" disabled={isBusy} onClick={onCheck}>서버 기록 다시 확인</Button>
         </Alert>
       ) : null}
@@ -82,14 +84,12 @@ export function PlanningSyncSection({
         </Group>
       ) : null}
 
-      {!isViewer ? (
-        <Group gap="xs" mt="sm">
-          <Button size="xs" variant="subtle" disabled={isBusy} onClick={onCheck}>서버 기록 확인</Button>
-          {serverSupport !== "missing" && canUpload && !hasRemoteDivergence ? (
-            <Button size="xs" variant="default" disabled={isBusy || saveError !== ""} onClick={onUpload}>계획 서버 저장</Button>
-          ) : null}
-        </Group>
-      ) : null}
+      <Group gap="xs" mt="sm">
+        <Button size="xs" variant="subtle" disabled={isBusy} onClick={onCheck}>서버 기록 확인</Button>
+        {!isViewer && serverSupport !== "missing" && canUpload && !hasRemoteDivergence ? (
+          <Button size="xs" variant="default" disabled={isBusy || saveError !== ""} onClick={onUpload}>계획 서버 저장</Button>
+        ) : null}
+      </Group>
 
       {remoteStaged ? (
         <Alert variant="light" color="yellow" mt="sm" title="서버 기록이 다릅니다(자동 적용 없음)">

@@ -48,4 +48,13 @@ describe("UpcomingDues 급여 주기 분할(재사용, 4번째 패널 아님)", 
     const html = render([beforeCost], 25);
     expect(html).toContain("실제 입금 보장·잔액 예측이 아닙니다");
   });
+
+  test("개별 항목은 유효해도 그룹 합이 원 단위 영역 초과면 '합계 범위 초과' — ₩0 위장 금지", () => {
+    const bigA: FixedCost = { ...createFixedCost({ id: "ba", name: "등기금A", amount: 1_500_000_000, periodMonths: 1, billingDay: 10 }), billingAnchorDate: "2026-10-10" };
+    const bigB: FixedCost = { ...createFixedCost({ id: "bb", name: "등기금B", amount: 1_600_000_000, periodMonths: 1, billingDay: 20 }), billingAnchorDate: "2026-10-20" };
+    const html = render([bigA, bigB], 25);
+    expect((html.match(/합계 범위 초과/g) ?? []).length).toBeGreaterThanOrEqual(1);
+    expect(/급여 전[\s\S]{0,400}합계 범위 초과/.test(html)).toBe(true);
+    expect(/급여 전[\s\S]{0,400}>₩0</.test(html)).toBe(false);
+  });
 });

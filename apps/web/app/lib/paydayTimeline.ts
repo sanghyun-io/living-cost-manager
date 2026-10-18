@@ -10,8 +10,11 @@ import { addCivilDays, paydayOccurrences, parseCivilDate } from "./planningTime"
 export type PaydayOccurrence<T> = { item: T; date: string; daysUntil: number };
 
 export type PaydayGroup<T> = {
-  /** 확인된 발생이 하나도 없고 미확인 항목도 있으면 total=null(정확 0을 위장하지 않음). */
+  /** empty+확인 발생 0 = 0(정직한 비어 있음); 합이 원 단위 영역(MAX_INT)을
+   * 넘으면 total=null + overflow=true — 절대 0으로 위장하지 않는다. 개별 기록은
+   * 각각 유효해도 합만 영역 밖일 수 있다. */
   total: number | null;
+  overflow: boolean;
   occurrenceCount: number;
   items: PaydayOccurrence<T>[];
 };
@@ -69,11 +72,20 @@ export function enumerateDueOccurrences<T extends PredictableFixedCost>(
   return { occurrences, unknownCount };
 }
 
-function groupOf<T extends PredictableFixedCost>(items: PaydayOccurrence<T>[]): PaydayGroup<T> {
+const MAX_GROUP_TOTAL = 2147483647;
+
+/** empty+일정 미확인 없음 = 정직한 0. 미확인이 남아 있으면 total=null(0 위장 금지).
+ * 합이 원 단위 영역 초과면 total=null + overflow=true — 개별 기록은 유효해도 합은 계산 불가. */
+function groupOf<T extends PredictableFixedCost>(items: PaydayOccurrence<T>[], hasUnknown: boolean): PaydayGroup<T> {
   const sum = items.reduce((total, entry) => total + entry.item.amount, 0);
-  // 합산이 지원 범위를 넘으면 정확한 총액이 아니다(0/왜곡 표시 금지).
-  const total = Number.isSafeInteger(sum) && sum <= 2147483647 ? sum : null;
-  return { total: items.length > 0 ? total : null, occurrenceCount: items.length, items };
+  const withinDomain = Number.isSafeInteger(sum) && sum <= MAX_GROUP_TOTAL;
+  if (items.length === 0) return { total: hasUnknown ? null : 0, overflow: false, occurrenceCount: 0, items };
+  return {
+    total: withinDomain ? sum : null,
+    overflow: !withinDomain,
+    occurrenceCount: items.length,
+    items
+  };
 }
 
 /** 급여일(1..31) 기준으로 확인된 발생을 이전/이후로 나눈다. 급여일이 창 안에
@@ -94,8 +106,8 @@ export function buildPaydayTimeline<T extends PredictableFixedCost>(
   return {
     window: { from, untilExclusive },
     paydayDate: nextPayday,
-    before: groupOf(beforeItems),
-    after: groupOf(afterItems),
+    before: groupOf(beforeItems, unknownCount > 0),
+    after: groupOf(afterItems, unknownCount > 0),
     unknownCount
   };
 }
