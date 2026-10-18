@@ -6,6 +6,7 @@ Based on `52f4d129c94fc4e806aca74408c4418034d2fe1e`, using the separately implem
 
 - Small, dismissible **간단히 둘러볼까요?** invitation; never auto-starts the tour or claims the service itself is new to the user. Its fixed portal does not move the summary/list. After dismissal/completion there is no extra home copy.
 - Four steps: add/quick-add → first visible due-date input or persistent due help (add fallback) → data management/browser backup → optional guest login or account cloud-sync management. These are whitelisted presentation-only DOM targets.
+- The add (step 0) and due-date (step 1) targets live inside the collapsible 항목 관리 panel; entering those steps expands the panel (no other view, focus, or data changes). Steps 2-3 and dismissal never expand or collapse anything, so there is no open/close focus loop.
 - Next/back/complete/close/skip only change tour preferences. They never add an item, open a modal, authenticate, upload a snapshot, delete, or change a ledger. Existing target controls retain their own user-initiated behavior.
 - Tools → **둘러보기** replays even if the preference API is unavailable. Viewer/unverified users can explore; viewer copy does not promise editing. Sample mode permits manual exploration, suppresses automatic invitations, and cannot send account preference writes.
 - Card only receives pointer events; the highlight/layer does not. Nonmodal `role=dialog`, `aria-modal=false`, no focus trap. Escape closes only the tour when no existing modal is active. User-opened modals pause/hide the tour and keep Escape priority.

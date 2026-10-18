@@ -17,6 +17,7 @@ vi.mock("react", () => ({
 }));
 vi.mock("../app/lib/analytics", () => ({ track: vi.fn() }));
 import { useBudgetData } from "../app/lib/useBudgetData";
+import { createFixedCost } from "../app/lib/budget";
 import { getUserDataKey } from "../app/lib/users";
 import { buildLivingCostBackup } from "../app/lib/backup";
 
@@ -178,4 +179,34 @@ test("quota failure retains edits and retry persists latest state; recovery rema
   h.users.currentUser = { id: "other" };
   h.render(); h.save();
   expect(h.values.has(getUserDataKey("other"))).toBe(false);
+});
+
+test("management view is quiet when populated, open while empty, reveal reopens and snapshot swaps reset only the view", () => {
+  const h = setupBudget();
+  let b = h.render();
+  b.applyBudgetSnapshot({ monthlyIncome: 0, categories: [], cards: [], fixedCosts: [] });
+  expect(h.render().managementOpen).toBe(true); // 온보딩: 항목이 없으면 펼침
+
+  const item = createFixedCost({ id: "cost-1", name: "물량", amount: 10000, periodMonths: 1, billingDay: 5 });
+  b = h.render();
+  b.applyBudgetSnapshot({ monthlyIncome: 0, categories: [], cards: [], fixedCosts: [item] });
+  expect(h.render().managementOpen).toBe(false); // 데이터가 있으면 첫 화면은 조용히
+
+  h.render().toggleManagementOpen();
+  expect(h.render().managementOpen).toBe(true);
+  h.render().toggleManagementOpen();
+  expect(h.render().managementOpen).toBe(false);
+
+  const revealed = h.render();
+  revealed.revealItem(item.id);
+  b = h.render();
+  expect(b.managementOpen).toBe(true); // 펼침·필터해제·포커스는 한 상태 배치
+  expect(b.focusItemId).toBe(item.id);
+
+  h.render().requestManagementOpen();
+  b = h.render();
+  b.applyBudgetSnapshot({ monthlyIncome: 0, categories: [], cards: [], fixedCosts: [item] });
+  b = h.render();
+  expect(b.managementOpen).toBe(false); // 다른 공간/스냅샷 전환은 뷰만 기본값으로
+  expect(b.fixedCosts).toHaveLength(1);   // 데이터는 그대로
 });

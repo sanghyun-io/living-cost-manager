@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTourApi, createTourController, createTourStorage, mergeTourStatus, parseTourResponse, tourKey, type TourStatus } from '../app/lib/productTour';
+import { createTourApi, createTourController, createTourStorage, mergeTourStatus, parseTourResponse, tourKey, tourNeedsManagementOpen, type TourStatus } from '../app/lib/productTour';
 
 const a = { id: 'a', token: 'synthetic-a', baseUrl: 'https://synthetic.invalid/v1' };
 const b = { ...a, id: 'b', token: 'synthetic-b' };
@@ -119,5 +119,12 @@ describe('isolated product tour contract', () => {
     await f.controller.enter('account:a', a); f.controller.finish('skipped'); f.controller.finish('completed');
     release(response('skipped')); await settle();
     expect(f.controller.status).toBe('completed'); expect(f.api.put.mock.calls.map(call => call[2])).toEqual(['skipped', 'completed']);
+  });
+});
+
+describe('management-opening tour steps', () => {
+  it('only the add and due steps require the collapsed management panel', () => {
+    expect([0, 1].map(tourNeedsManagementOpen)).toEqual([true, true]);
+    for (const step of [null, 2, 3, 4, -1]) expect(tourNeedsManagementOpen(step)).toBe(false);
   });
 });

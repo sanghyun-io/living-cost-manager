@@ -6,6 +6,7 @@ import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CoachingPreferencesPanel } from "./CoachingPreferencesPanel";
 import { InsightsPanel } from "./InsightsPanel";
+import { UpcomingDues } from "./UpcomingDues";
 import type { FixedCost } from "../lib/budget";
 
 afterEach(cleanup);
@@ -35,23 +36,31 @@ it("recommendation keep action names its exact actionable item and removes it on
   expect(screen.queryByRole("button", { name: "항목B 절감 제안 제외", hidden: true })).toBeNull();
 });
 
-it("unknown protection readiness suppresses savings but retains upcoming billing, totals and later normal recommendations", () => {
+it("unknown protection readiness suppresses savings while the canonical dues surface keeps upcoming billing and totals", () => {
   const keep = vi.fn();
   const dueItems = items.map(item => ({ ...item, billingAnchorDate: "2026-10-20", billingDay: 20, isEndOfMonth: false }));
   const props = { fixedCosts: dueItems, asOf: new Date("2026-10-15T00:00:00Z"), monthlyIncome: 100000, monthlyExpense: 30000, onKeepItem: keep };
-  const h = render(<MantineProvider><InsightsPanel {...props} coachingPreferencesReady={false} /></MantineProvider>);
+  // 납부 예정·합계의 정본은 첫 화면 UpcomingDues(코칭 readiness 와 무관)이고,
+  // InsightsPanel 은 그 복제를 렌더하지 않는다. 절감 제안만 readiness 로 막힌다.
+  const h = render(<MantineProvider>
+    <UpcomingDues fixedCosts={dueItems} asOf={new Date("2026-10-15T00:00:00Z")} />
+    <InsightsPanel {...props} coachingPreferencesReady={false} />
+  </MantineProvider>);
   expect(screen.getByText("내 코칭 설정을 확인할 수 없어 절감 제안을 보류했습니다.")).toBeTruthy();
   expect(screen.queryByText("아낄 수 있는 곳")).toBeNull();
   expect(screen.queryAllByRole("button", { name: /절감 제안 제외$/, hidden: true })).toHaveLength(0);
-  expect(screen.getByText("가까운 납부 · 최대 5건")).toBeTruthy();
-  expect(screen.getByText("항목A")).toBeTruthy(); expect(screen.getByText("항목B")).toBeTruthy();
-  const totalsBefore = h.container.querySelector(".due-total")?.textContent;
-  expect(totalsBefore).toContain("30,000");
-  h.rerender(<MantineProvider><InsightsPanel {...props} coachingPreferencesReady /></MantineProvider>);
+  expect(h.container.querySelector(".quiet-upcoming")).toBeTruthy();
+  expect(h.container.querySelectorAll(".quiet-upcoming-item")).toHaveLength(2);
+  expect(h.container.querySelector(".quiet-upcoming-total")?.textContent).toContain("30,000");
+  expect(h.container.querySelector(".insights-panel .quiet-upcoming-item")).toBeNull(); // 복제 없음
+  h.rerender(<MantineProvider>
+    <UpcomingDues fixedCosts={dueItems} asOf={new Date("2026-10-15T00:00:00Z")} />
+    <InsightsPanel {...props} coachingPreferencesReady />
+  </MantineProvider>);
   expect(screen.queryByText("내 코칭 설정을 확인할 수 없어 절감 제안을 보류했습니다.")).toBeNull();
   expect(screen.getByText("아낄 수 있는 곳")).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "항목B 절감 제안 제외", hidden: true }).length).toBeGreaterThan(0);
-  expect(h.container.querySelector(".due-total")?.textContent).toBe(totalsBefore);
+  expect(h.container.querySelector(".quiet-upcoming-total")?.textContent).toContain("30,000");
 });
 
 it("SSR explicitly reports unavailable protection settings instead of rendering savings actions", () => {

@@ -70,6 +70,19 @@ describe('action-owned keyboard focus restoration', () => {
     }
   });
 
+  // A collapsed '항목 관리' panel (hidden) must never receive focus; once the
+  // reveal state batch opens it, the next flush focuses exactly once.
+  test('collapsed panel fields are skipped until the panel opens, then focused once', () => {
+    const f = fixture(), ticket = f.begin();
+    f.target.hidden = true;
+    f.controller.complete(ticket);
+    f.controller.flush('a:two', true, f.targets);
+    expect(f.target.focus).not.toHaveBeenCalled();
+    f.target.hidden = false;
+    f.controller.flush('a:two', true, f.targets);
+    expect(f.target.focus).toHaveBeenCalledTimes(1);
+  });
+
   test('intentional pointer interaction on BODY cancels, unlike incidental disabled-control blur', () => {
     const f = fixture(), ticket = f.begin('aggregate', 'a:one');
     f.doc.activeElement = f.doc.body; f.dispatch('pointerdown', f.doc.body);
