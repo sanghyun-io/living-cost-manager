@@ -152,8 +152,8 @@ describe("usePlanningData — manual server CAS", () => {
     expect(view.result.current.data.paydayDay).toBe(null); // 자동 적용 없음
     expect(view.result.current.remoteStaged?.data.paydayDay).toBe(10);
     expect(view.result.current.baseConfirmed).toBe(false); // 미반영 편집 → 기준 진행 금지
-    expect(view.result.current.planningServerUnknown).toBe(true);
-    expect(view.result.current.planningServerDirty).toBe(false); // 기준 없는 상태는 '확인 필요'
+    expect(view.result.current.planningServerDirty).toBe(true); // 발산은 곧 서버 미반영(진실)
+    expect(view.result.current.hasRemoteDivergence).toBe(true);
   });
 
   test("미반영 편집이 있으면 재확인이 CAS revision 을 진행시키지 않는다(PUT 는 이전 기준으로 409 경로)", async () => {
@@ -236,8 +236,12 @@ describe("usePlanningData — manual server CAS", () => {
     const out = await act(async () => view.result.current.uploadNow());
     expect(out.status).toBe("skipped");
     expect(api.putWorkspacePlanning).not.toHaveBeenCalled();
-    const adopted = view.result.current.adoptRemote();
-    expect(adopted).toBe(false);
+    // P2-6: 뷰어도 명시적 읽기 hydration(서버 기록 표시) 가능 — PUT/편집은 계속 금지
+    let adopted = false;
+    act(() => { adopted = view.result.current.adoptRemote(); });
+    expect(adopted).toBe(true);
+    expect(view.result.current.data.weeks[0].budgetAmount).toBe(50000);
+    expect(api.putWorkspacePlanning).not.toHaveBeenCalled();
   });
 
   test("샘플 모드(scopeReady false)는 서버를 전혀 호출하지 않는다", async () => {
@@ -310,7 +314,7 @@ describe("usePlanningData — manual server CAS", () => {
     expect(adapter.isCurrentScope(profileB)).toBe(false);
     expect(adapter.getRaw()).toBe(seeded);
     const imported: WorkspacePlanningData = { ...weekData(), paydayDay: 21 };
-    expect(adapter.prepareReplace(seeded)).toBe(true);
+    expect(adapter.prepareReplace()).toBe(true);
     const recovery = [...store._map.keys()].find(key => key.includes(":recovery:"));
     expect(recovery).toBeTruthy();
     expect(store.getItem(recovery!)).toBe(seeded); // 원시 그대로 복구 사본

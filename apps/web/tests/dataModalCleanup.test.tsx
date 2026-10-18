@@ -183,6 +183,7 @@ const createMockProps = (overrides: Partial<DataModalProps> = {}): DataModalProp
     serverConfirmed: false,
     planningActive: false,
     serverDirty: false,
+    hasRemoteDivergence: false,
     conflict: false,
     lastPlanningSyncedAt: null,
     statusMessage: "",
@@ -192,7 +193,7 @@ const createMockProps = (overrides: Partial<DataModalProps> = {}): DataModalProp
     onUpload: vi.fn(),
     onUploadOverwrite: vi.fn(),
     onAdoptRemote: vi.fn(),
-    onDiscardRemote: vi.fn(),
+    onCloseComparison: vi.fn(),
     onRetrySave: vi.fn()
   },
   ...overrides

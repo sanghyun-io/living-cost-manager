@@ -93,16 +93,24 @@ export interface PlanningProps {
   serverConfirmed: boolean;
   planningActive: boolean;
   serverDirty: boolean;
+  hasRemoteDivergence: boolean;
   conflict: boolean;
   lastPlanningSyncedAt: Date | null;
   statusMessage: string;
   localSummary: { weekCount: number; reserveCount: number; paydayDay: number | null };
-  remoteStaged: { weekCount: number; reserveCount: number; paydayDay: number | null; checkedAt: Date } | null;
+  remoteStaged: {
+    weekCount: number;
+    reserveCount: number;
+    paydayDay: number | null;
+    checkedAt: Date;
+    rows: { label: string; budget: number | null; spent: number | null }[];
+    reserveRows: { label: string; saved: number | null; target: number | null }[];
+  } | null;
   onCheck: () => void;
   onUpload: () => void;
   onUploadOverwrite: () => void;
   onAdoptRemote: () => void;
-  onDiscardRemote: () => void;
+  onCloseComparison: () => void;
   onRetrySave: () => void;
 }
 

@@ -133,12 +133,13 @@ export function parseKrwInput(text: string): { ok: true; value: number } | { ok:
 export type PlanningEdit = { ok: true; data: WorkspacePlanningData } | { ok: false; message: string };
 
 /** 가계부 전체 복원(LCM2)의 두 로컬 키 원자성을 위한 최소 어댑터. useBudgetData 는
- * 생성 순서상 planning 훅을 ref로 늦게 받는다. */
+ * 생성 순서상 planning 훅을 ref로 늦게 받는다. prepareReplace 는 현재 메모리 편집의
+ * successful flush + 해당 내용 복구 사본 저장을 요구하므로 인자가 없다. */
 export type PlanningImportAdapter = {
   isCurrentScope: (candidate: string | null | undefined) => boolean;
-  /** 현재 스코프 미로딩이면 undefined(교체 불가), 캐시 없으면 null. */
+  /** 현재 스코프 미로딩이면 undefined(교체 불가), 캐시 없으면 null. prepareReplace 후 재조회. */
   getRaw: () => string | null | undefined;
-  prepareReplace: (raw: string | null) => boolean;
+  prepareReplace: () => boolean;
   replace: (imported: WorkspacePlanningData, rawBefore: string | null) => { ok: boolean; message?: string };
   rollback: (rawBefore: string | null) => void;
 };

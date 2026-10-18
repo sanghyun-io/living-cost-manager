@@ -280,6 +280,10 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
       if (!adapter || !adapter.isCurrentScope(userId)) {
         cancelImport(); setImportMessage("계획 데이터를 안전하게 처리할 수 없어 교체하지 않았습니다. 잠시 후 다시 시도하세요."); return;
       }
+      // 미저장 메모리 편집이 있으면 플러시+복구 사본(현재 내용 기준)이 먼저 성공해야 한다.
+      if (!adapter.prepareReplace()) {
+        cancelImport(); setImportMessage("계획 편집을 기기에 저장/복구하지 못해 교체하지 않았습니다. 저장 공간을 확보한 뒤 다시 시도하세요."); return;
+      }
       const raw = adapter.getRaw();
       if (raw === undefined) {
         cancelImport(); setImportMessage("계획 기록 로딩이 끝나지 않아 교체하지 않았습니다. 잠시 후 다시 시도하세요."); return;
@@ -291,9 +295,6 @@ export function useBudgetData({ users: accountUsers, ui, marketingPersonal = fal
         cancelImport(); setImportMessage("다른 탭에서 저장 데이터가 변경되어 교체하지 않았습니다. 최신 데이터를 확인하세요."); return;
       }
       preserveBeforeImport(userId, before);
-      if (importedPlanning && adapter && !adapter.prepareReplace(planningRawBefore)) {
-        cancelImport(); setImportMessage("교체 전 계획 복구 사본을 저장하지 못해 교체하지 않았습니다. 저장 공간을 확보하세요."); return;
-      }
       // localStorage has no cross-tab compare-and-swap. Recheck after recovery
       // and write synchronously to eliminate the deferred-effect race, without
       // claiming atomic exclusion of simultaneous writes in other processes.

@@ -548,6 +548,7 @@ export default function Home() {
             serverConfirmed: planning.baseConfirmed,
             planningActive: planning.planningActive,
             serverDirty: planning.planningServerDirty,
+            hasRemoteDivergence: planning.hasRemoteDivergence,
             conflict: planning.conflict,
             lastPlanningSyncedAt: planning.lastPlanningSyncedAt,
             statusMessage: planning.statusMessage,
@@ -556,19 +557,31 @@ export default function Home() {
               weekCount: planning.remoteStaged.data.weeks.length,
               reserveCount: planning.remoteStaged.data.reserves.length,
               paydayDay: planning.remoteStaged.data.paydayDay,
-              checkedAt: planning.remoteStaged.checkedAt
+              checkedAt: planning.remoteStaged.checkedAt,
+              rows: [...planning.remoteStaged.data.weeks]
+                .sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1))
+                .slice(0, 6)
+                .map(week => ({ label: week.weekStart.slice(5).replace("-", "/"), budget: week.budgetAmount, spent: week.spentAmount })),
+              reserveRows: planning.remoteStaged.data.reserves.slice(0, 6).map(reserve => ({
+                label: reserve.costLabel ?? reserve.costId.slice(0, 16),
+                saved: reserve.savedAmount,
+                target: reserve.targetAmount
+              }))
             } : null,
             onCheck: () => void planning.checkRemote(),
             onUpload: () => void planning.uploadNow(),
             onUploadOverwrite: () => {
               if (window.confirm("서버의 계획 기록을 이 기기 기록으로 교체합니다. 다른 멤버의 최근 계획이 대체될 수 있습니다. 계속할까요?")) {
-                void planning.uploadNow({ forceStagedRevision: true, allowDiverged: true });
+                void planning.uploadNow({ forceStagedRevision: true });
               }
             },
             onAdoptRemote: () => {
-              if (window.confirm("서버 계획 기록을 이 기기에 적용합니다. 현재 기기 계획은 교체 전 복구 사본으로 보관됩니다.")) planning.adoptRemote();
+              const message = planning.isViewer
+                ? "서버 계획 기록을 이 기기에 표시합니다(읽기 사본). 서버는 변경되지 않습니다."
+                : "서버 계획 기록을 이 기기에 적용합니다. 현재 기기 계획은 교체 전 복구 사본으로 보관됩니다.";
+              if (window.confirm(message)) planning.adoptRemote();
             },
-            onDiscardRemote: planning.discardRemote,
+            onCloseComparison: planning.closeRemoteComparison,
             onRetrySave: planning.retrySave
           }}
         />

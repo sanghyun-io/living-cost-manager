@@ -1,5 +1,5 @@
 import { Alert, Badge, Button, Card, Group, Text } from "@mantine/core";
-import { formatSaveTime } from "../../lib/formatting";
+import { formatWon, formatSaveTime } from "../../lib/formatting";
 import type { PlanningProps } from "../../lib/pageTypes";
 
 const supportLabels: Record<PlanningProps["serverSupport"], string | null> = {
@@ -10,12 +10,17 @@ const supportLabels: Record<PlanningProps["serverSupport"], string | null> = {
   unavailable: "서버 저장소 이상"
 };
 
-/** 데이터 관리 안의 "생활 계획" 절. 상태는 두 줄로 압축하고, 원시 서버 오류/
- * SDK 진단은 보여주지 않으며, 자동 덮어쓰기 경로가 전혀 없다. */
+function amountText(value: number | null): string {
+  return value === null ? "미설정/기록없음" : formatWon(value);
+}
+
+/** 데이터 관리 안의 "생활 계획" 절. 상태는 압축 표시하고 원시 서버 진단은 보여주지
+ * 않으며, 자동 덮어쓰기 경로가 전혀 없다. 발산(서버 기록 상이)은 비교를 닫아도
+ * 계속 서버 반영을 막고, 교체 권한은 열린 비교의 명시 선택에서만 생긴다. */
 export function PlanningSyncSection({
   hasWorkspace, isViewer, canUpload, saveError, isBusy, serverSupport, serverConfirmed,
-  planningActive, serverDirty, conflict, lastPlanningSyncedAt, statusMessage,
-  localSummary, remoteStaged, onCheck, onUpload, onUploadOverwrite, onAdoptRemote, onDiscardRemote, onRetrySave
+  planningActive, serverDirty, hasRemoteDivergence, conflict, lastPlanningSyncedAt, statusMessage,
+  localSummary, remoteStaged, onCheck, onUpload, onUploadOverwrite, onAdoptRemote, onCloseComparison, onRetrySave
 }: PlanningProps) {
   if (!hasWorkspace) {
     return (
@@ -48,18 +53,27 @@ export function PlanningSyncSection({
           <Text className="section-label" size="xs">생활 계획 · 주간 예산·급여일·준비금</Text>
           <Text size="sm" mt="xs">{deviceLine}</Text>
           <Text size="xs" c="dimmed">
-            서버: {serverLabel ?? (serverSupport === "missing"
-              ? "이 서버에서는 계획 저장을 제공하지 않습니다(기기 기록 유지)."
-              : serverConfirmed
-                ? serverDirty ? "미반영 변경 있음(수동 저장)" : "마지막 확인 기준 일치"
-                : "확인 전(자동 덮어쓰지 않음)")}
+            서버: {serverLabel ?? (hasRemoteDivergence
+              ? "기록 상이(미해소) — 저장은 서버 적용 또는 명시 교체 후 가능"
+              : serverSupport === "missing"
+                ? "이 서버에서는 계획 저장을 제공하지 않습니다(기기 기록 유지)."
+                : serverConfirmed
+                  ? serverDirty ? "미반영 변경 있음(수동 저장)" : "마지막 확인 기준 일치"
+                  : "확인 전(자동 덮어쓰지 않음)")}
             {lastPlanningSyncedAt ? ` · 마지막 저장 ${formatSaveTime(lastPlanningSyncedAt)}` : ""}
           </Text>
         </div>
-        <Badge color={conflict || saveError ? "rose" : serverDirty ? "yellow" : "gray"}>
-          {saveError ? "저장 실패" : serverSupport === "missing" ? "미사용" : conflict ? "확인 필요" : serverDirty ? "미반영" : "대조 가능"}
+        <Badge color={conflict || saveError ? "rose" : hasRemoteDivergence || serverDirty ? "yellow" : "gray"}>
+          {saveError ? "저장 실패" : serverSupport === "missing" ? "미사용" : conflict ? "확인 필요" : hasRemoteDivergence ? "서버 기록 상이" : serverDirty ? "미반영" : "대조 가능"}
         </Badge>
       </Group>
+
+      {!remoteStaged && hasRemoteDivergence ? (
+        <Alert variant="light" color="yellow" mt="sm" title="서버 기록과 다릅니다(비교는 닫힘)">
+          <Text size="sm">발산이 남아 있어 일반 서버 저장은 막혀 있습니다. 서버 기록을 다시 확인한 뒤 '서버 기록 적용' 또는 '열린 비교에서의 명시적 교체'만 가능합니다.</Text>
+          <Button size="xs" variant="default" mt="xs" disabled={isBusy} onClick={onCheck}>서버 기록 다시 확인</Button>
+        </Alert>
+      ) : null}
 
       {saveError ? (
         <Group gap="xs" mt="sm">
@@ -71,13 +85,11 @@ export function PlanningSyncSection({
       {!isViewer ? (
         <Group gap="xs" mt="sm">
           <Button size="xs" variant="subtle" disabled={isBusy} onClick={onCheck}>서버 기록 확인</Button>
-          {serverSupport !== "missing" && canUpload ? (
+          {serverSupport !== "missing" && canUpload && !hasRemoteDivergence ? (
             <Button size="xs" variant="default" disabled={isBusy || saveError !== ""} onClick={onUpload}>계획 서버 저장</Button>
           ) : null}
         </Group>
-      ) : (
-        <Text size="xs" c="dimmed" mt="sm">보기 전용 권한입니다. 서버 기록 확인만 가능합니다.</Text>
-      )}
+      ) : null}
 
       {remoteStaged ? (
         <Alert variant="light" color="yellow" mt="sm" title="서버 기록이 다릅니다(자동 적용 없음)">
@@ -87,13 +99,30 @@ export function PlanningSyncSection({
           <Text size="sm">
             서버({formatSaveTime(remoteStaged.checkedAt)} 확인): 주 {remoteStaged.weekCount}개 · 준비 {remoteStaged.reserveCount}개 · 급여일 {remoteStaged.paydayDay ?? "미설정"}
           </Text>
-          {!isViewer ? (
-            <Group gap="xs" mt="xs">
-              <Button size="xs" variant="default" onClick={onAdoptRemote}>서버 기록 적용</Button>
-              <Button size="xs" variant="subtle" color="rose" onClick={onUploadOverwrite}>내 기록으로 서버 저장(교체)</Button>
-            </Group>
+          {remoteStaged.rows.length > 0 ? (
+            <div>
+              {remoteStaged.rows.map(row => (
+                <Text key={row.label} size="xs">서버 주 {row.label}: 예산 {amountText(row.budget)} · 사용 {amountText(row.spent)}</Text>
+              ))}
+            </div>
           ) : null}
-          <Button size="xs" variant="subtle" mt="xs" onClick={onDiscardRemote}>비교 닫기</Button>
+          {remoteStaged.reserveRows.length > 0 ? (
+            <div>
+              {remoteStaged.reserveRows.map(row => (
+                <Text key={row.label} size="xs">서버 준비 {row.label}: 모아둠 {amountText(row.saved)} / 목표 {amountText(row.target)}</Text>
+              ))}
+            </div>
+          ) : null}
+          <Group gap="xs" mt="xs">
+            <Button size="xs" variant="default" onClick={onAdoptRemote}>{isViewer ? "서버 기록을 이 기기에 표시(읽기)" : "서버 기록 적용"}</Button>
+            {!isViewer ? (
+              <Button size="xs" variant="subtle" color="rose" onClick={onUploadOverwrite}>내 기록으로 서버 저장(교체)</Button>
+            ) : null}
+            <Button size="xs" variant="subtle" mt="xs" onClick={onCloseComparison}>비교 닫기</Button>
+          </Group>
+          <Text size="xs" c="dimmed" mt="xs">
+            비교를 닫아도 서버 기록 상이가 해소되지 않으며 일반 저장은 계속 막힙니다. 교체는 이 화면이 열려 있을 때만 선택할 수 있습니다.
+          </Text>
         </Alert>
       ) : null}
 
