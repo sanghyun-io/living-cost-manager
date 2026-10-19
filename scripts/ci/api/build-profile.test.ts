@@ -58,6 +58,7 @@ describe('shared engine forecast/lease/owned cleanup',()=>{
  it('cold and warm forecasts are explicitly estimates, with physical floor once and distinct guest reserve',()=>{
   const f=fixture(),cold=estimate(f.evidence,false),cached=estimate(f.evidence,true);
   expect(cold.kind).toBe('estimate-from-caps-not-measurement');expect(cold.hostPeak).toBeGreaterThan(cached.hostPeak);
+  expect(cold.syntheticPgCap).toBe(cold.parts.syntheticPG);expect(cold.syntheticPgCap).toBe(256*1024**2);
   expect(cold.hostRequired).toBe(16*GiB+Math.ceil(cold.hostPeak*1.2));expect(cold.guestRequired).toBe(2*GiB+Math.ceil(cold.guestPeak*1.2));
   expect(cold.hostPeak).toBe(Object.values(cold.parts).reduce((a:number,b:number)=>a+b,0));expect(cold.parts.streamedArchive).toBeGreaterThan(REFERENCE.historicalArchiveBytes);
  });
@@ -92,6 +93,12 @@ describe('shared engine forecast/lease/owned cleanup',()=>{
  it('DNS-safe names include run/attempt/digest and FULL SHA labels; foreign collision is refused before remove',async()=>{
   const f=fixture();await f.l.prepare();for(const n of Object.values(f.l.names)){expect(n).toContain(`${f.id.run}-${f.id.attempt}-${f.id.sha.slice(0,12)}`);expect(n.length).toBeLessThan(63);}expect(f.l.labels['lcm-ci-owner']).toBe(f.id.sha);
   f.resource('container',f.l.names.pg,{Labels:{'lcm-ci-owner':'other'}});expect(()=>f.l.intent('container',f.l.names.pg)).toThrow('foreign-preexisting');expect(mutations(f)).toEqual([]);
+ });
+ it('phase-scoped probe intents never reuse a removed probe, allow separate phases, and reject out-of-range ordinals',async()=>{
+  const f=fixture();await f.l.prepare();const first=f.l.names.probe+'-baseline-1';f.l.intent('container',first);
+  expect(()=>f.l.intent('container',first)).toThrow('resource-reuse');f.l.intent('container',f.l.names.probe+'-build-1');
+  for(const suffix of ['baseline-0','baseline-11','baseline-9007199254740992','baseline-NaN','other-1'])expect(()=>f.l.intent('container',f.l.names.probe+'-'+suffix)).toThrow('resource-name');
+  const foreign=f.l.names.probe+'-synthetic-2';f.resource('container',foreign,{Labels:{owner:'other'}});expect(()=>f.l.intent('container',foreign)).toThrow('foreign-preexisting');expect(mutations(f)).toEqual([]);
  });
  it.each(['lcm-ci-owner','lcm-ci-run','lcm-ci-attempt'])('cleanup refuses foreign/mismatched %s and keeps the resource',async key=>{
   const f=fixture();await f.l.prepare();f.l.intent('container',f.l.names.pg);f.resource('container',f.l.names.pg,{Labels:{...f.l.labels,[key]:'other'}});

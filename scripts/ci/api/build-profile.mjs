@@ -115,9 +115,10 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
   const fmt=kind==='image'?imageFormat:kind==='container'?'{"Id":{{json .Id}},"Labels":{{json .Config.Labels}}}':'{"Id":{{json .Id}},"Labels":{{json .Labels}}}';
   return JSON.parse(docker([kind,'inspect',name,'--format',fmt]));
  }
- function intent(kind,name) {if(!Object.values(names).includes(name)&&!Object.values(tags).includes(name)&&!(kind==='container'&&name.startsWith(names.probe+'-')&&/^[1-9][0-9]*$/.test(name.slice(names.probe.length+1))))throw Error('resource-name');if(inspect(kind,name))throw Error('foreign-preexisting-resource');const j=owned();if(j.resources.some(r=>r.name===name))throw Error('resource-reuse');j.resources.push({kind,name,baselineAbsent:true});save(j);}
+ const isProbeName=name=>name.startsWith(names.probe+'-')&&/^(baseline|build|synthetic)-(?:[1-9]|10)$/.test(name.slice(names.probe.length+1));
+ function intent(kind,name) {if(!Object.values(names).includes(name)&&!Object.values(tags).includes(name)&&!(kind==='container'&&isProbeName(name)))throw Error('resource-name');if(inspect(kind,name))throw Error('foreign-preexisting-resource');const j=owned();if(j.resources.some(r=>r.name===name))throw Error('resource-reuse');j.resources.push({kind,name,baselineAbsent:true});save(j);}
  function verifyResource(r) {
-  if(r.baselineAbsent!==true||!['image','container','network'].includes(r.kind)||(!Object.values(names).includes(r.name)&&!Object.values(tags).includes(r.name)&&!(r.kind==='container'&&r.name.startsWith(names.probe+'-')&&/^[1-9][0-9]*$/.test(r.name.slice(names.probe.length+1)))))throw Error('unclaimed-resource');
+  if(r.baselineAbsent!==true||!['image','container','network'].includes(r.kind)||(!Object.values(names).includes(r.name)&&!Object.values(tags).includes(r.name)&&!(r.kind==='container'&&isProbeName(r.name))))throw Error('unclaimed-resource');
   const x=inspect(r.kind,r.name);if(!x)return null;const l=x.Config?.Labels??x.Labels;for(const [k,v]of Object.entries(labels))if(l?.[k]!==v)throw Error('foreign-resource-preserved');if(r.createdId&&r.createdId!==x.Id)throw Error('resource-id-drift');if(r.kind==='image'&&owned().preexistingImages.includes(x.Id))throw Error('preexisting-image-id-preserved');
   if(!r.createdId){const j=owned();j.resources=j.resources.map(a=>a.name===r.name?{...a,createdId:x.Id}:a);save(j);}return x;
  }
@@ -185,7 +186,7 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
   }catch{teardown();throw Error('overlay-prepare-failed');}
  }
  async function runImage(args) {
-  const j=owned();if(j.controllerPid||args.includes('--profile-worker')||!['baseline','build','synthetic','archive'].includes(args[0])||args[args.indexOf('--sha')+1]!==id.sha)throw Error('image-operation');
+  const j=owned();if(j.stage!=='ready'||j.controllerPid||args.includes('--profile-worker')||!['baseline','build','synthetic','archive'].includes(args[0])||args[args.indexOf('--sha')+1]!==id.sha)throw Error('image-operation');
   const nonce=randomBytes(24).toString('hex');
   try{capacity();save({...owned(),controllerPid:process.pid,nonce});await watch(process.execPath,[fileURLToPath(new URL('./image.mjs',import.meta.url)),...args,'--profile-worker'],{env:{...env,DOCKER_BUILDKIT:'1',LCM_PROFILE_CONTROLLER_NONCE:nonce},cwd:j.workspace,log,interval:j.plan.profile==='verified-runtime-overlay'?500:interval,check:()=>sample(args[0])});if(args[0]==='archive')completeProof();}
   catch{if(existsSync(metricsFile)){const m=json(metricsFile);m.status='failed-or-cancelled';writeFileSync(metricsFile,JSON.stringify(m),{mode:0o600});}teardown();throw Error('image-halted');}

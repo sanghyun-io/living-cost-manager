@@ -5,7 +5,7 @@ import {join,dirname,resolve,posix} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {PROD,MIGRATION,REPO} from './constants.mjs';
 import {identity} from './build-profile.mjs';
-import {GiB,MiB,RESERVES} from './resource-budget.mjs';
+import {GiB,MiB,RESERVES,SYNTHETIC_PG_CAP} from './resource-budget.mjs';
 export const BASE=Object.freeze({source:PROD.currentReleaseSha,imageId:PROD.currentImageId,node:'v24.19.0',nodeMajor:24,abi:'137',prisma:'6.19.3',platform:'linux/arm64'});
 export const sha=b=>createHash('sha256').update(b).digest('hex');
 export const canonical=x=>JSON.stringify(x&&typeof x==='object'?Array.isArray(x)?x.map(v=>JSON.parse(canonical(v))):Object.fromEntries(Object.keys(x).sort().map(k=>[k,JSON.parse(canonical(x[k]))])):x);
@@ -54,7 +54,7 @@ export function verifyBase(m,transport=true) {
 export function overlayEstimate(m,bundle,localBase=false,pgCached=true,nativeGcReserve=0) {
  verifyBase(m,false);const B=m.accountingBytes,C=m.imageBytes,A=m.archiveBytes??Math.ceil(B*1.1),delta=Math.ceil((bundle.bytes*2+m.audit.generatedBytes*2)/MiB)*MiB;
  const metadata=32*MiB,importGuest=localBase?0:B*2+C;
- const retained=localBase?0:B+C,pgResident=pgCached?0:824000000,probe=pgResident+256*MiB;
+ const retained=localBase?0:B+C,pgResident=pgCached?0:824000000,probe=pgResident+SYNTHETIC_PG_CAP;
  const candidateCap=B+delta,archiveCap=Math.ceil(candidateCap*1.1);
  const stages={import:{host:importGuest+(localBase?0:A)+bundle.bytes+metadata,guest:importGuest},build:{host:retained+delta+bundle.bytes+metadata,guest:retained+delta+metadata},synthetic:{host:retained+delta+probe+bundle.bytes+metadata,guest:retained+delta+probe},archive:{host:retained+delta+pgResident+candidateCap+archiveCap+bundle.bytes+metadata,guest:retained+delta+pgResident+candidateCap+metadata}};
  // Overall totals above include cumulative residency from the initial baseline.
@@ -63,6 +63,6 @@ export function overlayEstimate(m,bundle,localBase=false,pgCached=true,nativeGcR
  const futureStages={import:stages.import,build:{host:delta+bundle.bytes+metadata,guest:delta+metadata},synthetic:{host:probe+bundle.bytes+metadata,guest:probe+metadata},archive:{host:candidateCap+archiveCap+bundle.bytes+metadata,guest:candidateCap+metadata}};
  const hostPeak=Math.max(...Object.values(stages).map(s=>s.host)),guestPeak=Math.max(...Object.values(stages).map(s=>s.guest));
  if(!Number.isFinite(nativeGcReserve)||nativeGcReserve<0)throw Error('native-gc-headroom');
- return {kind:'estimate-from-verified-baseline-and-caps-not-measured-peak',profile:'verified-runtime-overlay',stages,futureStages,hostPeak,guestPeak,hostRequired:RESERVES.physicalFloor+RESERVES.physicalRecovery+Math.ceil(hostPeak*1.2),guestRequired:Math.max(RESERVES.guestOperational,nativeGcReserve)+Math.ceil(guestPeak*1.2),runtimeCap:candidateCap,archiveCap,deltaCap:delta,baseResident:retained,localBase,pgCached,nativeGcReserve,assumptions:['No pnpm install/full Linux builder or new VM','Cold import includes compressed content + resident image + extraction scratch; local archive deleted after verified load','Archive conservatively includes daemon export scratch as well as one host gzip file','Fresh phase df includes all persisted earlier allocations; sampled deltas include other clients','Generated-client cap twice fresh baseline measured bytes, input capped and verified; native generation/smoke still required','Observed native GC headroom is also reserved to avoid inducing shared cache eviction; no GC configuration is changed']};
+ return {kind:'estimate-from-verified-baseline-and-caps-not-measured-peak',profile:'verified-runtime-overlay',stages,futureStages,hostPeak,guestPeak,hostRequired:RESERVES.physicalFloor+RESERVES.physicalRecovery+Math.ceil(hostPeak*1.2),guestRequired:Math.max(RESERVES.guestOperational,nativeGcReserve)+Math.ceil(guestPeak*1.2),runtimeCap:candidateCap,archiveCap,deltaCap:delta,syntheticPgCap:SYNTHETIC_PG_CAP,baseResident:retained,localBase,pgCached,nativeGcReserve,assumptions:['No pnpm install/full Linux builder or new VM','Cold import includes compressed content + resident image + extraction scratch; local archive deleted after verified load','Archive conservatively includes daemon export scratch as well as one host gzip file','Fresh phase df includes all persisted earlier allocations; sampled deltas include other clients','Generated-client cap twice fresh baseline measured bytes, input capped and verified; native generation/smoke still required','Observed native GC headroom is also reserved to avoid inducing shared cache eviction; no GC configuration is changed']};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))try{if(process.argv[2]==='bundle')console.log(JSON.stringify(bundle(process.cwd(),process.argv[3])));else throw Error('overlay-operation');}catch{console.error('runtime-overlay: gate-failed');process.exitCode=1;}

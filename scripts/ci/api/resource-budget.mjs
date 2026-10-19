@@ -4,6 +4,7 @@ import {readFileSync,lstatSync} from 'node:fs';
 import {join} from 'node:path';
 import {BUDGET} from './constants.mjs';
 export const GiB=1024**3,MiB=1024**2;
+export const SYNTHETIC_PG_CAP=256*MiB;
 export const REFERENCE=Object.freeze({kind:'measured-darwin-reference-not-linux',at:'2026-10-19',dependencyBytes:914145280,packageKey:'a09911e4e514d640bd1f238427a583aabf5f503671121ad3f1937a4712f39c2c',historicalRuntimeBytes:660000000,historicalArchiveBytes:153910829,sourceBytes:600480,sourceFiles:96});
 export const RESERVES=Object.freeze({physicalFloor:BUDGET.mac.floorGib*GiB,physicalRecovery:BUDGET.mac.reserveGib*GiB,guestOperational:2*GiB,margin:GiB/2});
 export const PUBLIC_BASES=Object.freeze({nodeDigest:'node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1',nodeVersion:'24.21.0',nodeAccountingBytes:239000000,pgDigest:'postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea',pgAccountingBytes:412000000});
@@ -33,14 +34,14 @@ export function estimate(e,warm=false) {
   basePull:e.baseCached?0:e.baseAccountingBytes*2,pgBasePull:e.pgCached?0:PUBLIC_BASES.pgAccountingBytes*2,
   linuxInstall:warm?0:dependencyCap,packageStore:warm?0:dependencyCap,
   compile:warm?0:compileCap,productionDeploy:warm?0:runtimeCap,
-  runtimeExport:runtimeCap,streamedArchive:Math.ceil(runtimeCap*1.1),syntheticPG:256*MiB,buildMetadata:256*MiB};
+  runtimeExport:runtimeCap,streamedArchive:Math.ceil(runtimeCap*1.1),syntheticPG:SYNTHETIC_PG_CAP,buildMetadata:256*MiB};
  // Persisted intermediate outputs remain in this total across ALL stages.
  const hostPeak=Object.values(parts).reduce((a,b)=>a+b,0);
  const guestPeak=hostPeak-parts.context-parts.streamedArchive;
  return {kind:'estimate-from-caps-not-measurement',profile:warm?'verified-identical-input-cache':'cold-unverified-cache',parts,hostPeak,guestPeak,
   hostRequired:RESERVES.physicalFloor+RESERVES.physicalRecovery+Math.ceil(hostPeak*1.2),
   guestRequired:RESERVES.guestOperational+Math.ceil(guestPeak*1.2),
-  runtimeCap,buildImageCap:dependencyCap*2+runtimeCap+compileCap,archiveCap:parts.streamedArchive,
+  runtimeCap,buildImageCap:dependencyCap*2+runtimeCap+compileCap,archiveCap:parts.streamedArchive,syntheticPgCap:SYNTHETIC_PG_CAP,
   assumptions:['Linux install allowance = twice measured Darwin dependency reference; NOT measured Linux usage','No credit for anonymous/shared build-cache du','Warm credit requires a live retained inline-cache image AND successful same-input sampled proof','Streaming avoids a plain tar and duplicate archive','Guest reserve 2GiB is LCM operational headroom, not the host physical policy floor','Caps and sampled minima are not atomic guarantees; shared activity is included']};
 }
 export function admit(plan,free) {

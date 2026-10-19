@@ -71,7 +71,7 @@ try {
   if(cmd!=='verify-archive') {
     builder=lifecycle();builder.owned();
     if(flag('sha')!==undefined && flag('sha')!==builder.id.sha)fail('source identity mismatch');
-    if(['build','synthetic','archive'].includes(cmd)) {
+    if(['baseline','build','synthetic','archive'].includes(cmd)) {
       if(argv.includes('--profile-worker'))builder.worker();
       else {await builder.runImage(argv);console.log('api-image: monitored operation ok');process.exit(0);}
     }
@@ -88,7 +88,10 @@ const SYN = builder?.names;
 const labelArgs=Object.entries(builder?.labels??{}).flatMap(([k,v])=>['--label',`${k}=${v}`]);
 let probeCount=0;
 function probe(args,opts={}) {
- const name=`${SYN.probe}-${++probeCount}`;builder.intent('container',name);
+ // A CLI invocation is one phase. Phase names prevent ordinal reuse across
+ // separate baseline/build/synthetic processes sharing the same durable lease.
+ if(!['baseline','build','synthetic'].includes(cmd)||++probeCount>10)fail('probe phase/count');
+ const name=`${SYN.probe}-${cmd}-${probeCount}`;builder.intent('container',name);
  return docker(['run','--rm','--name',name,...labelArgs,...args],opts);
 }
 if(cmd==='baseline') {
@@ -244,8 +247,9 @@ if (cmd === "synthetic") {
   }
   const health = JSON.parse(body);
   if (health.commitSha !== sha) fail(`health commitSha ${health.commitSha} != ${sha}`);
-  const pgBytes=Number(docker(['exec',SYN.pg,'du','-sk','/var/lib/postgresql/data']).stdout.trim().split(/\s+/)[0])*1024;
-  if(!Number.isFinite(pgBytes)||pgBytes<=0||pgBytes>builder.owned().plan.parts.syntheticPG)fail('synthetic PG footprint cap');
+  const pgKiB=docker(['exec',SYN.pg,'du','-sk','/var/lib/postgresql/data']).stdout.trim().match(/^([1-9][0-9]*)[ \t]+\/var\/lib\/postgresql\/data$/)?.[1];
+  const pgBytes=Number(pgKiB)*1024,pgCap=builder.owned().plan.syntheticPgCap;
+  if(!Number.isSafeInteger(pgBytes)||pgBytes<=0||!Number.isSafeInteger(pgCap)||pgCap<=0||pgBytes>pgCap)fail('synthetic PG footprint cap');
   teardown();
   builder.done('synthetic');
   console.log(`synthetic: ok (migrations=${migCount} health=${health.commitSha} release=${health.releaseId})`);

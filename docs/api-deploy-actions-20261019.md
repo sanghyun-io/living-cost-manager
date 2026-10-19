@@ -778,3 +778,52 @@ preexisting base preservation, exact own alias cleanup, strict overlay metadata,
 stream cap/child failure and the prior restore/SQL/identity/REST guards. New engine
 execution remains fake; actual readonly base and client capability observations
 are distinctly recorded and are not a candidate build/measurement proof.
+
+## 13. Source P2 follow-up — whole CLI lifecycle regression
+
+Independent review identified three executable gaps in403f60a, despite its239
+tests: probe ordinals reset per CLI process, overlay lacked the full-build-only
+`parts.syntheticPG` path, and baseline dispatch did not enter its already-defined
+monitor/controller. No new production/resource permission or architecture is added.
+
+- Probe names are now run/attempt/digest + **fixed phase + ordinal1..10**. The lease
+  retains each fresh intent: a removed `--rm` probe cannot have its intent reused,
+  while baseline-1/build-1/synthetic-1 are distinct. Invalid phase/ordinal and
+  foreign-name/label/ID checks still fail; no intent overwrite or cleanup weakening.
+- Both plan types expose one explicit `syntheticPgCap` (existing256MiB value).
+  The synthetic CLI parses checked integer KiB from the exact owned PG path and
+  enforces that cap; missing/malformed/over-cap values fail before success markers.
+- Baseline enters the same parent `runImage` controller as build/synthetic/archive.
+  Parent admission,500ms requested samples, cancellation/timeout, private worker
+  nonce/PID and owned cleanup now cover SSH transfer, Docker load and base audit.
+  Direct baseline `--profile-worker` cannot skip that controller. Import remains
+  the baseline capacity phase. Physical15+recovery1 and all forecasts are unchanged.
+
+The new regression uses a **single durable lease and stateful fake engine**, with
+separate actual Node CLI processes baseline→build→synthetic→archive, then actual
+archive verification and cleanup. Docker/SSH are bounded protocol doubles; SSH
+still joins remote argv and executes an outer shell. Only the private-client
+dependency is injected with standard test-only Node module hooks; production has
+no test-mode flag or budget/ownership bypass. Valid synthetic execution reaches
+migration, planning roundtrip, health, footprint validation, cleanup and archive.
+An isolated prebuilt-candidate fixture specifically reaches the actual footprint
+handler; an over-cap fixture still fails and cleans only its own resources.
+
+Red evidence: current regressions run against a disposable copy of committed403
+produced five expected failures. The real worker logs identified `resource-reuse`
+at build and `TypeError reading syntheticPG` after the real du handler. Baseline
+also accepted a direct worker flag and incorrectly succeeded while fake SSH/load
+caused a host/guest capacity dip. The fixed source passes those same CLI tests;
+capacity-dip cases record failed/cancelled samples, signal their own child group,
+remove the partial LOCAL archive and do not produce build/archive success. Foreign
+containers/networks/images remain intact. The baseline source-copy fixture and all
+test-owned files/children are removed; no real image, export, customer data or
+production operation is involved. First real Linux generation/build/measurement
+still requires independent closure of these source fixes.
+
+Verification: **247 pipeline tests**, **48 runner-kit tests**, **15 Python proof
+tests**, plus Node/CJS/Bash/YAML/diff checks. The capacity-dip tests also invoke
+subsequent build/archive CLIs: a cleaned terminal lease refuses heavy re-entry
+before any engine operation and cannot create a success artifact. All prior239
+tests remain; tests add no production bypass or changed reserve. No image build,
+export/import, production operation, push, new tool or OS change was executed.
