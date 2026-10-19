@@ -7,6 +7,15 @@ printf 'opskv %s\n' "$*" >>"$S/calls.log"
 sub="${1:-}"
 case "$sub" in
   show) cat "$S/opskv_show.txt" ;;
+  get)
+    out=""; prev=""
+    for a in "$@"; do [ "$prev" = --output ] && out="$a"; prev="$a"; done
+    [ -n "$out" ] && [ ! -e "$out" ] || exit 1
+    umask 077
+    if [ -f "$S/opskv_stored.txt" ]; then cat "$S/opskv_stored.txt" >"$out"
+    else printf '%s' 'lcm-coaching-a2c7bd9af46d84dc88b2a36656c25949b57076b0@sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f' >"$out"; fi
+    chmod 600 "$out"
+    ;;
   set)
     want=""; vf=""; prev=""
     for a in "$@"; do

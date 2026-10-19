@@ -3,7 +3,7 @@ import {mkdtempSync,writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {classifyCompare} from './paths.mjs';
+import {classifyCompare,classifyLiveCompare,liveApiBase} from './paths.mjs';
 const base='a'.repeat(40),head='b'.repeat(40),ids={base,head};
 // Synthetic values, actual REST response field names. No nonstandard head/from
 // or total_count fields: completeness must come from the bounded REST lists.
@@ -14,7 +14,7 @@ describe('actual compare REST shape',()=>{
  it('positively binds a complete web-only response without invented fields',()=>{
   expect(classifyCompare(rest(),ids)).toEqual({needsApi:false,reason:'web-only'});
  });
- it.each(['apps/api/src/app.ts','packages/shared/src/x.ts','prisma/schema.prisma','package.json','pnpm-lock.yaml','.github/workflows/ci.yml','scripts/ci/api/deploy-host.sh'])('API-impacting path %s',filename=>{
+ it.each(['apps/api/src/app.ts','packages/shared/src/x.ts','prisma/schema.prisma','package.json','pnpm-lock.yaml','.github/workflows/ci.yml','scripts/ci/api/image.mjs'])('API-impacting path %s',filename=>{
   expect(classifyCompare(rest({files:[{filename,status:'modified'}]}),ids).needsApi).toBe(true);
  });
  it.each([299,300,301])('bounds the REST file list at %i (no total_count available)',n=>{
@@ -67,5 +67,20 @@ describe('actual compare REST shape',()=>{
  });
  it.each([{base:'0'.repeat(40),head},{base,head:'0'.repeat(40)},{base,head:'HEAD'},{base:'main',head}])('requires exact immutable event SHAs: %j',inputs=>{
   expect(classifyCompare(rest(),inputs).needsApi).toBe(true);
+ });
+});
+describe('actual serving API release, not event.before',()=>{
+ const live='c'.repeat(40),health={ok:true,commitSha:live},cmp=files=>rest({base_commit:{sha:live},merge_base_commit:{sha:live},files:files.map(filename=>({filename,status:'modified'}))});
+ it('failed release followed by web-only event still needs foundation changes from LIVE source',()=>{const c=cmp(['apps/api/src/planning.ts','apps/web/src/App.tsx']);expect(classifyLiveCompare(c,{health,head}).needsApi).toBe(true);expect(classifyCompare(rest(),ids).needsApi).toBe(false);});
+ it('successfully serving API followed by pure web changes skips API',()=>expect(classifyLiveCompare(cmp(['apps/web/src/App.tsx']),{health,head}).needsApi).toBe(false));
+ it.each(['scripts/ci/api/deploy.mjs','scripts/ci/api/deploy-host.sh','scripts/ci/api/metadata.mjs','scripts/ci/api/deploy-diagnostics.mjs','scripts/ci/api/paths.mjs','scripts/ci/api/local-restore.mjs'])('deployment/metadata support %s alone does not rebuild an already-serving payload',p=>expect(classifyLiveCompare(cmp([p]),{health,head}).needsApi).toBe(false));
+ it.each(['scripts/ci/api/image.mjs','scripts/ci/api/runtime-overlay.cjs','scripts/ci/api/Dockerfile.runtime-overlay','scripts/ci/api/build-profile.mjs'])('image producer/recipe %s still needs API image',p=>expect(classifyLiveCompare(cmp([p]),{health,head}).needsApi).toBe(true));
+ it.each([null,{}, {ok:false,commitSha:live},{ok:true,commitSha:'main'},{ok:true,commitSha:'0'.repeat(40)}])('unhealthy/malformed live evidence fails closed: %j',h=>expect(classifyLiveCompare(cmp([]),{health:h,head}).needsApi).toBe(true));
+ it.each([{status:'behind'},{status:'diverged'},{base_commit:{sha:'d'.repeat(40)}},{merge_base_commit:{sha:'d'.repeat(40)}},{merge_base_commit:undefined}])('foreign/nonancestor live source fails closed: %j',extra=>expect(classifyLiveCompare({...cmp([]),...extra},{health,head}).needsApi).toBe(true));
+ it('only healthy exact public source SHA can become a compare route',()=>{expect(liveApiBase(health)).toBe(live);expect(()=>liveApiBase({ok:true,commitSha:'a;bad'})).toThrow();});
+ it.each([['apps/api/src/planning.ts',true],['apps/web/src/App.tsx',false]])('live CLI source binding produces expected gate for %s',(path,expected)=>{
+  const p=mkdtempSync(join(tmpdir(),'lcm-paths-'));roots.push(p);writeFileSync(join(p,'health.json'),JSON.stringify(health));writeFileSync(join(p,'compare.json'),JSON.stringify(cmp([path])));
+  const r=spawnSync(process.execPath,[join(import.meta.dirname,'paths.mjs'),'detect-live','--health',join(p,'health.json'),'--compare',join(p,'compare.json'),'--head',head,'--output',join(p,'output')],{encoding:'utf8'});
+  expect(r.status).toBe(0);expect(readFileSync(join(p,'output'),'utf8')).toContain(`needs_api=${expected}`);
  });
 });

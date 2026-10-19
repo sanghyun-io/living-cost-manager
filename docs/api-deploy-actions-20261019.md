@@ -896,3 +896,97 @@ test-owned roots/children and temporary native client contexts are cleaned. Only
 the two small protected static receipts/logs are retained for review. No full
 candidate image, base export/load, customer backup/restore, DDL, promotion, push,
 global client configuration change, VM operation or daemon maintenance occurred.
+
+## 15. First actual API backup failure — identity cast, not a dump/permission failure
+
+Main's run39230515032/attempt1 at source847 passed build-test/classification,
+production-gated image build, Linux Prisma regeneration, planning-model roundtrip,
+health and archive upload. The preserved image journal was read selectively:
+status=passed, completed baseline/runtime/synthetic/archive, cleaned,89 samples,
+runtime accounting667000000B. Admission host21868621824B/guest8022114304B;
+minimum21286473728B/7282618368B; shared deltas582148096B/739495936B. These are
+sampled SHARED observations, not atomic/owned peak attribution. The prior §14
+first image-build blocker is closed by that actual run; it is not a deployment proof.
+
+API-deploy imported the candidate but failed backup. Read-only confirmation here:
+serving image remains5d133132.../a2, public health200/ok/sourcea2; schema livingcost.lcm
+has24 tables,11 applied/12 history, planning table absent. The run directory has
+no customer dump, backup.manifest, restore receipt or migrate.log. Its150B stderr
+contains no classified backup error; it is not evidence of a valid backup. No dump,
+restore, migration, activation, KV write or backup retry was executed manually.
+
+**Actual cause:** the candidate's real Prisma connection metadata returned the
+correct DB/schema/server/port, but `inet_server_addr()::text` formats a bare IPv4
+address as `PG_IP/32`. Docker's expected container address is `PG_IP`. The strict
+string comparison therefore halts before pg_dump. A second read-only query showed
+`host(inet_server_addr())` removes exactly that mask, without changing the actual
+server. No credential URL/value/hash or customer record was returned. Current
+read-only serving Config.Image also matches the pinned old compose digest reference.
+
+Fix is PostgreSQL `host(inet_server_addr())`, NOT dropping server/schema/case/port
+checks, changing URL parsing, granting permissions or altering sealed-env semantics.
+Local reproduction runs the committed847 backup helper with a fake that correctly
+models PostgreSQL's inet driver result: halt25/db-identity-mismatch, no pg_dump or
+manifest. Current helper passes the same target. Native isolated synthetic PG16
+also confirms literal `inet::text` vs `host(inet)` behavior without enabling TCP.
+Existing real synthetic dump/restore/migration tests remain; no production dump was made.
+
+Backup now records only fixed substep/outcome/code/source-line metadata in its
+root-private0600 backup-status.json. Known halts and unexpected shell errors never
+record BASH_COMMAND, SQL, env or row output. Root mktemp/staging, size/peak guards,
+actual Prisma URL connection and native-restore-before-DDL receipt are unchanged.
+
+Deploy child failures retain at most64KiB failed stderr per call in own0700/0600
+`~/.local/state/lcm-api-deploy-diagnostics/<run>-<attempt>-<sha>/failed-stderr.log`,
+outside artifact directories. **No child stdout is persisted**, especially binary
+dump transfer. Only one strict allowlisted helper halt can become a public
+operation/code/detail; unknown/multiline/binary output is discarded from diagnostics.
+Raw stderr stays private; no customer restore log is opened or copied to chat/artifacts.
+
+### Release detection is based on serving API, not event.before
+
+The classifier fetches bounded public health from the fixed HTTPS API URL (no
+redirect/auth), accepts only healthy exact40hex source, then GETs the fixed repo
+compare `LIVE_API_SHA...EVENT_HEAD`. Exact base/head, explicit merge-base ancestry,
+status, complete chronological commits below250 and files below300 are required;
+unknown/error/foreign/nonancestor/truncation stays needs_api=true. Event.before is
+not treated as a successful release. Thus a web-only commit after failed847 still
+includes the undeployed planning foundation from livea2 and cannot skip API.
+Conversely live847 followed only by web changes can skip rebuilding API.
+
+Business/schema/package and concrete image producer/recipe helpers count as API
+input. Deploy/restore/diagnostic/classifier/metadata-only support alone does not
+change an already-serving payload. CI workflow changes remain conservative API
+input. The pinned old-image CAS is NOT refreshed from health or removed; a later
+genuine API upgrade still needs a reviewed baseline manifest refresh.
+
+### Exact deployed reference and official KV CAS
+
+Current code's local IMAGE_NAME and remote NEW_REF already both used `:candidate`;
+there was no proven suffix mismatch to guess-fix. Registration now obtains the
+actual compose/container Config.Image, immutable ID and serving health identity
+from a source-pinned serving-reference helper. Only that exact observed string is
+written after public health agrees. `opskv show` must identify existing kind=config
+and a valid version; `get --output` uses a fresh0600 file, removed after comparison.
+Before backup/SQL a new read-only KV preflight requires official value to match
+the observed serving reference. Unknown/unverified differences fail without a
+set; no key is created or silently overwritten. After verified promotion, only
+the reviewed pinned old reference may transition to the observed new reference,
+using the read version CAS; an already-equal value is idempotent. Source/health,
+kind, reference, Config.Image drift and stale CAS are tested. No actual key value
+was retrieved here; only public CLI help was checked, and no KV write occurred.
+
+Next is independent review, then a **fresh new-SHA Actions run**. Do not run the
+remote backup/migration by hand or reuse failed evidence as a successful restore.
+The one conditional DB/API approval is retained without asking it again. A first
+successful fresh backup/actual native restore and receipt is still mandatory
+before the already-approved pinned SQL229a operation. Public FE remains99/APIa2.
+
+Local validation for this revision: **286 pipeline tests**, **48 runner tests**,
+**15 Python proof tests**, Node/CJS/Bash/YAML and extracted classifier/deploy shell
+syntax, and diff checks pass. Read-only production state/metadata probes are
+separate from local fake and isolated native synthetic-PG reproductions. All own
+test roots/clusters/children and temporary KV fixture files were cleaned. No live
+KV value read/write, remote helper upload/backup retry, image build, migration,
+promotion, OS action or Git push occurred. Existing protected failed-run evidence
+and customer data were not modified or deleted.

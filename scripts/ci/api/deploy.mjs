@@ -2,13 +2,16 @@
 // raw subprocess diagnostics never enter Actions output.
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync,writeFileSync,mkdirSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,rmSync,lstatSync,chmodSync} from 'node:fs';
+import {randomBytes} from 'node:crypto';
 import {join} from 'node:path';
 import {PROD,SHA_RE,IMAGE_NAME} from './constants.mjs';
 import {validateMetadata} from './metadata.mjs';
 import {rehearse,parseManifest,localTools} from './local-restore.mjs';
 import {verifyBase,compatibility} from './runtime-overlay.mjs';
 import {receiveVerified} from './verified-transfer.mjs';
+import {saveDeployFailure} from './deploy-diagnostics.mjs';
+import {homedir} from 'node:os';
 const args=process.argv.slice(2),cmd=args[0];
 const flag=n=>{const i=args.indexOf(`--${n}`);return i<0?undefined:args[i+1]};
 const need=n=>{const v=flag(n);if(!v)throw Error('missing-argument');return v};
@@ -16,11 +19,16 @@ const hash=b=>createHash('sha256').update(b).digest('hex');
 const quote=s=>`'${String(s).replaceAll("'","'\\''")}'`;
 const remoteCommand=parts=>parts.map(quote).join(' ');
 function child(bin,a,opts={}) {
- const r=spawnSync(bin,a,{encoding:'utf8',...opts});
- if(r.status!==0)throw Error('child-failed'); return r.stdout;
+ const {operation='local-command',parseHelper=false,...spawnOpts}=opts;
+ const r=spawnSync(bin,a,{encoding:'utf8',...spawnOpts});
+ if(r.status!==0){
+  let summary=`op=${operation} diagnostics=protected`;
+  try{const i=identity();summary=saveDeployFailure({home:homedir(),key:`${i.run}-${i.attempt}-${i.sha}`,operation,exitCode:r.status,stderr:r.stderr,stdout:r.stdout,binary:spawnOpts.encoding===null,parseHelper});}catch{}
+  const e=Error('deploy-child-failed');e.summary=summary;throw e;
+ } return r.stdout;
 }
-function ssh(parts,input,encoding='utf8') {
- return child(process.env.LCM_SSH_BIN??'ssh',['-o','BatchMode=yes',PROD.host,remoteCommand(parts)],{input,encoding,maxBuffer:4*1024**3});
+function ssh(parts,input,encoding='utf8',diagnostics={}) {
+ return child(process.env.LCM_SSH_BIN??'ssh',['-o','BatchMode=yes',PROD.host,remoteCommand(parts)],{input,encoding,maxBuffer:4*1024**3,operation:encoding===null?'binary-transfer':'ssh-command',...diagnostics});
 }
 function identity(){
  const sha=need('sha'),run=need('run'),attempt=need('attempt');
@@ -28,9 +36,23 @@ function identity(){
  return {sha,run,attempt,dir:`${PROD.backupsRoot}/actions-${run}-${attempt}-${sha.slice(0,12)}`};
 }
 function op(name,id,extra=[],input) {
- const out=ssh(['sudo','bash',`${id.dir}/deploy-host.sh`,name,'--sha',id.sha,'--run',id.run,'--attempt',id.attempt,...extra],input);
+ const out=ssh(['sudo','bash',`${id.dir}/deploy-host.sh`,name,'--sha',id.sha,'--run',id.run,'--attempt',id.attempt,...extra],input,'utf8',{operation:name,parseHelper:true});
  // No arbitrary helper stdout, even on failures.
  console.log(`api-deploy: ${name} ok`);return out;
+}
+function servingReference(id) {
+ const m=JSON.parse(ssh(['sudo','bash',id.dir+'/deploy-host.sh','serving-reference','--sha',id.sha,'--run',id.run,'--attempt',id.attempt]));
+ const old=m.source===PROD.currentReleaseSha&&m.reference===PROD.currentComposeImageRef&&m.imageId===PROD.currentImageId;
+ const current=m.source===id.sha&&m.reference===`${PROD.newComposeImageTagPrefix}${id.sha}:candidate`&&/^sha256:[a-f0-9]{64}$/.test(m.imageId??'');
+ if(!old&&!current)throw Error('serving-reference-binding');return m;
+}
+function officialConfig(tmpDir) {
+ const bin=process.env.OPS_KV_BIN??'opskv',key='/living-cost-manager/production/BACKEND_IMAGE';
+ const j=JSON.parse(child(bin,['show',key],{operation:'opskv-show'})),meta=j.data??j,version=String(meta.version??'');
+ if(meta.kind!=='config'||!/^[1-9][0-9]*$/.test(version))throw Error('opskv-metadata');
+ mkdirSync(tmpDir,{recursive:true,mode:0o700});const ds=lstatSync(tmpDir);if(ds.isSymbolicLink()||ds.uid!==process.getuid())throw Error('opskv-directory');chmodSync(tmpDir,0o700);
+ const f=join(tmpDir,`backend-image-current-${randomBytes(8).toString('hex')}.value`);
+ try{child(bin,['get',key,'--output',f],{operation:'opskv-get'});const s=lstatSync(f);if(s.isSymbolicLink()||s.uid!==process.getuid()||(s.mode&0o777)!==0o600)throw Error('opskv-value-owner');const reference=readFileSync(f,'utf8').trim();return {bin,key,version,reference};}finally{rmSync(f,{force:true});}
 }
 try {
  if(cmd==='verify-public') {
@@ -95,19 +117,24 @@ try {
    writeFileSync(join(backupDir,'restore-proof.json'),JSON.stringify(proof)+'\n',{mode:0o600});
    const m=parseManifest(readFileSync(join(backupDir,'backup.manifest'),'utf8'));
    rmSync(join(backupDir,m.dump));rmSync(join(backupDir,'private-restore.log'));
-  } else if(cmd==='register-opskv') {
-   const bin=process.env.OPS_KV_BIN??'opskv',key='/living-cost-manager/production/BACKEND_IMAGE';
-   const j=JSON.parse(child(bin,['show',key])),version=String(j.version??j.data?.version??'');
-   if(!/^[0-9]+$/.test(version))throw Error('opskv-version');
-   const dir=need('tmp-dir');mkdirSync(dir,{recursive:true,mode:0o700});
-   const f=join(dir,'backend-image.value');writeFileSync(f,IMAGE_NAME(id.sha)+'\n',{mode:0o600});
-   try {child(bin,['set','--expected-version',version,'--kind','config','--value-file',f,key]);}finally{rmSync(f,{force:true});}
+  } else if(cmd==='register-opskv'||cmd==='preflight-opskv') {
+   const observed=servingReference(id),dir=need('tmp-dir'),kv=officialConfig(dir);
+   if(cmd==='preflight-opskv'){if(kv.reference!==observed.reference)throw Error('opskv-reference-mismatch');}
+   else {
+    if(observed.source!==id.sha)throw Error('opskv-requires-promoted-source');
+    const publicHealth=JSON.parse(child(process.env.LCM_CURL_BIN??'curl',['-fsS','--max-time','10',PROD.publicHealthUrl],{operation:'public-health'}));if(publicHealth.commitSha!==id.sha)throw Error('public-health-reference');
+    if(kv.reference!==observed.reference){
+     if(kv.reference!==PROD.currentComposeImageRef)throw Error('opskv-reference-mismatch');
+     const f=join(dir,'backend-image.value');writeFileSync(f,observed.reference+'\n',{mode:0o600,flag:'wx'});
+     try {child(kv.bin,['set','--expected-version',kv.version,'--kind','config','--value-file',f,kv.key],{operation:'opskv-set'});}finally{rmSync(f,{force:true});}
+    }
+   }
   } else if(['preflight','ensure-rollback','backup','rehearse','migrate','promote','verify','cleanup-job'].includes(cmd))op(cmd,id);
   else throw Error('unknown-command');
  }
  console.log('api-deploy: ok');
 } catch(e) {
  // Error messages are fixed internal codes; child stderr/stdout is discarded.
- console.error(`api-deploy: halted ${['helper hash mismatch','identity mismatch','local-restore-failed','local-cleanup-failed'].includes(e.message)?e.message:'gate-failed'}`);
+ console.error(`api-deploy: halted ${e.message==='deploy-child-failed'?e.summary:['helper hash mismatch','identity mismatch','local-restore-failed','local-cleanup-failed','opskv-reference-mismatch','opskv-metadata'].includes(e.message)?e.message:'gate-failed'}`);
  process.exitCode=1;
 }

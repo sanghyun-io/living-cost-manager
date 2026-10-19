@@ -138,7 +138,7 @@ jobs:
           echo "✓ SHA: ${{ github.sha }}"
 
   # Classify whether this push can change the API. Evidence = the push event
-  # payload's own base..head SHAs (bounded and exact; never a mutable HEAD
+  # live API source..event head SHAs (bounded and exact; not event.before or mutable HEAD
   # reference), compared through the GitHub API with the run token
   # (contents: read only). Missing or truncated evidence fail-CLOSED to
   # needs_api=true — a pure-web push that is misclassified merely costs a
@@ -168,29 +168,31 @@ jobs:
         with:
           node-version: 24.18.0
 
-      - name: Compare base..head and classify
+      - name: Compare actual live API source..head and classify
         id: classify
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          BASE="${{ github.event.before }}"
           HEAD="${{ github.sha }}"
           say() { echo "$1" >> "$GITHUB_OUTPUT"; echo "needs-api-detect: $1"; }
-          if ! printf '%s' "$BASE" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$BASE" | grep -Eq '^0+$'; then
-            say "needs_api=true"; say "reason=no-base"; exit 0
-          fi
           if ! printf '%s' "$HEAD" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$HEAD" | grep -Eq '^0+$'; then
             say "needs_api=true"; say "reason=invalid-head"; exit 0
           fi
-          trap 'rm -f needs-api-compare.json' EXIT
+          trap 'rm -f needs-api-compare.json needs-api-live.json' EXIT
+          if ! node scripts/ci/api/paths.mjs fetch-live needs-api-live.json; then
+            say "needs_api=true"; say "reason=live-api-unavailable"; exit 0
+          fi
+          if ! BASE="$(node scripts/ci/api/paths.mjs live-base needs-api-live.json)"; then
+            say "needs_api=true"; say "reason=live-api-invalid"; exit 0
+          fi
           if ! gh api \
                "repos/sanghyun-io/living-cost-manager/compare/${BASE}...${HEAD}" \
                > needs-api-compare.json; then
             say "needs_api=true"; say "reason=compare-unavailable"; exit 0
           fi
-          node scripts/ci/api/paths.mjs detect \
-            --compare needs-api-compare.json --base "$BASE" --head "$HEAD" \
+          node scripts/ci/api/paths.mjs detect-live \
+            --compare needs-api-compare.json --health needs-api-live.json --head "$HEAD" \
             --output "$GITHUB_OUTPUT"
           rm -f needs-api-compare.json
 
@@ -534,6 +536,12 @@ jobs:
           set -eu
           node scripts/ci/api/deploy.mjs ensure-rollback \
             --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Verify official config metadata/value agrees with observed serving reference before backup or SQL
+        run: |
+          node scripts/ci/api/deploy.mjs preflight-opskv \
+            --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --tmp-dir "$GITHUB_WORKSPACE/.lcm-opskv-tmp"
 
       - name: Transfer + load image (digest-mismatch refuses docker load)
         run: |

@@ -112,6 +112,7 @@ function makeHost(opts: HostOpts = {}) {
   fs.mkdirSync(path.join(lcm, "api"), { recursive: true });
   fs.mkdirSync(path.join(lcm, "backups"), { recursive: true });
   fs.mkdirSync(st, { recursive: true });
+  fs.mkdirSync(path.join(fh,'ci-home'),{mode:0o700});
   fs.writeFileSync(path.join(lcm, "docker-compose.yml"), opts.compose ?? composeText(OLD_REF));
   fs.writeFileSync(
     path.join(lcm, "api", ".env"),
@@ -140,7 +141,7 @@ function makeHost(opts: HostOpts = {}) {
     df_avail_k: "20000000",
     timer_active: "active",
     opskv_version: "2",
-    opskv_show: JSON.stringify({ path: "/living-cost-manager/production/BACKEND_IMAGE", version: 2, value: "[HIDDEN]" }),
+    opskv_show: JSON.stringify({ path: "/living-cost-manager/production/BACKEND_IMAGE", version: 2, kind:'config',value: "[HIDDEN]" }),
     images_tsv:
       `${OLD_REF}\t${OLD_ID}\ta2c7bd9af46d84dc88b2a36656c25949b57076b0\n` +
       `${NEW_TAG}\t${CAND_ID}\t${TEST_SHA}\n`,
@@ -312,6 +313,13 @@ describe("host helper — rollback archive", () => {
 });
 
 describe("host helper — archive load + backup + rehearse", () => {
+  it('reproduces the inet CIDR identity failure on847, then current host(inet) passes without skipping any identity check',()=>{
+    const h=makeHost(),old=spawnSync('git',['show','847b9372d5cb394646d9d381f57657529881bee1:scripts/ci/api/deploy-host.sh'],{cwd:REPO,encoding:'utf8'});expect(old.status).toBe(0);
+    const file=path.join(h.base,'before-host-cast.sh');fs.writeFileSync(file,old.stdout);
+    const r=spawnSync('bash',[file,'backup','--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT],{encoding:'utf8',env:helperEnv(h.fh)});
+    expect(r.status).toBe(25);expect(r.stdout).toContain('db-identity-mismatch');expect(readCalls(h.fh)).not.toContain('pg_dump');expect(fs.existsSync(path.join(h.rd,'backup.manifest'))).toBe(false);
+    const fixed=helper(h,'backup');expect(fixed.status,fixed.stdout+fixed.stderr).toBe(0);const status=JSON.parse(fs.readFileSync(path.join(h.rd,'backup-status.json'),'utf8'));expect(status.outcome).toBe('complete');expect(status.substep).toBe('complete');expect(fs.statSync(path.join(h.rd,'backup-status.json')).mode&0o777).toBe(0o600);
+  });
   const stageArchive = (h: ReturnType<typeof makeHost>) => {
     const arc = path.join(h.rd, "image.tar.gz");
     fs.writeFileSync(arc, "fake-archive-bytes");
@@ -651,6 +659,7 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
       encoding: "utf8",
       env: {
         ...process.env, PATH: `${FAKES}:${process.env.PATH}`, FAKE_HOST: fh,
+        HOME:path.join(fh,'ci-home'),
         ...ciEnv, GITHUB_RUN_ID:args[args.indexOf('--run')+1]??RUN,
         LCM_ROOT: path.join(fh, "opt/livingcost"),
         LCM_HELPER_ALLOW_NONROOT_TEST: "1",
@@ -701,6 +710,23 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
     const r=node(h.fh,['send-archive','--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT,'--metadata',m,'--archive',arc]);
     expect(r.status).toBe(1);expect(readCalls(h.fh)).toBe('');
   });
+  it('failed backup emits only its allowlisted halt/substep and keeps child stderr privately',()=>{
+    const h=makeHost({touchFlags:['dump_fail']}),base=['--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT];
+    const r=node(h.fh,['backup',...base]);expect(r.status).toBe(1);expect(r.stderr).toContain('op=backup');expect(r.stderr).toContain('halt=25 detail=pg_dump-failed');expect(r.stdout+r.stderr).not.toContain(DBPASS);
+    const s=JSON.parse(fs.readFileSync(path.join(h.rd,'backup-status.json'),'utf8'));expect(s.substep).toBe('dump');expect(s.outcome).toBe('halt');expect(s.code).toBe(25);
+    const p=path.join(h.fh,'ci-home/.local/state/lcm-api-deploy-diagnostics',`${RUN}-${ATTEMPT}-${TEST_SHA}`,'failed-stderr.log');expect(fs.statSync(p).mode&0o777).toBe(0o600);expect(fs.readFileSync(p,'utf8')).not.toContain('SENTINEL_PGDUMP_ROW');
+  });
+  it('official config preflight checks the observed serving reference without a write; unknown difference fails closed',()=>{
+    const h=makeHost(),base=['--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT,'--tmp-dir',path.join(h.base,'kv')];
+    expect(node(h.fh,['preflight-opskv',...base]).status).toBe(0);expect(readCalls(h.fh)).not.toContain('opskv set');
+    fs.writeFileSync(path.join(h.st,'opskv_stored.txt'),'unknown-foreign-reference');const r=node(h.fh,['preflight-opskv',...base]);expect(r.status).toBe(1);expect(r.stderr).toContain('opskv-reference-mismatch');expect(r.stderr).not.toContain('unknown-foreign-reference');expect(readCalls(h.fh)).not.toContain('opskv set');
+  });
+  it('registration requires exact observed Config.Image and still rejects a stale CAS version',()=>{
+    const {h}=fullFreshToMigrated();helper(h,'promote');helper(h,'verify');fs.writeFileSync(path.join(h.st,'opskv_version.txt'),'3\n');
+    const base=['--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT,'--tmp-dir',path.join(h.base,'kv')];
+    expect(node(h.fh,['register-opskv',...base]).status).toBe(1);expect(fs.existsSync(path.join(h.st,'opskv_stored.txt'))).toBe(false);
+    fs.writeFileSync(path.join(h.st,'config_ref_override.txt'),'foreign-wrong-config-image');const r=node(h.fh,['register-opskv',...base]);expect(r.status).toBe(1);expect(r.stderr).not.toContain('foreign-wrong-config-image');
+  });
 
   it("runs the gated sequence end-to-end then registers opskv with CAS", () => {
     const h = makeHost();
@@ -742,9 +768,9 @@ describe("runner orchestrator (deploy.mjs via fake ssh)", () => {
     expect(fs.readFileSync(path.join(h.st, "opskv_stored.txt"), "utf8").trim()).toBe(NEW_TAG);
     const calls = readCalls(h.fh);
     expect(calls).not.toContain(DBPASS);
-    // a version-conflicting set fails closed (state already advanced to v3)
-    const conflict = node(h.fh, ["register-opskv", ...base, "--tmp-dir", path.join(h.base, "vk2")]);
-    expect(conflict.status).toBe(1);
+    // An already equal observed deployed reference needs no overwrite.
+    const repeat = node(h.fh, ["register-opskv", ...base, "--tmp-dir", path.join(h.base, "vk2")]);
+    expect(repeat.status).toBe(0);
   });
 
   it("a remote halt propagates as a failed step with no downstream mutation", () => {
@@ -799,7 +825,7 @@ describe("needs-API detection", () => {
     ...extra,
   });
   it("detects api/prisma/shared/docker-input paths", () => {
-    for (const f of ["apps/api/src/app.ts", "prisma/schema.prisma", "packages/shared/src/x.ts", "pnpm-lock.yaml", "scripts/ci/api/paths.mjs"]) {
+    for (const f of ["apps/api/src/app.ts", "prisma/schema.prisma", "packages/shared/src/x.ts", "pnpm-lock.yaml", "scripts/ci/api/image.mjs"]) {
       expect(classifyCompare(cmp([f]), { base: "a".repeat(40), head: "b".repeat(40) }).needsApi).toBe(true);
     }
   });
@@ -906,11 +932,11 @@ describe("image.mjs guards (Mac Mini side)", () => {
 describe("workflow structure (spec-as-content)", () => {
   const yml = fs.readFileSync(path.join(REPO, ".github/workflows/ci.yml"), "utf8");
   it('binds compare to the fixed repository/event SHAs and publishes the referenced step output',()=>{
-    expect(yml).toMatch(/name: Compare base\.\.head and classify\n\s+id: classify/);
+    expect(yml).toMatch(/name: Compare actual live API source\.\.head and classify\n\s+id: classify/);
     expect(yml).toContain('repos/sanghyun-io/living-cost-manager/compare/${BASE}...${HEAD}');
-    expect(yml).toContain('BASE="${{ github.event.before }}"');
+    expect(yml).toContain('paths.mjs fetch-live needs-api-live.json');
     expect(yml).toContain('HEAD="${{ github.sha }}"');
-    expect(yml).toContain('--compare needs-api-compare.json --base "$BASE" --head "$HEAD"');
+    expect(yml).toContain('--compare needs-api-compare.json --health needs-api-live.json --head "$HEAD"');
     expect(yml).toContain('needs_api: ${{ steps.classify.outputs.needs_api }}');
   });
   it("serializes production deploys (no cancel mid-migration)", () => {

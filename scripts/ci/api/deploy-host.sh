@@ -70,7 +70,7 @@ MAX_ARCHIVE_BYTES=3221225472
 NEW_REF_PREFIX=lcm-ci-api-
 
 status() { printf 'op=%s %s\n' "$OP" "$*"; }
-halt() { status "result=halt code=$1 detail=$2"; exit "$1"; }
+halt() { if declare -F record_backup_status >/dev/null; then record_backup_status halt "$1" "$2" "${BASH_LINENO[0]:-0}"; fi; status "result=halt code=$1 detail=$2"; exit "$1"; }
 
 # ---------------- P1: secure staging directory (no predictable /tmp) ----------
 # Creates a root-owned 0700 staging directory under a ROOT-owned non-writable
@@ -140,7 +140,7 @@ verify_db_identity() {
   # URL in argv, credential digest, default-schema guess or fixed-PG proof.
   actual=$(docker run --rm --env-file "$RECEIPTS/execution.env" --network "$BACKEND_DB_NETWORK" "$NEW_TAG" node -e '
 const {PrismaClient}=require("@prisma/client"); const p=new PrismaClient();
-p.$queryRawUnsafe("SELECT current_database() db,current_schema() schema,inet_server_addr()::text addr,inet_server_port() port").then(r=>{const x=r[0];process.stdout.write([x.db,x.schema,x.addr,x.port].join("|"))}).catch(()=>{process.exitCode=1}).finally(()=>p.$disconnect());
+p.$queryRawUnsafe("SELECT current_database() db,current_schema() schema,host(inet_server_addr()) addr,inet_server_port() port").then(r=>{const x=r[0];process.stdout.write([x.db,x.schema,x.addr,x.port].join("|"))}).catch(()=>{process.exitCode=1}).finally(()=>p.$disconnect());
 ' 2>>"$LOG") || halt 25 "db-identity-probe"
   [ "$actual" = "$DB_NAME|$DB_SCHEMA|$expected_ip|5432" ] || halt 25 "db-identity-mismatch"
 }
@@ -169,6 +169,23 @@ NEW_TAG="${NEW_REF_PREFIX}${SHA}:candidate"
 NEW_REF="$NEW_TAG"
 RECEIPTS="$BACKUPS_ROOT/actions-${RUN}-${ATTEMPT}-${SHA:0:12}"
 LOG="$RECEIPTS/stderr.log"
+BACKUP_STEP=not-started
+record_backup_status() {
+  [ "${OP:-}" = backup ] && [ -d "${RECEIPTS:-/nonexistent}" ] || return 0
+  local outcome="$1" code="$2" detail="$3" line="$4"
+  [[ "$outcome" =~ ^(started|halt|complete)$ ]] && [[ "$code" =~ ^[0-9]+$ ]] && [[ "$detail" =~ ^[a-z0-9_-]+$ ]] && [[ "$line" =~ ^[0-9]+$ ]] || return 0
+  printf '{"op":"backup","substep":"%s","outcome":"%s","code":%s,"detail":"%s","line":%s}\n' "$BACKUP_STEP" "$outcome" "$code" "$detail" "$line" >"$RECEIPTS/backup-status.json"
+  chmod 600 "$RECEIPTS/backup-status.json"
+}
+backup_step() { BACKUP_STEP="$1"; record_backup_status started 0 "$1" "${LINENO:-0}"; }
+backup_unexpected() {
+  local rc="$?" line="$1"
+  if [ "${OP:-}" = backup ] && ! grep -q '"outcome":"halt"' "$RECEIPTS/backup-status.json" 2>/dev/null; then record_backup_status halt "$rc" unexpected-shell-failure "$line"; fi
+  exit "$rc"
+}
+# Fixed substep/line/exit metadata only; NEVER BASH_COMMAND, env, SQL or row output.
+set -E
+trap 'backup_unexpected "$LINENO"' ERR
 
 require_compose() {
   [ -f "$COMPOSE_FILE" ] || halt 20 "compose-missing"
@@ -277,6 +294,20 @@ verify_restore_receipt() {
 
 # ---------------- ops ----------------
 case "$OP" in
+  serving-reference)
+    require_compose
+    ref=$(compose_backend_ref)
+    case "$ref" in
+      "$OLD_REF") expected_id="$OLD_IMAGE_ID"; expected_source="$OLD_SHA";;
+      "$NEW_REF") expected_id=$(cat "$RECEIPTS/candidate-image.txt" 2>/dev/null) || halt 23 "candidate-image-not-loaded"; expected_source="$SHA";;
+      *) halt 21 "serving-reference-cas";;
+    esac
+    [ "$(docker inspect -f '{{.Config.Image}}' "$BACKEND_CONTAINER")" = "$ref" ] || halt 21 "serving-config-reference"
+    [ "$(docker inspect -f '{{.Image}}' "$BACKEND_CONTAINER")" = "$expected_id" ] || halt 21 "serving-image-id"
+    health=$(docker exec "$BACKEND_CONTAINER" node -e "fetch('http://127.0.0.1:4000'+(process.env.API_BASE_PATH||'')+'/health').then(r=>r.json()).then(j=>process.stdout.write(String(j.commitSha))).catch(()=>{process.exitCode=1})" 2>/dev/null) || halt 21 "serving-health"
+    [ "$health" = "$expected_source" ] || halt 21 "serving-health-identity"
+    printf '{"reference":"%s","imageId":"%s","source":"%s"}\n' "$ref" "$expected_id" "$expected_source"
+    ;;
   base-inspect)
     require_compose
     mkdir_receipts
@@ -486,17 +517,21 @@ JS
   backup)
     require_compose
     mkdir_receipts
+    backup_step classify
     STATE=$(classify)
     case "$STATE" in
       halt:*) IFS=: read -r _ code reason <<<"$STATE"; halt "$code" "$reason";;
       promoted) status "result=ok state=promoted backup=skip-already-current"; exit 0;;
     esac
     # P2: verify DB connection identity BEFORE any dump/mutation
+    backup_step seal-env
     [ ! -L "$API_ENV_FILE" ] || halt 25 "env-symlink"
     # A root-private execution copy remains sealed for this job only. Both
     # Prisma probe and migration use these identical bytes (no env TOCTOU).
     if [ ! -f "$RECEIPTS/execution.env" ]; then install -m 600 "$API_ENV_FILE" "$RECEIPTS/execution.env"; fi
+    backup_step db-identity
     verify_db_identity
+    backup_step capacity
     df_ok || halt 24 "oci-capacity-below-floor"
     # P2: verify OCI capacity can hold the dump + manifest + receipts
     avail_k=$(df -Pk "$LCM_ROOT" | awk 'NR==2{print $4}')
@@ -514,13 +549,16 @@ SQL
     DUMP="$RECEIPTS/livingcost-$STAMP.dump"
     # P1: use secure mktemp under trusted staging dir (no predictable /tmp)
     tmp=$(secure_mktemp "lcm-dump-XXXXXX.dump")
+    backup_step dump
     if ! docker exec "$PG_CONTAINER" pg_dump -U "$PG_SUPERUSER" -Fc "$DB_NAME" >"$tmp" 2>>"$LOG"; then
       rm -f "$tmp"; halt 25 "pg_dump-failed"
     fi
     sz=$(stat -c %s "$tmp")
     [ "$sz" -gt 0 ] && [ "$sz" -le "$MAX_DUMP_BYTES" ] || { rm -f "$tmp"; halt 25 "dump-size-invalid"; }
+    backup_step install-copy
     install -m 600 "$tmp" "$DUMP"; rm -f "$tmp"
     ds=$(sha256sum "$DUMP" | cut -d' ' -f1)
+    backup_step catalog
     TABLES=$(db <<'SQL'
 SELECT count(*) FROM information_schema.tables WHERE table_schema='lcm';
 SQL
@@ -538,6 +576,7 @@ SQL
       printf 'db=%s\nschema=%s\nstamp=%s\nstate=%s\n' "$DB_NAME" "$DB_SCHEMA" "$STAMP" "$STATE"
       printf 'tables=%s\nmig_rows=%s\napplied=%s\n' "$TABLES" "$HR" "$AP"
     } >"$RECEIPTS/backup.manifest"
+    backup_step fingerprints
     # structural fingerprints of PRE-EXISTING tables (new table excluded)
     COL=$(db <<'SQL'
 SELECT md5(string_agg(r, '|' ORDER BY r)) FROM (
@@ -557,6 +596,7 @@ SQL
     printf 'cols=%s\n' "$COL" >"$RECEIPTS/columns.before.sha"
     printf 'cons=%s\n' "$CON" >"$RECEIPTS/constraints.before.sha"
     chmod 600 "$RECEIPTS"/* 2>/dev/null || true
+    BACKUP_STEP=complete; record_backup_status complete 0 complete "${LINENO:-0}"
     status "result=ok bytes=$sz sha256=$ds tables=$TABLES mig_rows=$HR"
     ;;
 

@@ -33,6 +33,9 @@ case "$CMD" in
   inspect) # docker inspect -f FMT CONTAINER
     fmt=$(getafter "-f" "$@"); target=$(getlast "$@")
     case "$fmt" in
+      *Config.Image*)
+        if [ -f "$S/config_ref_override.txt" ]; then cat "$S/config_ref_override.txt"
+        else awk '/^    image: /{sub(/^    image: /,"");print;exit}' "$FH/opt/livingcost/docker-compose.yml"; fi ;;
       *NetworkSettings*) echo 172.19.0.2 ;;
       *State.Running*) v=$(read_state container_running.txt); echo "${v:-true}" ;;
       *.Image*) read_state container_image.txt ;;
@@ -81,7 +84,11 @@ case "$CMD" in
       has restore_fail && { echo "pg_restore: error: injected failure" >&2; exit 1; }
       exit 0
     fi
-    if [[ "$J" == *"node -e"* ]]; then read_state health_local.txt; exit 0; fi
+    if [[ "$J" == *"node -e"* ]]; then
+      if [ "$(read_state container_image.txt)" = 'sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f' ]; then echo a2c7bd9af46d84dc88b2a36656c25949b57076b0
+      else read_state health_local.txt; fi
+      exit 0
+    fi
     if [[ "$J" == *"pg_isready"* ]]; then exit 0; fi
     if [[ "$J" == *psql* ]]; then
       # -c form (inline SQL) vs -i heredoc form (SQL on stdin)
@@ -125,6 +132,10 @@ case "$CMD" in
       url=$(grep '^DATABASE_URL=' "$ef" | tail -1 | cut -d= -f2-)
       schema=public; [[ "$url" == *schema=lcm* ]] && schema=lcm
       ip=172.19.0.2; [[ "$url" == *@gamja-data-postgres:5432/livingcost* ]] || ip=172.19.0.99
+      # PostgreSQL inet::text includes /32; host(inet) returns the bare address.
+      # Model the actual driver behavior that caused run39230515032 to halt.
+      if [[ "$J" == *'inet_server_addr()::text'* ]]; then ip="$ip/32";
+      elif [[ "$J" != *'host(inet_server_addr())'* ]]; then exit 92; fi
       printf 'livingcost|%s|%s|5432' "$schema" "$ip"
       exit 0
     fi

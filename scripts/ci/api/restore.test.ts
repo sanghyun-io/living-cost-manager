@@ -27,6 +27,9 @@ it('actual PG16 custom dump -> isolated peer restore -> pinned Prisma migration 
   expect(io.run(process.execPath,['-e',probe],{cwd:root,env:{...process.env,DATABASE_URL:url}})).toBe(s.db+'|lcm');
   expect(io.run(process.execPath,['-e',probe],{cwd:root,env:{...process.env,DATABASE_URL:url.replace('&schema=lcm','')}})).toBe(s.db+'|public');
   const query=(sql:string)=>io.run(join(s.pgBinDir,'psql'),[...pgArgs(s),'-d',s.db,'-XAt','-v','ON_ERROR_STOP=1','-c',sql]);
+  // Actual PostgreSQL inet text semantics behind the production backup failure;
+  // a literal tests this without adding TCP/trust or touching a customer DB.
+  expect(query("SELECT '172.18.0.7'::inet::text || '|' || host('172.18.0.7'::inet)")).toBe('172.18.0.7/32|172.18.0.7');
   query(`INSERT INTO lcm."Workspace" (id,name,"updatedAt") VALUES ('synthetic','PRIVATE_ROW_SENTINEL',now())`);
   const tables=query(`SELECT count(*) FROM pg_tables WHERE schemaname='lcm'`),mig=query('SELECT count(*) FROM lcm._prisma_migrations'),dbbytes=query('SELECT pg_database_size(current_database())');
   io.run(join(s.pgBinDir,'pg_dump'),[...pgArgs(s),'-d',s.db,'-Fc','-f',join(backup,'synthetic.dump')]);
