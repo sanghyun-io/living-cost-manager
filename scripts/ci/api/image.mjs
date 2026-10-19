@@ -2,10 +2,10 @@
 //   capacity → build → synthetic health test → save archive (+metadata) → verify
 //
 // Safety properties (behaviour-tested in pipeline.test.ts):
-//   - runs ONLY on the Mac Mini CI engine; the OCI host is runtime/deploy only
+//   - runs ONLY on the job's leased Mac Mini Colima profile; OCI is runtime only
 //   - never starts/reconfigures/resets/prunes the shared engine; owned
 //     resources use exact `lcm-ci-*` names keyed by the 40-hex SHA and are
-//     removed by teardown; no global prune, no other-container contact
+//     removed by teardown; no global prune or default-engine operation here
 //   - the candidate image is health-tested against a synthetic Docker network
 //     marked --internal with NO published host ports and a throwaway database;
 //     the production DB is never reachable from this step (and synthetic
@@ -15,6 +15,7 @@
 //     explicitly that these digests are NOT OCI registry RepoDigests
 import { spawnSync } from "node:child_process";
 import {validateMetadata} from './metadata.mjs';
+import {lifecycle} from './build-profile.mjs';
 import { randomBytes, createHash } from "node:crypto";
 import {
   existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync,
@@ -49,7 +50,9 @@ function run(bin, args, opts = {}) {
   return r;
 }
 function docker(args, opts = {}) {
-  return run("docker", args, opts);
+  if(!builder)fail('builder context required');
+  builder.owned();builder.engine();
+  return run("docker", ['--context',builder.id.context,...args], opts);
 }
 function dieUnlessSha(v, name = "sha") {
   if (!SHA_RE.test(String(v))) fail(`${name} must be an exact 40-hex SHA`);
@@ -57,51 +60,22 @@ function dieUnlessSha(v, name = "sha") {
 }
 
 // ---- capacity --------------------------------------------------------------
-// Host capacity 25 GiB measured 2026-10-19; policy floor 15 GiB is never
-// lowered here. Required headroom = peak*1.2 + recovery reserve.
-// C) fix: Check BOTH Mac host filesystem AND Colima VM guest filesystem.
-// Docker runs inside the VM, so we need to verify the VM has enough space.
-function gibFree(dir) {
-  const r = run("df", ["-k", dir]);
-  const availK = Number(r.stdout.split("\n")[1]?.split(/\s+/)[3]);
-  if (!Number.isFinite(availK) || availK <= 0) fail("cannot measure free space");
-  return availK / 1024 / 1024;
-}
-function colimaVmFreeGib() {
-  // Query Docker's actual filesystem (inside Colima VM)
-  const r = run("docker", ["info", "--format", "{{.DockerRootDir}}"], { allowFail: true });
-  if (r.status !== 0 || !r.stdout.trim()) {
-    fail('Docker filesystem measurement unavailable');
+// Both host Data and the owned guest's actual DockerRootDir data mount must
+// have >=20.8GiB before a heavy phase. Cold startup separately requires 22.7.
+let builder;
+try {
+  // Archive verification is hash/metadata-only on the native deploy job; the
+  // builder is already deleted. Actual image checks happen on OCI before use.
+  if(cmd!=='verify-archive') {
+    builder=lifecycle();builder.owned();
+    if(flag('sha')!==undefined && flag('sha')!==builder.id.sha)fail('source identity mismatch');
+    if(['build','synthetic','archive'].includes(cmd)) {
+      if(argv.includes('--profile-worker'))builder.worker();
+      else {await builder.runImage(argv);console.log('api-image: monitored operation ok');process.exit(0);}
+    }
   }
-  const dockerRoot = r.stdout.trim();
-  // Query the VM mount itself, not an Alpine container's overlay/root mount.
-  if (!/^\/[A-Za-z0-9/_-]+$/.test(dockerRoot)) fail('Docker root invalid');
-  const dfResult = run('colima', ['ssh', '--', 'df', '-Pk', dockerRoot], {allowFail:true});
-  if (dfResult.status !== 0) {
-    fail('Docker filesystem measurement failed');
-  }
-  const availK = Number(dfResult.stdout.split("\n")[1]?.split(/\s+/)[3]);
-  const fields=dfResult.stdout.split('\n')[1]?.trim().split(/\s+/)??[];
-  if(!fields[0]?.startsWith('/dev/') || !fields[5]?.startsWith('/') || !(dockerRoot===fields[5] || dockerRoot.startsWith(fields[5].replace(/\/$/,'')+'/'))) fail('Docker filesystem mount invalid');
-  if (!Number.isFinite(availK) || availK <= 0) {
-    fail('Docker filesystem measurement invalid');
-  }
-  return availK / 1024 / 1024;
-}
-function capacity() {
-  const needGib =
-    BUDGET.mac.buildPeakGib * 1.2 + BUDGET.mac.reserveGib + BUDGET.mac.floorGib;
-  const hostFree = gibFree(process.env.HOME ?? tmpdir());
-  const vmFree = colimaVmFreeGib();
-  console.log(
-    `capacity: host_free=${hostFree.toFixed(1)}GiB vm_free=${vmFree.toFixed(1)}GiB ` +
-      `required>=${needGib.toFixed(1)}GiB ` +
-      `(floor ${BUDGET.mac.floorGib} + peak ${BUDGET.mac.buildPeakGib}*1.2 + reserve ${BUDGET.mac.reserveGib})`,
-  );
-  // Check BOTH host and VM free space
-  if (hostFree < needGib) fail("host capacity budget not met — refusing heavy writes");
-  if (vmFree < needGib) fail("Docker VM capacity budget not met — refusing heavy writes");
-}
+}catch{fail('owned builder or capacity budget not met');}
+function capacity() {try {const c=builder.capacity();console.log(`capacity: host=${c.host.toFixed(1)}GiB guest=${c.guest.toFixed(1)}GiB required>=20.8GiB floor=15GiB`);}catch{fail('capacity budget not met');}}
 if (cmd === 'capacity') { capacity(); process.exit(0); }
 
 // ---- build ------------------------------------------------------------------
@@ -290,6 +264,9 @@ if (cmd === "archive") {
   };
   try { validateMetadata(meta, sha); } catch { fail('metadata identity invalid'); }
   writeFileSync(metaOut, JSON.stringify(meta, null, 2) + "\n");
+  // Preserve unique small digest evidence even if artifact upload later fails;
+  // lifecycle cleanup removes bulk scratch/VM, never this job's proof journal.
+  writeFileSync(join(builder.job,'archive-metadata.json'),JSON.stringify(meta)+'\n',{mode:0o600,flag:'wx'});
   console.log(`archive: bytes=${bytes} sha256=${archiveSha.slice(0, 16)}… imageID=${imageId.slice(7, 19)}…`);
   process.exit(0);
 }
@@ -306,33 +283,7 @@ if (cmd === "verify-archive") {
   if (bytes !== meta.archiveBytes) fail(`archive size ${bytes} != metadata ${meta.archiveBytes}`);
   const h = createHash("sha256").update(readFileSync(archive)).digest("hex");
   if (h !== meta.archiveSha256) fail("archive sha256 mismatch — refusing downstream docker load");
-  // Verify the actual loaded image matches metadata (platform + revision label + image ID)
-  const inspected=docker(["image", "inspect", meta.imageId], { allowFail: true });
-  if (inspected.status !== 0) {
-    // Image not loaded yet; this is expected in verify-archive before load.
-    // The load-image op will verify identity after docker load.
-    console.log("verify-archive: ok (image not yet loaded; load-image will verify identity)");
-  } else {
-    const imageInfo=JSON.parse(inspected.stdout);
-    if(!Array.isArray(imageInfo) || imageInfo.length!==1)fail('image inspect invalid');
-    const info = imageInfo[0];
-    if (!info) {
-      fail('image inspect invalid');
-    } else {
-      if (info.Os !== "linux" || info.Architecture !== "arm64") {
-        fail('loaded image platform mismatch');
-      }
-      const label = info.Config?.Labels?.["org.opencontainers.image.revision"];
-      if (label !== meta.sha) {
-        fail(`loaded image revision label ${label} != metadata sha ${meta.sha}`);
-      }
-      if (info.Id !== meta.imageId) {
-        fail(`loaded image ID ${info.Id} != metadata imageId ${meta.imageId}`);
-      }
-      if(info.Size!==meta.imageBytes)fail('loaded image size mismatch');
-      console.log("verify-archive: ok (image loaded and verified)");
-    }
-  }
+  console.log('verify-archive: ok (hash/metadata only; OCI load verifies actual image)');
   process.exit(0);
 }
 

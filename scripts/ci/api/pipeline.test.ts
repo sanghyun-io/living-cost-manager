@@ -44,7 +44,7 @@ const APPLIED11 = [
 ].sort();
 const DIRS12 = [...APPLIED11, PENDING].sort();
 const DBPASS = "SENTINEL_DBPASS_4f2a";
-const ciEnv={GITHUB_SHA:TEST_SHA,GITHUB_REPOSITORY:'sanghyun-io/living-cost-manager',GITHUB_WORKFLOW_REF:'sanghyun-io/living-cost-manager/.github/workflows/ci.yml@refs/heads/main',GITHUB_RUN_ID:RUN,GITHUB_RUN_ATTEMPT:ATTEMPT};
+const ciEnv={GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',GITHUB_ACTOR:'sanghyun-io',GITHUB_SHA:TEST_SHA,GITHUB_REPOSITORY:'sanghyun-io/living-cost-manager',GITHUB_WORKFLOW_REF:'sanghyun-io/living-cost-manager/.github/workflows/ci.yml@refs/heads/main',GITHUB_RUN_ID:RUN,GITHUB_RUN_ATTEMPT:ATTEMPT};
 function boundMeta(run=RUN) {return {schema:'lcm-api-archive-v1',repo:ciEnv.GITHUB_REPOSITORY,workflowPath:'.github/workflows/ci.yml',platform:'linux/arm64',releaseShaLabel:TEST_SHA,migrationName:PENDING,runId:run,runAttempt:ATTEMPT,archivePath:'image.tar.gz',imageBytes:660000000};}
 
 beforeAll(() => {
@@ -819,14 +819,22 @@ describe("needs-API detection", () => {
 });
 
 describe("image.mjs guards (Mac Mini side)", () => {
-  const node = (args: string[], fh: string) =>
-    spawnSync("node", [path.join(API, "image.mjs"), ...args], {
+  const node = (args: string[], fh: string,extraEnv:Record<string,string>={}) => {
+    const home=path.join(fh,'image-home'),profile=`lcm-api-build-${RUN}-${ATTEMPT}`,context=`colima-${profile}`;
+    const job=path.join(home,'.local/state/lcm-api-build',`${RUN}-${ATTEMPT}`),pd=path.join(home,'.colima',profile);
+    const owner={version:1,run:RUN,attempt:ATTEMPT,sha:TEST_SHA,profile,context};
+    fs.mkdirSync(pd,{recursive:true,mode:0o700});fs.mkdirSync(job,{recursive:true,mode:0o700});
+    fs.writeFileSync(path.join(pd,'.lcm-owned.json'),JSON.stringify(owner),{mode:0o600});
+    fs.writeFileSync(path.join(job,'lease.json'),JSON.stringify({...owner,stage:'ready',claimed:true,workspace:REPO}),{mode:0o600});
+    return spawnSync("node", [path.join(API, "image.mjs"), ...args], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${FAKES}:${process.env.PATH}`, FAKE_HOST: fh,
-        ...ciEnv,
-        LCM_CI_API_STATE_DIR: path.join(fh, "imgstate") },
+        ...ciEnv,HOME:home,COLIMA_HOME:'',LIMA_HOME:'',DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:'',COLIMA_PROFILE:'',
+        LCM_BUILDER_PROFILE:profile,LCM_BUILDER_CONTEXT:context,
+        LCM_CI_API_STATE_DIR: path.join(job,`lcm-ci-api-${SHA12}`),...extraEnv },
       stdin: "ignore",
     });
+  };
   it("capacity enforces floor+peak*1.2+reserve from measured free space", () => {
     const h = makeHost({ extraState: { df_avail_k: "1048576" } }); // 1 GiB
     const r = node(["capacity", "--sha", TEST_SHA], h.fh);
@@ -835,11 +843,32 @@ describe("image.mjs guards (Mac Mini side)", () => {
     const h2 = makeHost({ extraState: { df_avail_k: "26000000" } }); // ~24.8 GiB
     expect(node(["capacity", "--sha", TEST_SHA], h2.fh).status).toBe(0);
   });
+  it('monitored parent/worker build uses only the leased context and profile (fake engine)',()=>{
+    const h=makeHost({extraState:{df_avail_k:'26000000'}});
+    const r=node(['build','--sha',TEST_SHA],h.fh);expect(r.status,r.stdout+r.stderr).toBe(0);
+    const calls=readCalls(h.fh);expect(calls).toContain(`docker --context colima-lcm-api-build-${RUN}-${ATTEMPT} build`);
+    expect(calls).toContain(`colima --profile lcm-api-build-${RUN}-${ATTEMPT} ssh -- df -Pk /var/lib/docker`);
+    expect(calls).not.toMatch(/^docker (?!--context)/m);
+  });
+  it('fake archive retains a small digest proof outside VM/scratch before transient artifact cleanup',()=>{
+    const h=makeHost({extraState:{df_avail_k:'26000000'}}),arc=path.join(h.base,'image.tar.gz'),meta=path.join(h.base,'metadata.json');
+    const r=node(['archive','--sha',TEST_SHA,'--out',arc,'--metadata',meta],h.fh);expect(r.status,r.stdout+r.stderr).toBe(0);
+    const proof=path.join(h.fh,'image-home/.local/state/lcm-api-build',`${RUN}-${ATTEMPT}`,'archive-metadata.json');
+    expect(JSON.parse(fs.readFileSync(proof,'utf8'))).toEqual(JSON.parse(fs.readFileSync(meta,'utf8')));
+    expect(fs.statSync(proof).mode&0o777).toBe(0o600);
+    fs.rmSync(arc);fs.rmSync(meta);expect(fs.existsSync(proof)).toBe(true);
+  });
+  it.each(['foreign-context','wrong-sha','worker-bypass'])('image CLI rejects %s before engine calls',mode=>{
+    const h=makeHost({extraState:{df_avail_k:'26000000'}});
+    const args=['build','--sha',mode==='wrong-sha'?'a'.repeat(40):TEST_SHA];if(mode==='worker-bypass')args.push('--profile-worker');
+    const r=node(args,h.fh,mode==='foreign-context'?{LCM_BUILDER_CONTEXT:'colima'}:{});
+    expect(r.status).toBe(1);expect(readCalls(h.fh)).toBe('');
+  });
   it.each(['vm_measure_fail','vm_parse_fail'])('measurement failure halts capacity AND direct build: %s',flag=>{
     const h=makeHost({extraState:{df_avail_k:'26000000'},touchFlags:[flag]});
     expect(node(['capacity'],h.fh).status).toBe(1);
     expect(node(['build','--sha',TEST_SHA],h.fh).status).toBe(1);
-    expect(readCalls(h.fh)).not.toContain('docker build');expect(readCalls(h.fh)).not.toContain('docker load');
+    expect(readCalls(h.fh)).not.toMatch(/docker(?: --context \S+)? build/);expect(readCalls(h.fh)).not.toMatch(/docker(?: --context \S+)? load/);
   });
   it('every required archive field and replayed identity fails in the real CLI',()=>{
     const h=makeHost(),arc=path.join(h.base,'image.tar.gz'),file=path.join(h.base,'m.json');fs.writeFileSync(arc,'one');
@@ -848,6 +877,7 @@ describe("image.mjs guards (Mac Mini side)", () => {
     expect(check(m)).toBe(0);
     for(const k of Object.keys(m)){const v={...m};delete v[k];expect(check(v),k).toBe(1);expect(check({...m,[k]:''}),k+' empty').toBe(1);}
     for(const [k,v]of Object.entries({runId:'99',runAttempt:'2',repo:'other/repo',workflowPath:'other.yml',platform:'linux/amd64',archiveBytes:NaN,imageBytes:0}))expect(check({...m,[k]:v}),k).toBe(1);
+    expect(readCalls(h.fh)).toBe(''); // deploy verification never contacts a gone builder/default engine
   });
   it("verify-archive refuses tampered archives and unbound metadata", () => {
     const h = makeHost();
@@ -902,5 +932,15 @@ describe("workflow structure (spec-as-content)", () => {
   });
   it("image artifact retention is 1 day", () => {
     expect(yml).toMatch(/retention-days: 1\b/);
+  });
+  it('builder is started explicitly, cleanup is always after upload, deploy stays native',()=>{
+    const start=yml.indexOf('run: node scripts/ci/api/build-profile.mjs start');
+    const upload=yml.indexOf('name: Upload API image artifact');
+    const clean=yml.indexOf("name: Delete only this job's marked builder");
+    expect(start).toBeGreaterThan(0);expect(upload).toBeGreaterThan(start);expect(clean).toBeGreaterThan(upload);
+    expect(yml.slice(clean,clean+180)).toContain('if: always()');
+    expect(yml).toContain('node scripts/ci/api/build-profile.mjs native-capacity');
+    expect(yml).toContain('timeout-minutes: 60');
+    expect(yml).not.toContain('colima start');expect(yml).not.toContain('docker context use');
   });
 });

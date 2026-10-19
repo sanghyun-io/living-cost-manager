@@ -370,3 +370,114 @@ not guard removal. Pure web pushes can skip API only with complete positive
 evidence; the full public99→current source range still includes API foundation
 changes and must select API. Capacity gates/floors remain unchanged and blocked;
 no image build, push, workflow trigger or production application occurred here.
+
+## 10. Planned owned ephemeral builder — readiness only (supersedes shared-build context)
+
+**Not provisioned or executed here. Independent resource-helper review must pass
+before the first real start/download/build, which is reserved for GitHub Actions.**
+The existing `default` Colima instance, its 21 product containers and shared
+volumes are NOT the build target and are never stopped, resized, reset or pruned.
+The owner account remains Sanghyun as explicitly requested; no OS-account or
+cloud/provider/credential change is introduced. These source changes describe a
+planned lifecycle, not an applied runtime/ops inventory entry in another repository.
+
+Installed read-only CLI help was checked: Colima 0.10.3 supports `--cpus`,
+`--memory`, `--disk`, `--root-disk`, `--profile`, `--activate=false`,
+`--ssh-config=false`, and `--mount` (RO unless suffixed `:w`; `none` is also
+documented but is not used). Startup uses 2 CPU / 3 GiB RAM / 40 GiB sparse
+data disk / 20 GiB sparse root, aarch64/vz/docker/virtiofs, `--template=false`,
+`--ssh-agent=false` and exactly the real job workspace as one RO mount. No home,
+private SSH, host agent or arbitrary writable mount is supplied. Generated
+`lima.yaml` is parsed as safe data and must contain exactly that RO mount,
+`forwardAgent=false` and `loadDotSSHPubKeys=false` before any build. Unexpected
+mounts/configuration halt and clean only the owned profile; no shared Lima config
+is patched. Actual generated configuration still needs first-run verification.
+
+`build-profile.mjs` derives `lcm-api-build-<run>-<attempt>` and
+`colima-lcm-api-build-<run>-<attempt>` from the trusted main Owner workflow identity
+and exact source SHA. Workspace git HEAD/cleanliness is checked before allocation.
+Profiles, Lima disks, Docker contexts or job journals that already exist are
+refused, not adopted. A fresh 0700 state root at
+`~/.local/state/lcm-api-build/<run>-<attempt>` contains a 0600 identity/stage journal
+and private log. The global LCM `active` directory is claimed atomically; the
+profile directory is claimed exclusively and receives its own 0600 owner marker
+before provisioning. Same-attempt resume is deliberately unsupported. This is a
+cooperative owner-account lease, not isolation against malicious same-UID code.
+
+Only the derived context/profile and scratch path are exported to GITHUB_ENV.
+All image-engine commands have an explicit owned `--context`; guest capacity
+uses explicit `colima --profile ... ssh -- df -Pk <DockerRootDir>`. Context endpoint
+must equal that owned profile's Unix Docker socket. No artifact metadata can
+select a context. Read-only global client-context metadata, other context names,
+the explicit shared `colima` container-ID inventory and public shared ssh_config
+digest are compared before/after; drift is reported, never "fixed" by switching
+contexts or restarting another product. No default-engine build, probe or cleanup
+is performed by `image.mjs`.
+
+Resource conditions (unchanged floor/image gate):
+- Cold startup requires **22.7 GiB host free**: existing 20.8 GiB gate plus
+  forecast 1.85 GiB bootstrap, rounded upward. The supplied cold forecast is
+  ~316.9 MiB public download + ~1.2 GiB root allocation + ~0.3 GiB data format
+  + logs; it is an estimate, not a measured new-profile startup result.
+- Host RAM admission requires at least 4 GiB available (3 GiB VM + 1 GiB reserve),
+  using free/inactive/speculative pages, and the expected Darwin ARM64 platform.
+  No memory purge, swap alteration or other process termination is attempted.
+- Immediately after startup and before each heavy phase, **host and actual owned
+  guest Docker data filesystem must both have ≥20.8 GiB free**. VM `/` is not an
+  acceptable substitute for the data mount. Missing/failed measurements halt.
+- An independent parent monitors every owned start/build/probe/archive child.
+  Image children require a matching private controller PID/nonce; a direct worker
+  flag cannot bypass monitoring. Every five seconds host free is checked (plus
+  guest free once the builder is ready);
+  below **16.5 GiB** (15 floor + 1 reserve + .5 margin), unknown measurement,
+  timeout or cancellation stops only the detached child group created by that
+  parent, then tears down its own VM. No process-name scans or unrelated PID kills.
+  Startup has a 10-minute timeout; the job has a 60-minute bound. Forecast gates
+  still apply: the monitor is a backstop, not permission to start below budget.
+
+The lifecycle journals exact profile/Lima/data-disk paths, budgets and host free
+before/after. Cleanup revalidates canonical owner/identity/marker immediately
+before official `stop` and `delete --force --data` on that one profile; even a
+failed partial-start stop proceeds to its own official delete. Unknown ownership
+or failed deletion preserves the precise lease and fails the gate. No wildcard
+profile cleanup, shared-cache deletion or whole-VM copies are used. One official
+Colima 0.10.3 public boot blob (~316.9 MiB) may remain as a checksum-protected,
+reusable upstream cache; its purpose is avoiding repeated cold downloads and its
+retention is reviewed after the first run, not blindly pruned or promised as
+"net zero" space. No custom/force disk image or boot-cache bypass is accepted.
+
+Actions always cleans synthetic containers first; saves/uploads the public image
+archive; and only **after upload** stops/deletes the marked VM and removes its
+own transient archive files. Failure/cancellation also reaches idempotent cleanup.
+Small private journals/logs and a 0600 archive-metadata digest proof remain even
+if upload fails, for first-run evidence review; financial backup
+and isolated restore still run natively on Mac PG and never enter this builder.
+The deploy job no longer assumes the builder lives: artifact verification is
+strict hash/metadata-only locally; actual image identity/platform/size checks
+remain in the existing OCI load helper. Offline native CLI preparation uses a
+host-only 20.8 GiB capacity gate, not the shared VM. Production backup/receipt,
+SQL hash `229a1fa4...`, timeouts, additive migration and OLD-image CAS are unchanged.
+
+Source validation uses only fake Colima/context/filesystem fixtures and the
+existing native synthetic PG suite. New tests cover resource admission, foreign
+profiles/aliases/markers/SHAs, atomic lease collision, mounts, unknown/low guest
+space, partial-start cleanup, context socket binding, idempotence, private output,
+real Node-child budget abort and cancellation without killing an unrelated child.
+Those Node processes are test-owned; no real VM/download/image build is used.
+Existing financial, archive, SSH and classifier tests remain. Current host free
+was freshly read at ~22.9 GiB during readiness; this is not an atomic reservation
+and must be remeasured by Actions alongside RAM. Runtime resource viability,
+actual bootstrap peak and first-build health remain **unverified**, not deployed.
+No new paid cloud resource is allocated, but storage/RAM/CPU/Actions quota still
+have costs; no zero-cost, guaranteed reclaim or guaranteed completion claim is made.
+
+Local results for this readiness revision: **178/178 API tests** (all prior 131
+retained), **48/48 runner tests**, **10/10 Python restore proof**, **5/5 Python
+clean-build proof**. Node and Bash syntax, Ruby Psych YAML parse, extracted image
+job shell syntax and `git diff --check` passed. The existing optional Ruby ffi
+extension warning did not prevent parsing. All new fake profile directories,
+synthetic archives/proofs, monitor children and existing synthetic native clusters
+were cleaned by the fixture lifecycle; no real boot blob or VM was created.
+Host available was 23,996,136 KiB before and 23,979,296 KiB after a recorded full local
+checks; concurrent-session movement is not attributed to these tests. This is
+source/test readiness pending independent review, not physical startup proof.

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+[ "${1:-}" = --profile ] && [ "${2:-}" = "lcm-api-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ] || exit 91
+printf 'colima %s\n' "$*" >>"$FAKE_HOST/state/calls.log"
 [ ! -f "$FAKE_HOST/state/vm_measure_fail" ] || exit 1
 if [ -f "$FAKE_HOST/state/vm_parse_fail" ]; then echo invalid; exit 0; fi
-exec df -Pk /var/lib/docker
+avail=$(cat "$FAKE_HOST/state/df_avail_k.txt")
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vdb1 40000000 1 %s 1%% /var/lib/docker\n' "$avail"

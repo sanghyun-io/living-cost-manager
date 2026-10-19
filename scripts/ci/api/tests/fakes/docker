@@ -7,6 +7,10 @@ FH="${FAKE_HOST:?fake docker needs FAKE_HOST}"
 S="$FH/state"
 mkdir -p "$S"
 printf 'docker %s\n' "$*" >>"$S/calls.log"
+if [ -n "${LCM_BUILDER_CONTEXT:-}" ]; then
+  [ "${1:-}" = --context ] && [ "${2:-}" = "$LCM_BUILDER_CONTEXT" ] || exit 91
+  shift 2
+fi
 
 read_state() { [ -f "$S/$1" ] && cat "$S/$1" || echo ""; }
 has() { [ -f "$S/$1" ]; }
@@ -23,6 +27,7 @@ CMD="${1:-}"; shift || true
 J="$*"
 
 case "$CMD" in
+  context) printf 'unix://%s/.colima/%s/docker.sock\n' "$HOME" "$LCM_BUILDER_PROFILE" ;;
   info) echo /var/lib/docker ;;
   inspect) # docker inspect -f FMT CONTAINER
     fmt=$(getafter "-f" "$@"); target=$(getlast "$@")

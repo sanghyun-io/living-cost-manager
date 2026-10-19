@@ -311,9 +311,9 @@ jobs:
   # ---- API image build + synthetic health test (Mac Mini engine ONLY) ----
   # The OCI host stays runtime/deploy-only: no `docker build` on OCI as a CI
   # bypass. This job touches ONLY its own resources on the shared colima
-  # engine (exact `lcm-ci-*` names keyed by the 40-hex SHA, removed by the
-  # always()-teardown) — the engine itself is never started, reconfigured,
-  # reset or pruned, and no other container is contacted. The synthetic boot
+  # owned ephemeral profile (exact run/attempt lease + SHA; deleted after
+  # artifact upload). The shared default engine is never started, stopped,
+  # resized or pruned; only its read-only inventory is compared. The synthetic boot
   # uses a dedicated --internal Docker network (no host port published, no
   # egress) with a throwaway database and per-run random secrets that are
   # generated in-memory and never printed. Registry re-pull of the current
@@ -326,7 +326,7 @@ jobs:
     needs: [preflight, build-test, needs-api-detect]
     if: needs.needs-api-detect.outputs.needs_api == 'true'
     runs-on: [self-hosted, macOS, ARM64, lcm-production]
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -347,14 +347,13 @@ jobs:
           fetch-depth: 1
           ref: ${{ github.sha }}
 
-      - name: Docker engine reachable (existing colima context; never (re)started here)
-        run: |
-          set -eu
-          command -v docker
-          docker version --format 'engine={{.Server.Version}} os={{.Server.Os}} arch={{.Server.Architecture}}'
-          # Fail closed if the context is not the arm64 Linux engine that
-          # matches the OCI aarch64 host (buildx default platform follows it).
-          docker version --format '{{.Server.Os}}/{{.Server.Architecture}}' | grep -qx linux/arm64
+      - name: Setup Node (pinned exact 24.18.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.18.0
+
+      - name: Start fresh owned builder (22.7GiB startup gate, never shared default)
+        run: node scripts/ci/api/build-profile.mjs start
 
       - name: Capacity budget (floor 15GiB + measured peak budget, never lowered)
         run: node scripts/ci/api/image.mjs capacity
@@ -383,6 +382,16 @@ jobs:
           path: dist-api
           if-no-files-found: error
           retention-days: 1
+
+      - name: Delete only this job's marked builder and transient archive (always, after upload)
+        if: always()
+        run: |
+          set -eu
+          rc=0
+          node scripts/ci/api/build-profile.mjs teardown || rc=1
+          rm -f dist-api/image.tar.gz dist-api/metadata.json
+          if [ -d dist-api ]; then rmdir dist-api || rc=1; fi
+          exit "$rc"
 
   # ---- Gated API promotion: backup → rehearse → migrate → promote → verify ----
   # Runs ONLY for needs_api pushes and ONLY after Owner approval of the
@@ -468,7 +477,7 @@ jobs:
           set -eu
           # Checkout cleans node_modules: never assume an earlier job's CLI survived.
           # No network installer or engine download fallback. Missing cache stops here.
-          node scripts/ci/api/image.mjs capacity
+          node scripts/ci/api/build-profile.mjs native-capacity
           corepack enable pnpm
           pnpm install --offline --frozen-lockfile --ignore-scripts --filter living-cost-manager
           node scripts/ci/api/deploy.mjs check-local-tools \
