@@ -13,7 +13,10 @@ export function privateClient(dir,{home,create=false,tool=TOOL,run}={}) {
  if(create)call(['context','create','colima','--docker',`host=${endpoint}`]);
  if(call(['context','inspect','colima','--format','{{.Endpoints.docker.Host}}'])!==endpoint)throw Error('private-context-endpoint');
  if(!call(['buildx','version']).includes(`v${tool.version} `))throw Error('buildx-version');
- const inspect=call(['buildx','inspect','default']);if(!/^Driver:\s+docker\s*$/m.test(inspect)||!/^Status:\s+running\s*$/m.test(inspect)||!/^Endpoint:\s+default\s*$/m.test(inspect))throw Error('builder-not-native-default');
+ // Native context builders must match the explicitly selected Docker context.
+ // Buildx inspect(default) can succeed via DOCKER_HOST while build(default)
+ // rejects --context colima before creating any solve history.
+ const inspect=call(['buildx','inspect','colima']);if(!/^Driver:\s+docker\s*$/m.test(inspect)||!/^Status:\s+running\s*$/m.test(inspect)||!/^Endpoint:\s+colima\s*$/m.test(inspect))throw Error('builder-not-native-context');
  // Avoid inducing the existing shared daemon's automatic cache GC. This is
  // observed daemon metadata, NOT a new daemon configuration or global policy.
  const gc=[...inspect.matchAll(/Min Free Space:\s+([0-9.]+)(GiB|MiB)/g)].map(m=>(+m[1]+.001)*(m[2]==='GiB'?1024**3:1024**2));

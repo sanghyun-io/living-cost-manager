@@ -1,5 +1,5 @@
 import{it,expect,afterEach}from'vitest';
-import{mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync,realpathSync,copyFileSync}from'node:fs';
+import{mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync,realpathSync,copyFileSync,statSync}from'node:fs';
 import{join,dirname,resolve}from'node:path';import{tmpdir}from'node:os';import{spawnSync}from'node:child_process';import{pathToFileURL}from'node:url';
 import{BASE,compatibility,inventory,canonical,sha}from'./runtime-overlay.mjs';import{lifecycle}from'./build-profile.mjs';import{MIGRATION}from'./constants.mjs';
 const HERE=import.meta.dirname,ROOT=resolve(HERE,'../../..'),ENGINE=join(HERE,'tests/overlay-cli-engine.mjs'),roots:string[]=[];
@@ -49,6 +49,12 @@ it('overlay synthetic CLI reaches the real PG footprint/cap/cleanup handler from
  const s=JSON.parse(readFileSync(join(f.root,'engine.json'),'utf8'));expect(s.planningSmoke.revision).toBe(2);expect(s.container).toEqual({'foreign-container':f.foreign});f.l.teardown();
 },20000);
 it('direct baseline worker flag cannot bypass the leased controller before any export/import',async()=>{const f=await fixture();const r=f.cli('baseline',['--profile-worker']);expect(r.status).toBe(1);expect(f.commands().some(x=>x.mode==='server'||x.mode==='docker'&&x.args[0]==='load')).toBe(false);f.l.teardown();},20000);
+it('actual build handler failure preserves Docker stderr privately and reports only operation/status publicly',async()=>{
+ const f=await fixture('build-error');expect(f.cli('baseline').status).toBe(0);const r=f.cli('build');expect(r.status).toBe(1);
+ expect(r.stderr).toContain('operation=overlay-build child-exit=1 diagnostics=protected');expect(r.stdout+r.stderr).not.toContain('PRIVATE_BUILD_STDERR_SENTINEL');
+ const p=join(f.l.job,'code-child.log');expect(readFileSync(p,'utf8')).toContain('PRIVATE_BUILD_STDERR_SENTINEL');expect(statSync(p).mode&0o777).toBe(0o600);expect(statSync(join(f.l.job,'child-failure.json')).mode&0o777).toBe(0o600);
+ const j=JSON.parse(readFileSync(f.l.leaseFile,'utf8'));expect(j.completed).toEqual(['baseline']);expect(j.stage).toBe('cleaned');expect(JSON.parse(readFileSync(join(f.l.job,'measurement.json'),'utf8')).status).not.toBe('passed');
+},20000);
 it('overlay PG over-cap remains a failed gate and cleans only its labelled synthetic resources',async()=>{
  const f=await fixture('pg-overcap',true),r=f.cli('synthetic');expect(r.status).toBe(1);expect(f.commands().some(x=>x.mode==='docker'&&x.args.includes('du'))).toBe(true);
  const j=JSON.parse(readFileSync(f.l.leaseFile,'utf8'));expect(j.completed).not.toContain('synthetic');expect(j.stage).toBe('cleaned');const m=JSON.parse(readFileSync(join(f.l.job,'measurement.json'),'utf8'));expect(m.status).not.toBe('passed');expect(JSON.parse(readFileSync(join(f.root,'engine.json'),'utf8')).container).toEqual({'foreign-container':f.foreign});

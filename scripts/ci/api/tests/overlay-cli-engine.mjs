@@ -42,7 +42,8 @@ if(mode==='df'||mode==='colima') {
   s.image[c.transport.imageId]=c.baseImage;save('Loaded image ID: '+c.transport.imageId);
  }else if(cmd==='tag'){if(!s.image[a[1]]||s.image[a[2]])throw Error('fixture-tag-identity');s.image[a[2]]=s.image[a[1]];save();}
  else if(cmd==='buildx'&&a[1]==='build'){
-  if(after('--builder')!=='default'||after('--network')!=='none'||!a.includes('--load'))throw Error('fixture-overlay-builder');
+  if(after('--builder')!=='colima'||after('--network')!=='none'||!a.includes('--load'))throw Error('fixture-overlay-builder');
+  if(c.mode==='build-error'){process.stderr.write('ERROR: public-code-build-error PRIVATE_BUILD_STDERR_SENTINEL\n');process.exit(1);}
   const m=JSON.parse(readFileSync(join(last,'bundle/bundle.json')));if(m.source!==process.env.GITHUB_SHA)throw Error('fixture-build-source');
   const tag=after('-t');if(s.image[tag])throw Error('fixture-build-preexisting');
   s.image[tag]={Id:id(tag),Size:160000000,Os:'linux',Architecture:'arm64',Config:{Labels:{...labels(),'org.opencontainers.image.revision':m.source,'lcm.runtime-baseline':c.transport.imageId,'lcm.compiled-bundle':m.bundleSha256}}};save();

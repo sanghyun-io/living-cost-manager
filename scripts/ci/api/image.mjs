@@ -18,6 +18,7 @@ import {validateMetadata} from './metadata.mjs';
 import {lifecycle} from './build-profile.mjs';
 import {streamArchive} from './archive-stream.mjs';
 import {BASE,verifyBase,canonical} from './runtime-overlay.mjs';
+import {protectedRun,operationFor,failureSummary} from './child-diagnostics.mjs';
 import { randomBytes, createHash } from "node:crypto";
 import {
   mkdirSync, readFileSync, statSync, writeFileSync,
@@ -44,9 +45,9 @@ function fail(msg) {
   process.exit(1);
 }
 function run(bin, args, opts = {}) {
-  const r = spawnSync(bin, args, { encoding: "utf8", ...opts });
+  const r = builder?protectedRun(bin,args,{log:join(builder.job,'code-child.log'),failureFile:join(builder.job,'child-failure.json'),...opts}):spawnSync(bin, args, { encoding: "utf8", ...opts });
   if (r.status !== 0 && !opts.allowFail) {
-    fail(`child failed (exit ${r.status})`);
+    fail(failureSummary({operation:operationFor(bin,args),exitCode:r.status}));
   }
   return r;
 }
@@ -76,7 +77,13 @@ try {
       else {await builder.runImage(argv);console.log('api-image: monitored operation ok');process.exit(0);}
     }
   }
-}catch{fail('owned builder or capacity budget not met');}
+}catch(e){
+ if(e.message==='image-halted'){
+  let record;try{record=JSON.parse(readFileSync(join(builder.job,'child-failure.json'),'utf8'));}catch{}
+  fail(failureSummary(record));
+ }
+ fail('owned builder or capacity budget not met');
+}
 function capacity() {try {builder.capacity();console.log('capacity: stage forecast admitted; physical floor=15GiB, recovery=1GiB; guest operational reserve=2GiB');}catch{fail('capacity budget not met');}}
 if (cmd === 'capacity') { capacity(); process.exit(0); }
 
@@ -120,7 +127,7 @@ if (cmd === "build") {
   const overlay=builder.owned();if(overlay.plan.profile==='verified-runtime-overlay'){
    if(!overlay.completed.includes('baseline'))fail('base not verified');
    builder.markStage('overlay-apply-generate');builder.intent('image',imageName);
-   docker(['buildx','build','--builder','default','--load','--platform','linux/arm64','--network','none','--pull=false','-f',join(builder.job,'context/Dockerfile'),'--build-arg',`VERIFIED_BASE=${builder.baseTag}`,'--build-arg',`RELEASE_SHA=${sha}`,'--build-arg',`LCM_BASE_IMAGE_ID=${BASE.imageId}`,'--build-arg',`LCM_BUNDLE_SHA=${overlay.bundleManifest.bundleSha256}`,'--build-arg',`LCM_DEPENDENCY_PROOF_SHA=${overlay.bundleManifest.dependencyProof.sha256}`,...labelArgs,'-t',imageName,join(builder.job,'context')]);
+   docker(['buildx','build','--builder','colima','--load','--platform','linux/arm64','--network','none','--pull=false','-f',join(builder.job,'context/Dockerfile'),'--build-arg',`VERIFIED_BASE=${builder.baseTag}`,'--build-arg',`RELEASE_SHA=${sha}`,'--build-arg',`LCM_BASE_IMAGE_ID=${BASE.imageId}`,'--build-arg',`LCM_BUNDLE_SHA=${overlay.bundleManifest.bundleSha256}`,'--build-arg',`LCM_DEPENDENCY_PROOF_SHA=${overlay.bundleManifest.dependencyProof.sha256}`,...labelArgs,'-t',imageName,join(builder.job,'context')]);
    builder.recordOutput('runtime');
    probe(['--network','none',imageName,'node','/opt/lcm-overlay-verify.cjs','verify-installed']);
    builder.done('runtime');process.exit(0);

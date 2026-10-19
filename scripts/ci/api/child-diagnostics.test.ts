@@ -1,0 +1,12 @@
+import{it,expect,afterEach}from'vitest';import{mkdtempSync,readFileSync,rmSync,statSync,symlinkSync}from'node:fs';import{join}from'node:path';import{tmpdir}from'node:os';import{protectedRun,failureSummary,operationFor}from'./child-diagnostics.mjs';
+const roots:string[]=[];afterEach(()=>{for(const p of roots.splice(0))rmSync(p,{recursive:true,force:true});});
+const fixture=()=>{const p=mkdtempSync(join(tmpdir(),'lcm-code-diagnostics-'));roots.push(p);return{p,log:join(p,'code-child.log'),failureFile:join(p,'child-failure.json')};};
+it('captures actual child stderr/stdout failure privately and exposes only fixed operation/status',()=>{
+ const f=fixture(),r=protectedRun(process.execPath,['-e','process.stdout.write("PRIVATE_STDOUT");process.stderr.write("PRIVATE_STDERR");process.exit(7)'],{...f,operation:'overlay-build'});
+ expect(r.status).toBe(7);const raw=readFileSync(f.log,'utf8');expect(raw).toContain('PRIVATE_STDERR');expect(raw).toContain('PRIVATE_STDOUT');expect(statSync(f.log).mode&0o777).toBe(0o600);expect(statSync(f.failureFile).mode&0o777).toBe(0o600);
+ const m=JSON.parse(readFileSync(f.failureFile,'utf8'));expect(failureSummary(m)).toBe('operation=overlay-build child-exit=7 diagnostics=protected');expect(JSON.stringify(m)).not.toMatch(/PRIVATE_STDERR|PRIVATE_STDOUT/);
+});
+it('preserves machine-readable stdout on success without dumping it into automation diagnostics',()=>{const f=fixture(),r=protectedRun(process.execPath,['-e','process.stdout.write(JSON.stringify({Id:"public-code-image"}))'],{...f,operation:'image-operation'});expect(JSON.parse(r.stdout).Id).toBe('public-code-image');expect(readFileSync(f.log,'utf8')).not.toContain('public-code-image');});
+it('expected readiness failure does not create an authoritative failed-operation record',()=>{const f=fixture();protectedRun(process.execPath,['-e','process.stderr.write("not ready");process.exit(1)'],{...f,operation:'synthetic-exec',allowFail:true});expect(()=>readFileSync(f.failureFile)).toThrow();});
+it('refuses log symlinks rather than writing through an unrelated path',()=>{const f=fixture();symlinkSync(f.failureFile,f.log);expect(()=>protectedRun(process.execPath,['-e',''],{...f})).toThrow();});
+it('public failure formatter never echoes malformed records or raw stderr fields',()=>{expect(failureSummary({operation:'SECRET_RAW_ERROR',exitCode:1})).not.toContain('SECRET');expect(operationFor('docker',['--config','private','--context','colima','buildx','build'])).toBe('overlay-build');});

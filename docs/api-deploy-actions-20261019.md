@@ -827,3 +827,72 @@ subsequent build/archive CLIs: a cleaned terminal lease refuses heavy re-entry
 before any engine operation and cannot create a success artifact. All prior239
 tests remain; tests add no production bypass or changed reserve. No image build,
 export/import, production operation, push, new tool or OS change was executed.
+
+## 14. First GHA build failure — native CLI selector diagnosis
+
+Main published615 to feature/main and approved the api-image production gate for
+run39226031517/attempt1. Build-test/preflight/classification and baseline transfer/
+load/audit succeeded; image build failed, so api-deploy and FE were skipped. Public
+FE99/APIa2 and the unapplied new table are unchanged (Main's run observation, not a
+new production DB query here). The original cleaned lease was never edited/reused.
+
+The preserved code-only journal confirms completed=[baseline], substage=
+overlay-apply-generate, status=failed-or-cancelled. Initial free host22696136704B /
+guest8022151168B; sampled minimum22019788800B /7387828224B. These are SHARED sampled
+baseline/import deltas, not a full candidate-build peak or owned attribution.
+The63-sample final journal and239B private.log show capacity passed; Docker stderr
+had been discarded by image.run, so that original child text cannot be recovered.
+
+Actual pinned Buildx0.38 native diagnostics reproduced the pre-solve failure:
+
+`ERROR: use docker --context=default buildx to switch to context "default"`
+
+The source combined explicit context=colima with builder=default. Read-only inspect
+of default happened to succeed through the pinned DOCKER_HOST, but commands that
+select a solve/history builder reject the context/name mismatch. There was no
+failed solve record to recover from BuildKit history. A guarded operator-local
+**static check** (`FROM scratch`, no RUN, no tag or image output, `--call=check`)
+reproduced this exact stderr with the old selection and passed with context=colima /
+builder=colima on the SAME existing native docker-driver daemon. No candidate/base
+export, import, generation, DB or promotion was performed in that diagnostic.
+
+Protected small evidence (0600 under own0700 directories):
+- `/Users/sanghyun/.lcm-static-build-diagnostic-fI6Gvb/receipt.json` + private.log:
+  failed old selection, UUID3bcdbf00-db6a-4e86-ab94-0f8cc0a8747c; host before/after
+ 21680680960/21680664576B, guest8021929984B unchanged.
+- `/Users/sanghyun/.lcm-static-build-diagnostic-QYODXJ/receipt.json` + private.log:
+  passed matching selection, UUID9b93d7d4-5fc2-4cc9-9d55-4b43c5cec91b; host
+ 21836640256/21836472320B, guest8022142976/8022114304B. Tiny solver metadata may
+ remain in the existing cache; no prune/reclaim or isolated df attribution claim.
+All temporary contexts/plugin symlinks/static Dockerfiles were removed in finally.
+The small unique receipts/logs are retained for review, not uploaded publicly.
+
+Fix: keep private `--config ... --context colima`, exact existing Unix socket and
+native docker driver, but inspect/build the matching context-native builder
+**colima**, never create a builder, switch global context or edit global config.
+Driver/endpoint/version/GC validation still fails closed. Resource forecasts,
+physical15+recovery1, rollback/base CAS and restore/SQL/provenance guards are unchanged.
+
+`image.run` now streams child stderr to own0600 `code-child.log`, preserving failed
+stdout privately too. A structured0600 `child-failure.json` contains only fixed
+operation/status/signal codes. Public CI gets e.g. `operation=overlay-build
+child-exit=1 diagnostics=protected`, never raw stderr/env/credential values. Success
+stdout remains machine-readable; expected readiness failures don't poison the
+failure marker. This module is code-image-only, not used on customer restore logs.
+
+Tests cover context-native builder acceptance/default endpoint rejection and an
+actual failing fake build handler whose sentinel stderr stays private while its
+operation/status reaches the real parent CLI. Whole-CLI ownership/monitor tests
+remain. The passing static diagnostic proves the CLI selection fix only: actual
+overlay apply/generate/planning health and a complete image peak are still NOT
+verified. Main must review/push a new source SHA and run fresh gated Actions; no
+blind reuse of the cleaned615 lease, old artifacts or old attempt as a full proof.
+
+Verification for this diagnostic fix: **254 pipeline tests**, **48 runner tests**,
+**15 Python proof tests**, Node/CJS/Bash/YAML/diff checks pass. The native static
+old-selector failure and matching-selector success above are actual commands;
+candidate execution in automated tests is still a stateful fake engine. All
+test-owned roots/children and temporary native client contexts are cleaned. Only
+the two small protected static receipts/logs are retained for review. No full
+candidate image, base export/load, customer backup/restore, DDL, promotion, push,
+global client configuration change, VM operation or daemon maintenance occurred.
