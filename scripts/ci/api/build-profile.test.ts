@@ -1,176 +1,150 @@
-import {describe,it,expect,afterEach} from 'vitest';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,statSync,realpathSync} from 'node:fs';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {spawn,spawnSync} from 'node:child_process';
-import {identity,lifecycle,watchChild,assertMounts,parseFree,LIMITS} from './build-profile.mjs';
-const roots:string[]=[];
-afterEach(()=>{for(const p of roots.splice(0))rmSync(p,{recursive:true,force:true});});
-function fixture(extra={}) {
- const home=realpathSync(mkdtempSync(join(tmpdir(),'lcm-builder-')));roots.push(home);
- const workspace=join(home,'workspace');mkdirSync(workspace,{mode:0o700});
- const env:any={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'b'.repeat(40),GITHUB_REPOSITORY:'sanghyun-io/living-cost-manager',GITHUB_WORKFLOW_REF:'sanghyun-io/living-cost-manager/.github/workflows/ci.yml@refs/heads/main',GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',GITHUB_ACTOR:'sanghyun-io',GITHUB_WORKSPACE:workspace,GITHUB_ENV:join(home,'github-env'),...extra};
- const id=identity(env),pd=join(home,'.colima',id.profile),ld=join(home,'.colima/_lima',id.context),dd=join(home,'.colima/_lima/_disks',id.context);
- const state:any={host:23,guest:36,memory:5,version:'colima version 0.10.3\ngit commit: public',current:'colima',ids:Array.from({length:21},(_,i)=>String(i).padStart(12,'0')),mounts:{mounts:[{location:workspace,writable:false}],mountType:'virtiofs',ssh:{forwardAgent:false,loadDotSSHPubKeys:false}}};
- const calls:Array<{bin:string,args:string[]}>=[];
- const run=(bin:string,args:string[])=>{
-  calls.push({bin,args});
-  if(bin==='docker'&&args.join(' ')==='context show')return state.current;
-  if(bin==='docker'&&args.join(' ')==='context ls --format {{.Name}}')return ['default','colima','figuredeal',...(state.foreignContext?[id.context]:[])].join('\n');
-  if(bin==='docker'&&args.join(' ')==='--context colima ps -aq')return state.ids.join('\n');
-  if(bin==='colima'&&args[0]==='version')return state.version;
-  if(bin==='git') {expect(args.slice(0,2)).toEqual(['-C',workspace]);return args[2]==='rev-parse'?(state.wrongHead?'c'.repeat(40):id.sha):(state.dirty?' M tracked-source':'');}
-  if(bin==='ruby')return readFileSync(join(ld,'lima.yaml'),'utf8');
-  if(bin==='docker') {
-   expect(args.slice(0,2)).toEqual(['--context',id.context]);
-   if(args[2]==='info')return '/var/lib/docker';
-   if(args[2]==='context')return state.badEndpoint?'unix:///foreign/default.sock':`unix://${pd}/docker.sock`;
-   if(args[2]==='version')return 'linux/arm64';
-   throw Error('unexpected-docker-mutation');
+import {it,expect,afterEach,describe} from 'vitest';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,realpathSync,statSync,symlinkSync} from 'node:fs';
+import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';import {spawn,spawnSync} from 'node:child_process';
+import {identity,lifecycle,watchChild,parseFree,inspectEvidence} from './build-profile.mjs';
+import {GiB,REFERENCE,PUBLIC_BASES,RESERVES,estimate,admit,warmProofValid,sourceInventory} from './resource-budget.mjs';
+import {MIGRATION} from './constants.mjs';
+const roots:string[]=[];afterEach(()=>{for(const p of roots.splice(0))rmSync(p,{recursive:true,force:true});});
+const hash=b=>createHash('sha256').update(b).digest('hex');
+function fixture() {
+ const home=realpathSync(mkdtempSync(join(tmpdir(),'lcm-shared-')));roots.push(home);const workspace=join(home,'source');mkdirSync(join(workspace,'apps/api'),{recursive:true});
+ const text='FROM node:24-alpine AS build\nRUN true\nFROM node:24-alpine AS runtime\n';writeFileSync(join(workspace,'apps/api/Dockerfile'),text);
+ const env:any={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'b'.repeat(40),GITHUB_REPOSITORY:'sanghyun-io/living-cost-manager',GITHUB_WORKFLOW_REF:'sanghyun-io/living-cost-manager/.github/workflows/ci.yml@refs/heads/main',GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',GITHUB_ACTOR:'sanghyun-io',GITHUB_WORKSPACE:workspace,GITHUB_ENV:join(home,'github-env')};
+ const id=identity(env),state:any={host:30*GiB,guest:20*GiB,current:'foreign-global-context',wrongHead:false,preexisting:['sha256:'+'f'.repeat(64)]},records=new Map<string,any>(),calls:any[]=[];
+ const evidence:any={kind:'read-only-input-evidence',recipeKey:'9'.repeat(64),inventory:{kind:'actual-source-inventory',inputKey:'e'.repeat(64),packageKey:REFERENCE.packageKey,bytes:Buffer.byteLength(text),files:[{path:'apps/api/Dockerfile',bytes:Buffer.byteLength(text),sha256:hash(text)}]},baseDigest:PUBLIC_BASES.nodeDigest,baseCached:true,baseAccountingBytes:PUBLIC_BASES.nodeAccountingBytes,nodeVersion:PUBLIC_BASES.nodeVersion,pgCached:true,pgRef:PUBLIC_BASES.pgDigest,backend:'buildx existing fixture',sqlSha256:MIGRATION.sqlSha256};
+ const run=(bin:string,a:string[])=>{
+  calls.push({bin,args:a});
+  if(bin==='git')return a.includes('rev-parse')?(state.wrongHead?'a'.repeat(40):id.sha):'';
+  if(bin==='df'){if(state.badHost)throw Error('measurement');return `Filesystem blocks used available cap mount\n/dev/mock 99999999 1 ${Math.floor(state.host/1024)} 1% /System/Volumes/Data`;}
+  if(bin==='colima'){expect(a).toEqual(['--profile','default','ssh','--','df','-Pk','/var/lib/docker']);if(state.badGuest)throw Error('measurement');return `Filesystem blocks used available cap mount\n/dev/vdb1 40000000 1 ${Math.floor(state.guest/1024)} 1% ${state.wrongMount?'/':'/var/lib/docker'}`;}
+  if(bin!=='docker')throw Error('unexpected-command');expect(a.slice(0,2)).toEqual(['--context','colima']);const args=a.slice(2);
+  if(args[0]==='context')return state.badEndpoint?'unix:///foreign.sock':`unix://${home}/.colima/default/docker.sock`;
+  if(args[0]==='version')return state.badPlatform?'linux/amd64':'linux/arm64';
+  if(args[0]==='info')return '/var/lib/docker';
+  if(args[0]==='image'&&args.includes('--quiet'))return state.preexisting.join('\n');
+  if(args.includes('ls')) {
+   const filter=args[args.indexOf('--filter')+1];const kind=args[0];const name=filter?.startsWith('reference=')?filter.slice(10):filter?.replace(/^name=\^\/?/,'').replace(/\$$/,'');
+   const x=records.get(kind+':'+name);if(!x)return '';return args.at(-1)==='{{.Size}}'?'641MB':name;
   }
-  if(bin==='colima') {
-   expect(args.slice(0,2)).toEqual(['--profile',id.profile]);
-   if(args[2]==='ssh') {
-    expect(args.slice(3)).toEqual(['--','df','-Pk','/var/lib/docker']);
-    if(state.badGuest) return 'unparseable';
-    return `Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vdb1 40000000 1 ${Math.floor(state.guest*1024**2)} 1% /var/lib/docker`;
-   }
-   if(args[2]==='stop'){if(state.stopFails)throw Error('already-stopped');return '';}
-   if(args[2]==='delete') {
-    expect(args.slice(3)).toEqual(['--force','--data']);
-    if(state.deleteFails)throw Error('delete-failed');
-    for(const p of [pd,ld,dd])rmSync(p,{recursive:true,force:true});return '';
-   }
+  if(args[1]==='inspect')return JSON.stringify(records.get(args[0]+':'+args[2]));
+  if(args[0]==='rm'||args[0]==='network'&&args[1]==='rm'||args[0]==='image'&&args[1]==='rm') {
+   const target=args.at(-1);for(const [k,x]of records)if(k.endsWith(':'+target)||x.Id===target){records.delete(k);return '';}
+   throw Error('foreign-remove');
   }
-  throw Error('unexpected-command');
+  throw Error('unexpected-mutation');
  };
- const watch=async(bin:string,args:string[],opts:any)=>{
-  calls.push({bin,args});opts.check();
-  if(bin==='colima') {
-   expect(args.slice(0,3)).toEqual(['--profile',id.profile,'start']);
-   mkdirSync(ld,{recursive:true,mode:0o700});mkdirSync(dd,{recursive:true,mode:0o700});
-   writeFileSync(join(ld,'lima.yaml'),JSON.stringify(state.mounts));
-   writeFileSync(join(pd,'colima.yaml'),'owned profile');
-   if(state.startFails)throw Error('partial-start');
-   if(state.hostAfter!==undefined)state.host=state.hostAfter;
-   if(state.changeContext)state.current='other';
-  } else {
-   expect(args.at(-1)).toBe('--profile-worker');
-   const lease=JSON.parse(readFileSync(l.leaseFile,'utf8'));
-   expect(lease.controllerPid).toBe(process.pid);expect(opts.env.LCM_PROFILE_CONTROLLER_NONCE).toBe(lease.nonce);
-   if(state.driftDuringBuild)state.host=16.49;
-   opts.check();
-   if(state.buildFails)throw Error('build-failed');
-  }
- };
- const l=lifecycle({env,home,run,hostFree:()=>state.host,memory:()=>state.memory,platform:'darwin',arch:'arm64',watch});
- return {home,workspace,env,id,pd,ld,dd,state,calls,l,run,watch};
+ const watch=async(bin:string,a:string[],o:any)=>{calls.push({bin,args:a});o.check();if(state.drift)state.host=16.49*GiB;if(state.driftGuest)state.guest=2.49*GiB;if(state.childFails)throw Error('child');o.check();};
+ const l=lifecycle({env,home,run,evidence,watch,report:()=>{}});
+ const resource=(kind,name,extra={})=>{records.set(kind+':'+name,{Id:'sha256:'+hash(kind+name),...(kind==='image'?{Size:660000000,Os:'linux',Architecture:'arm64',Config:{Labels:{...l.labels,'org.opencontainers.image.revision':id.sha,'lcm-ci-input':evidence.inventory.inputKey,'moby.buildkit.cache.v0':'inline'}}}:{Labels:l.labels}),...extra});};
+ return {home,workspace,env,id,state,records,calls,evidence,l,resource};
 }
-const mutations=(f:ReturnType<typeof fixture>)=>f.calls.filter(c=>c.bin==='colima'&&['start','stop','delete'].includes(c.args[2]));
-async function ready(f:ReturnType<typeof fixture>) {Object.assign(f.env,await f.l.start());}
-describe('owned fresh builder lifecycle (fake Colima only)',()=>{
- it('canonical lease, exact CLI flags, RO mount, explicit context, 21 shared IDs unchanged, idempotent cleanup',async()=>{
-  const f=fixture(),before=[...f.state.ids];await ready(f);
-  expect(f.l.capacity()).toEqual({host:23,guest:36});
-  const start=mutations(f)[0].args;
-  for(const flag of ['--activate=false','--ssh-config=false','--template=false','--ssh-agent=false'])expect(start).toContain(flag);
-  for(const [flag,value]of [['--cpus','2'],['--memory','3'],['--disk','40'],['--root-disk','20'],['--mount',f.workspace]])expect(start[start.indexOf(flag)+1]).toBe(value);
+const mutations=f=>f.calls.filter(c=>c.bin==='docker'&&['rm','create','run','build','pull','prune'].some(s=>c.args.slice(2).includes(s)));
+function warm(f) {
+ const sourceSha='a'.repeat(40),run='11',attempt='1',tag=`lcm-ci-build-${run}-${attempt}-${sourceSha}:cache`;
+ const labels={'org.opencontainers.image.revision':sourceSha,'lcm-ci-input':f.evidence.inventory.inputKey,'lcm-ci-run':run,'lcm-ci-attempt':attempt,'moby.buildkit.cache.v0':'inline'};
+ f.records.set('image:'+tag,{Id:'sha256:'+'a'.repeat(64),Config:{Labels:labels}});
+ const p={kind:'sampled-actual-not-atomic',status:'passed',syntheticHealth:true,repo:'sanghyun-io/living-cost-manager',sourceSha,run,attempt,inputKey:f.evidence.inventory.inputKey,recipeKey:f.evidence.recipeKey,baseDigest:f.evidence.baseDigest,backend:f.evidence.backend,nodeVersion:f.evidence.nodeVersion,sqlSha256:MIGRATION.sqlSha256,buildImageTag:tag,buildImageId:'sha256:'+'a'.repeat(64),outputs:{build:{bytes:660000000},runtime:{bytes:660000000}},archiveSha256:'d'.repeat(64),archiveBytes:REFERENCE.historicalArchiveBytes,samples:[{host:30*GiB,guest:20*GiB},{host:29*GiB,guest:19*GiB}]};
+ mkdirSync(f.l.root,{recursive:true,mode:0o700});writeFileSync(join(f.l.root,`warm-${p.inputKey}.json`),JSON.stringify(p),{mode:0o600});return p;
+}
+describe('shared engine forecast/lease/owned cleanup',()=>{
+ it('prepares without any VM lifecycle/context mutation; pins both Linux FROMs, preserves foreign resources',async()=>{
+  const f=fixture();for(let i=0;i<21;i++)f.records.set('container:foreign-'+i,{Id:'foreign-'+i,Labels:{owner:'other'}});const before=JSON.stringify([...f.records]);
+  await f.l.prepare();expect(mutations(f)).toEqual([]);expect(f.state.current).toBe('foreign-global-context');
+  expect(readFileSync(join(f.l.job,'context/apps/api/Dockerfile'),'utf8').match(new RegExp(PUBLIC_BASES.nodeDigest,'g'))).toHaveLength(2);
   expect(statSync(f.l.job).mode&0o777).toBe(0o700);expect(statSync(f.l.leaseFile).mode&0o777).toBe(0o600);
-  const exports=readFileSync(f.env.GITHUB_ENV,'utf8');expect(exports).toContain('LCM_BUILDER_CONTEXT=colima-lcm-api-build-123-1');expect(exports).not.toMatch(/SECRET|TOKEN|SSH_AUTH/);
-  await f.l.runImage(['build','--sha',f.id.sha]);
-  const cache=join(f.home,'.colima/public-boot-cache');writeFileSync(cache,'public reusable blob');
-  const proof=join(f.l.job,'archive-metadata.json');writeFileSync(proof,'small unique proof',{mode:0o600});
-  f.l.teardown();f.l.teardown();expect(existsSync(f.pd)).toBe(false);expect(existsSync(f.ld)).toBe(false);expect(existsSync(f.dd)).toBe(false);
-  expect(f.state.ids).toEqual(before);expect(f.state.current).toBe('colima');expect(readFileSync(cache,'utf8')).toBe('public reusable blob');
-  expect(readFileSync(proof,'utf8')).toBe('small unique proof');
-  expect(mutations(f).filter(c=>c.args[2]==='delete')).toHaveLength(1);
+  expect(readFileSync(f.env.GITHUB_ENV,'utf8')).toContain('LCM_BUILDER_CONTEXT=colima');
+  f.l.teardown();f.l.teardown();expect(JSON.stringify([...f.records])).toBe(before);expect(f.calls.filter(c=>c.bin==='colima').every(c=>c.args[2]==='ssh')).toBe(true);
  });
- it.each([22.69,20.8,16,NaN])('startup below 22.7/unknown: %s -> zero CLI mutation',async free=>{
-  const f=fixture();f.state.host=free;await expect(f.l.start()).rejects.toThrow();expect(mutations(f)).toEqual([]);expect(existsSync(f.l.job)).toBe(false);
+ it('cold and warm forecasts are explicitly estimates, with physical floor once and distinct guest reserve',()=>{
+  const f=fixture(),cold=estimate(f.evidence,false),cached=estimate(f.evidence,true);
+  expect(cold.kind).toBe('estimate-from-caps-not-measurement');expect(cold.hostPeak).toBeGreaterThan(cached.hostPeak);
+  expect(cold.hostRequired).toBe(16*GiB+Math.ceil(cold.hostPeak*1.2));expect(cold.guestRequired).toBe(2*GiB+Math.ceil(cold.guestPeak*1.2));
+  expect(cold.hostPeak).toBe(Object.values(cold.parts).reduce((a:number,b:number)=>a+b,0));expect(cold.parts.streamedArchive).toBeGreaterThan(REFERENCE.historicalArchiveBytes);
  });
- it.each([3.99,NaN])('insufficient/unknown RAM %s -> zero CLI mutation',async mem=>{
-  const f=fixture();f.state.memory=mem;await expect(f.l.start()).rejects.toThrow();expect(mutations(f)).toEqual([]);
+ it('uncached public bases increase the forecast, rather than claiming existing cache for unrelated du',()=>{
+  const f=fixture(),a=estimate(f.evidence,false),b=estimate({...f.evidence,baseCached:false,pgCached:false,sharedCacheBytes:5*GiB},false);expect(b.hostPeak).toBeGreaterThan(a.hostPeak);expect(b.profile).toBe('cold-unverified-cache');
  });
- it('unsupported CLI version refuses provisioning',async()=>{const f=fixture();f.state.version='colima version 0.9.0';await expect(f.l.start()).rejects.toThrow();expect(mutations(f)).toEqual([]);});
- it('preexisting context alias is never overwritten',async()=>{const f=fixture();f.state.foreignContext=true;await expect(f.l.start()).rejects.toThrow('preexisting-context');expect(mutations(f)).toEqual([]);});
- it.each(['wrongHead','dirty'])('source mismatch %s refuses provisioning',async failure=>{const f=fixture();f.state[failure]=true;await expect(f.l.start()).rejects.toThrow('workspace-source');expect(mutations(f)).toEqual([]);});
- it('never adopts a preexisting profile or job lease',async()=>{
-  const f=fixture();mkdirSync(f.pd,{recursive:true});writeFileSync(join(f.pd,'foreign'),'keep');
-  await expect(f.l.start()).rejects.toThrow('preexisting-builder');expect(mutations(f)).toEqual([]);expect(readFileSync(join(f.pd,'foreign'),'utf8')).toBe('keep');
+ it.each(['cached','uncached','foreign-tag'])('read-only inspection %s distinguishes cache absence and public digest/config ID',mode=>{
+  const calls:any[]=[];const run=(bin,a)=>{calls.push([bin,a]);if(bin==='git'){const r=spawnSync(bin,a,{encoding:'utf8'});expect(r.status).toBe(0);return r.stdout.trim();}
+   expect(a.slice(0,2)).toEqual(['--context','colima']);if(a.includes('buildx'))return 'existing BuildKit fixture';if(a.includes('ls'))return mode==='uncached'?'':a.join(' ').includes('postgres')?'411MB':'238MB';
+   if(a.includes('{{json .Config.Env}}'))return JSON.stringify(['NODE_VERSION=24.21.0']);
+   return JSON.stringify(a.join(' ').includes('postgres')?{Id:'sha256:'+'2'.repeat(64),RepoDigests:[PUBLIC_BASES.pgDigest],Os:'linux',Architecture:'arm64'}:{Id:'sha256:'+'1'.repeat(64),Size:62065778,RepoDigests:mode==='foreign-tag'?[]:[PUBLIC_BASES.nodeDigest],Os:'linux',Architecture:'arm64'});
+  };
+  const root=resolve(import.meta.dirname,'../../..');
+  if(mode==='foreign-tag'){expect(()=>inspectEvidence(root,run)).toThrow('base-identity');expect(calls.some(c=>c[1].includes('{{json .Config.Env}}'))).toBe(false);}
+  else{const e=inspectEvidence(root,run);expect(e.baseCached).toBe(mode==='cached');expect(e.pgCached).toBe(mode==='cached');expect(e.baseDigest).toBe(PUBLIC_BASES.nodeDigest);if(mode==='cached')expect(e.baseId).not.toBe(e.baseDigest.slice(5));}
+  expect(calls.filter(c=>c[0]==='docker').every(c=>!c[1].some(x=>['pull','build','prune','rm'].includes(x)))).toBe(true);
  });
- it('CLI reports the exact refused namespace without deleting a foreign profile',()=>{
-  const f=fixture();mkdirSync(f.pd,{recursive:true});writeFileSync(join(f.pd,'foreign'),'keep');
-  const r=spawnSync(process.execPath,[new URL('./build-profile.mjs',import.meta.url).pathname,'teardown'],{encoding:'utf8',env:{...process.env,...f.env,HOME:f.home,COLIMA_HOME:'',COLIMA_PROFILE:'',LIMA_HOME:'',DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:''}});
-  expect(r.status).toBe(1);expect(r.stderr).toContain(`profile=${f.id.profile}`);expect(r.stderr).toContain(f.l.leaseFile);expect(readFileSync(join(f.pd,'foreign'),'utf8')).toBe('keep');
+ it.each(['host','guest','badHost','badGuest','wrongMount','badEndpoint','badPlatform'])('bad/insufficient %s blocks before any mutation',async field=>{
+  const f=fixture();if(field==='host')f.state.host=19.5*GiB;else if(field==='guest')f.state.guest=7.5*GiB;else f.state[field]=true;
+  await expect(f.l.prepare()).rejects.toThrow();expect(mutations(f)).toEqual([]);
  });
- it('atomic active lease refuses another builder without deleting its marker',async()=>{
-  const f=fixture();mkdirSync(join(f.l.root,'active'),{recursive:true,mode:0o700});writeFileSync(join(f.l.root,'active/owner.json'),'foreign active lease');
-  await expect(f.l.start()).rejects.toThrow();expect(mutations(f)).toEqual([]);expect(readFileSync(join(f.l.root,'active/owner.json'),'utf8')).toBe('foreign active lease');
+ it('missing native BuildKit blocks; never installs a tool or falls back to legacy cancellation assumptions',async()=>{
+  const f=fixture();f.evidence.backend=null;await expect(f.l.prepare()).rejects.toThrow('native-buildkit');expect(mutations(f)).toEqual([]);expect(existsSync(f.l.job)).toBe(false);
  });
- it.each([{LCM_BUILDER_PROFILE:'default'},{LCM_BUILDER_CONTEXT:'colima-figuredeal'},{GITHUB_SHA:'HEAD'},{GITHUB_RUN_ID:'1; bad'},{GITHUB_EVENT_NAME:'pull_request'},{GITHUB_ACTOR:'other'},{DOCKER_HOST:'tcp://foreign:2375'}])('rejects unsafe identity/routing %j',extra=>{
-  const f=fixture();expect(()=>lifecycle({env:{...f.env,...extra},home:f.home})).toThrow();expect(mutations(f)).toEqual([]);
+ it('verified same-input warm proof is required; losing its live cache falls back to the full cold forecast',async()=>{
+  const f=fixture(),p=warm(f);f.state.host=20*GiB;f.state.guest=7.5*GiB;await f.l.prepare();expect(f.l.owned().plan.profile).toBe('verified-identical-input-cache');
+  f.records.delete('image:'+p.buildImageTag);expect(()=>f.l.capacity()).toThrow('capacity-budget');expect(f.l.owned().plan.profile).toBe('cold-unverified-cache');expect(mutations(f)).toEqual([]);
  });
- it('replayed/wrong marker prevents any stop/delete',async()=>{
-  const f=fixture();await ready(f);writeFileSync(f.l.marker,JSON.stringify({...identity(f.env),version:1,sha:'a'.repeat(40)}));
-  expect(()=>f.l.teardown()).toThrow('builder-marker');expect(mutations(f)).toHaveLength(1);
+ it.each(['status','inputKey','recipeKey','baseDigest','sqlSha256','buildImageId','sourceSha','run','buildImageTag'])('warm proof %s mismatch does not grant credit',field=>{
+  const f=fixture(),p=warm(f),live=f.records.get('image:'+p.buildImageTag);expect(warmProofValid(p,f.evidence,live)).toBe(true);expect(warmProofValid({...p,[field]:'wrong'},f.evidence,live)).toBe(false);
  });
- it('wrong lease SHA prevents cleanup',async()=>{
-  const f=fixture();await ready(f);const lease=JSON.parse(readFileSync(f.l.leaseFile,'utf8'));writeFileSync(f.l.leaseFile,JSON.stringify({...lease,sha:'a'.repeat(40)}));
-  expect(()=>f.l.teardown()).toThrow('lease-identity');expect(mutations(f)).toHaveLength(1);
+ it('DNS-safe names include run/attempt/digest and FULL SHA labels; foreign collision is refused before remove',async()=>{
+  const f=fixture();await f.l.prepare();for(const n of Object.values(f.l.names)){expect(n).toContain(`${f.id.run}-${f.id.attempt}-${f.id.sha.slice(0,12)}`);expect(n.length).toBeLessThan(63);}expect(f.l.labels['lcm-ci-owner']).toBe(f.id.sha);
+  f.resource('container',f.l.names.pg,{Labels:{'lcm-ci-owner':'other'}});expect(()=>f.l.intent('container',f.l.names.pg)).toThrow('foreign-preexisting');expect(mutations(f)).toEqual([]);
  });
- it.each(['badGuest','lowGuest','hostAfter','startFails','mountHome','agent','changeContext','badEndpoint'])('failed startup %s -> own teardown, no image build',async failure=>{
-  const f=fixture();if(failure==='lowGuest')f.state.guest=7.5;else if(failure==='hostAfter')f.state.hostAfter=20.79;else if(failure==='mountHome')f.state.mounts.mounts=[{location:'~',writable:true}];else if(failure==='agent')f.state.mounts.ssh.forwardAgent=true;else f.state[failure]=true;
-  await expect(f.l.start()).rejects.toThrow();expect(existsSync(f.pd)).toBe(false);expect(existsSync(f.ld)).toBe(false);expect(existsSync(f.dd)).toBe(false);
-  expect(mutations(f).some(c=>c.args[2]==='delete')).toBe(true);expect(f.calls.some(c=>c.args.includes('build'))).toBe(false);
+ it.each(['lcm-ci-owner','lcm-ci-run','lcm-ci-attempt'])('cleanup refuses foreign/mismatched %s and keeps the resource',async key=>{
+  const f=fixture();await f.l.prepare();f.l.intent('container',f.l.names.pg);f.resource('container',f.l.names.pg,{Labels:{...f.l.labels,[key]:'other'}});
+  expect(()=>f.l.teardown()).toThrow('cleanup-incomplete');expect(f.records.has('container:'+f.l.names.pg)).toBe(true);expect(mutations(f)).toEqual([]);
  });
- it('failed stop after partial boot still force-deletes only the owned profile',async()=>{
-  const f=fixture();f.state.startFails=true;f.state.stopFails=true;await expect(f.l.start()).rejects.toThrow();expect(existsSync(f.pd)).toBe(false);expect(mutations(f).at(-1)?.args[2]).toBe('delete');
+ it('newly tagged preexisting untagged image ID is NOT deleted even with matching job labels',async()=>{
+  const f=fixture();await f.l.prepare();f.l.intent('image',f.l.tags.runtime);f.resource('image',f.l.tags.runtime,{Id:f.state.preexisting[0]});
+  expect(()=>f.l.teardown()).toThrow('cleanup-incomplete');expect(f.records.has('image:'+f.l.tags.runtime)).toBe(true);expect(mutations(f)).toEqual([]);
  });
- it('failed delete preserves exact lease/marker and reports incomplete cleanup',async()=>{
-  const f=fixture();await ready(f);f.state.deleteFails=true;expect(()=>f.l.teardown()).toThrow();expect(existsSync(f.pd)).toBe(true);expect(JSON.parse(readFileSync(f.l.leaseFile,'utf8')).stage).toBe('ready');
+ it('cleanup uses only recorded fresh immutable container IDs and exact owned image tags; retains reviewed cache',async()=>{
+  const f=fixture();await f.l.prepare();f.l.intent('container',f.l.names.pg);f.resource('container',f.l.names.pg);const id=f.l.check('container',f.l.names.pg);
+  f.l.intent('image',f.l.tags.build);f.resource('image',f.l.tags.build);const j=f.l.owned();j.keepBuildCache=true;writeFileSync(f.l.leaseFile,JSON.stringify(j),{mode:0o600});
+  f.l.teardown();expect(f.records.has('container:'+f.l.names.pg)).toBe(false);expect(f.records.has('image:'+f.l.tags.build)).toBe(true);expect(mutations(f).map(c=>c.args.at(-1))).toEqual([id]);
  });
- it('build failure or monitored host drift tears down own VM',async()=>{
-  const f=fixture();await ready(f);f.state.driftDuringBuild=true;await expect(f.l.runImage(['build','--sha',f.id.sha])).rejects.toThrow();expect(existsSync(f.pd)).toBe(false);expect(f.state.ids).toHaveLength(21);
+ it('remaining-stage admission uses fresh df with persisted outputs already occupying disk (no peak reset)',async()=>{
+  const f=fixture();await f.l.prepare();const initial=f.l.capacity();f.l.done('linux-build');f.state.host=24*GiB;const next=f.l.capacity();expect(next.hostRequired).toBeLessThan(initial.hostRequired);expect(next.host).toBe(24*GiB);expect(next.hostRequired).toBeGreaterThan(16*GiB);
  });
- it('unknown measurement during build cannot grant continued execution',async()=>{
-  const f=fixture();await ready(f);f.state.badGuest=true;await expect(f.l.runImage(['build','--sha',f.id.sha])).rejects.toThrow();expect(f.calls.some(c=>c.args.includes('--profile-worker'))).toBe(false);expect(existsSync(f.pd)).toBe(false);
+ it.each(['drift','driftGuest','childFails'])('monitor %s aborts only own operation; measurements never become passed',async field=>{
+  const f=fixture();await f.l.prepare();f.state[field]=true;await expect(f.l.runImage(['build','--sha',f.id.sha])).rejects.toThrow('image-halted');
+  const m=JSON.parse(readFileSync(join(f.l.job,'measurement.json'),'utf8'));expect(m.kind).toBe('sampled-actual-not-atomic');expect(m.status).toBe('failed-or-cancelled');expect(m.sharedObservedDelta).toBeDefined();expect(f.l.owned().stage).toBe('cleaned');
  });
- it('fresh-only: same attempt cannot silently resume even after successful cleanup',async()=>{
-  const f=fixture();await ready(f);f.l.teardown();await expect(f.l.start()).rejects.toThrow('preexisting-builder');
+ it('absence of full health/archive stages cannot fabricate a completed measurement',async()=>{const f=fixture();await f.l.prepare();expect(()=>f.l.completeProof()).toThrow('measurement-incomplete');});
+ it('invalid immutable SHA and routing overrides fail without selecting an engine',()=>{
+  const f=fixture();for(const extra of [{GITHUB_SHA:'HEAD'},{GITHUB_RUN_ID:'1;bad'},{DOCKER_CONTEXT:'other'},{LCM_BUILDER_CONTEXT:'default'},{LCM_BUILDER_PROFILE:'default'},{GITHUB_ACTOR:'other'}])expect(()=>lifecycle({env:{...f.env,...extra},home:f.home})).toThrow();
  });
- it('strict mount allowlist rejects private/home/rw/agent forwarding',()=>{
-  const f=fixture();expect(()=>assertMounts(f.state.mounts,f.workspace)).not.toThrow();
-  for(const bad of [{...f.state.mounts,mounts:[{location:f.workspace,writable:true}]},{...f.state.mounts,mounts:[{location:'~',writable:false}]},{...f.state.mounts,ssh:{forwardAgent:true,loadDotSSHPubKeys:false}}])expect(()=>assertMounts(bad,f.workspace)).toThrow();
+ it('atomic active lease refuses concurrent job; exact source mismatch fails before mutation',async()=>{
+  const f=fixture();f.state.wrongHead=true;await expect(f.l.prepare()).rejects.toThrow('source-identity');f.state.wrongHead=false;await f.l.prepare();await expect(f.l.prepare()).rejects.toThrow();expect(mutations(f)).toEqual([]);
  });
- it('parses a minimal generated Lima YAML with the installed safe data parser before checking actual RO/agent settings',()=>{
-  const f=fixture(),p=join(f.home,'lima.yaml');
-  writeFileSync(p,`mountType: virtiofs\nmounts:\n  - location: ${f.workspace}\n    writable: false\nssh:\n  forwardAgent: false\n  loadDotSSHPubKeys: false\n`);
-  const r=spawnSync('ruby',['-ryaml','-rjson','-e','puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), permitted_classes: [], aliases: false))',p],{encoding:'utf8'});
-  expect(r.status).toBe(0);expect(()=>assertMounts(JSON.parse(r.stdout),f.workspace)).not.toThrow();
+ it('actual DockerRootDir parser rejects VM root, zero and malformed outputs',()=>{
+  expect(parseFree('fs blocks used available cap mount\n/dev/vdb1 40000000 1 7837492 1% /var/lib/docker','/var/lib/docker')).toBe(7837492*1024);
+  for(const s of ['invalid','fs blocks used available cap mount\n/dev/vda1 20000000 1 19000000 1% /','fs blocks used available cap mount\n/dev/vdb1 40000000 1 0 1% /var/lib/docker'])expect(()=>parseFree(s,'/var/lib/docker')).toThrow();
+  expect(()=>admit(estimate(fixture().evidence),{host:NaN,guest:20*GiB})).toThrow('capacity-unknown');expect(RESERVES.physicalFloor).toBe(15*GiB);
  });
- it('capacity parser uses data mount, not VM root, and rejects missing/zero values',()=>{
-  expect(parseFree('Filesystem blocks used available cap mount\n/dev/vdb1 40000000 1 36000000 1% /var/lib/docker','/var/lib/docker')).toBeGreaterThan(20.8);
-  for(const s of ['bad','Filesystem blocks used available cap mount\n/dev/vda1 19000000 1 18000000 1% /','Filesystem blocks used available cap mount\n/dev/vdb1 40000000 1 0 1% /var/lib/docker'])expect(()=>parseFree(s,'/var/lib/docker')).toThrow();
-  expect(LIMITS).toEqual({startup:22.7,build:20.8,abort:16.5,memory:4});
+ it('stale package reference blocks rather than silently using a smaller magic peak',()=>{const f=fixture();expect(()=>estimate({...f.evidence,inventory:{...f.evidence.inventory,packageKey:'other'}})).toThrow('reference-stale');});
+ it('source allowlist excludes private/untracked env and rejects source symlinks and oversized context',()=>{
+  const f=fixture(),paths=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','apps/api/package.json','apps/web/package.json','packages/shared/package.json','apps/api/Dockerfile'];
+  for(const p of paths){mkdirSync(join(f.workspace,p,'..'),{recursive:true});if(!existsSync(join(f.workspace,p)))writeFileSync(join(f.workspace,p),'{}');}
+  writeFileSync(join(f.workspace,'.env'),'PRIVATE_SYNTHETIC_SENTINEL');const inv=sourceInventory(f.workspace,[...paths,'.env']);expect(inv.files.some(x=>x.path==='.env')).toBe(false);
+  mkdirSync(join(f.workspace,'apps/api/src'));symlinkSync(join(f.workspace,'.env'),join(f.workspace,'apps/api/src/link.ts'));expect(()=>sourceInventory(f.workspace,[...paths,'apps/api/src/link.ts'])).toThrow('input-type');
+  writeFileSync(join(f.workspace,'apps/api/src/large.ts'),Buffer.alloc(4*1024**2));expect(()=>sourceInventory(f.workspace,[...paths,'apps/api/src/large.ts'])).toThrow('context-cap');
+ });
+ it.each([NaN,0,9*GiB])('candidate accounting %s fails without releasing the next stage budget',async size=>{
+  const f=fixture();await f.l.prepare();f.l.intent('image',f.l.tags.runtime);f.resource('image',f.l.tags.runtime,{Size:size});expect(()=>f.l.recordOutput('runtime')).toThrow();expect(f.l.owned().completed).not.toContain('runtime');
  });
 });
-it('real process monitor terminates only its own child group on budget drift; unrelated child stays alive',async()=>{
- const p=mkdtempSync(join(tmpdir(),'lcm-monitor-'));roots.push(p);let n=0,ownedPid:number|undefined;
+it('real process monitor terminates only its detached child group; unrelated child remains alive',async()=>{
+ const p=realpathSync(mkdtempSync(join(tmpdir(),'lcm-monitor-')));roots.push(p);let n=0,ownPid;
  const other=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
- try {
-  await expect(watchChild(process.execPath,['-e','process.stderr.write("PRIVATE_SYNTHETIC_CHILD");setInterval(()=>{},1000)'],{check:()=>{if(++n>2)throw Error('host-below-16.5');},interval:50,log:join(p,'private.log'),onSpawn:c=>{ownedPid=c.pid;}})).rejects.toThrow('owned-child-halted');
-  expect(other.exitCode).toBe(null);expect(()=>process.kill(other.pid!,0)).not.toThrow();expect(()=>process.kill(ownedPid!,0)).toThrow();expect(statSync(join(p,'private.log')).mode&0o777).toBe(0o600);
- }finally{other.kill('SIGTERM');await new Promise(r=>other.once('exit',r));}
+ try{await expect(watchChild(process.execPath,['-e','process.stderr.write("PRIVATE_CHILD");setInterval(()=>{},1000)'],{check:()=>{if(++n>2)throw Error('budget');},interval:50,log:join(p,'private.log'),onSpawn:c=>ownPid=c.pid})).rejects.toThrow('owned-child-halted');expect(other.exitCode).toBe(null);expect(()=>process.kill(other.pid!,0)).not.toThrow();expect(()=>process.kill(ownPid,0)).toThrow();expect(statSync(join(p,'private.log')).mode&0o777).toBe(0o600);}finally{const done=new Promise(r=>other.once('exit',r));other.kill('SIGTERM');await done;}
 },10000);
-it('cancellation of a real owned controller terminates its child group and returns a failure code',async()=>{
- const p=mkdtempSync(join(tmpdir(),'lcm-cancel-'));roots.push(p);const pidFile=join(p,'child.pid');
- const moduleUrl=new URL('./build-profile.mjs',import.meta.url).href;
- const script=`import {watchChild} from ${JSON.stringify(moduleUrl)};import{writeFileSync}from'node:fs';try{await watchChild(process.execPath,['-e','setInterval(()=>{},1000)'],{log:${JSON.stringify(join(p,'private.log'))},check:()=>{},interval:20,onSpawn:c=>writeFileSync(${JSON.stringify(pidFile)},String(c.pid))});}catch{process.exitCode=1;}`;
- const controller=spawn(process.execPath,['--input-type=module','-e',script],{stdio:'ignore'});let childPid;
- try {
-  for(let i=0;i<100&&!existsSync(pidFile);i++)await new Promise(r=>setTimeout(r,10));
-  expect(existsSync(pidFile)).toBe(true);childPid=+readFileSync(pidFile,'utf8');
-  const exited=new Promise(r=>controller.once('exit',r));controller.kill('SIGTERM');expect(await exited).toBe(1);
-  expect(()=>process.kill(childPid,0)).toThrow();
- }finally{if(controller.exitCode===null&&controller.signalCode===null){controller.kill('SIGTERM');await new Promise(r=>controller.once('exit',r));}}
+it('controller cancellation sends cancellation to its own child group and fails, never reports completed measurement',async()=>{
+ const p=realpathSync(mkdtempSync(join(tmpdir(),'lcm-cancel-')));roots.push(p);const pid=join(p,'pid'),url=new URL('./build-profile.mjs',import.meta.url).href;
+ const script=`import{watchChild}from${JSON.stringify(url)};import{writeFileSync}from'node:fs';try{await watchChild(process.execPath,['-e','setInterval(()=>{},1000)'],{check:()=>{},interval:20,log:${JSON.stringify(join(p,'private.log'))},onSpawn:c=>writeFileSync(${JSON.stringify(pid)},String(c.pid))});}catch{process.exitCode=1;}`;
+ const c=spawn(process.execPath,['--input-type=module','-e',script],{stdio:'ignore'});
+ try{for(let i=0;i<100&&!existsSync(pid);i++)await new Promise(r=>setTimeout(r,10));expect(existsSync(pid)).toBe(true);const child=+readFileSync(pid,'utf8');const ended=new Promise(r=>c.once('exit',r));c.kill('SIGTERM');expect(await ended).toBe(1);expect(()=>process.kill(child,0)).toThrow();}finally{if(c.exitCode===null&&c.signalCode===null){const ended=new Promise(r=>c.once('exit',r));c.kill('SIGTERM');await ended;}}
 },10000);

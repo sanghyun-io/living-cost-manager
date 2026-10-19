@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { classifyCompare } from "./paths.mjs";
 import { PROD, MIGRATION } from "./constants.mjs";
+import {estimate,REFERENCE,PUBLIC_BASES,GiB} from './resource-budget.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const API = HERE;
@@ -820,18 +821,19 @@ describe("needs-API detection", () => {
 
 describe("image.mjs guards (Mac Mini side)", () => {
   const node = (args: string[], fh: string,extraEnv:Record<string,string>={}) => {
-    const home=path.join(fh,'image-home'),profile=`lcm-api-build-${RUN}-${ATTEMPT}`,context=`colima-${profile}`;
-    const job=path.join(home,'.local/state/lcm-api-build',`${RUN}-${ATTEMPT}`),pd=path.join(home,'.colima',profile);
-    const owner={version:1,run:RUN,attempt:ATTEMPT,sha:TEST_SHA,profile,context};
-    fs.mkdirSync(pd,{recursive:true,mode:0o700});fs.mkdirSync(job,{recursive:true,mode:0o700});
-    fs.writeFileSync(path.join(pd,'.lcm-owned.json'),JSON.stringify(owner),{mode:0o600});
-    fs.writeFileSync(path.join(job,'lease.json'),JSON.stringify({...owner,stage:'ready',claimed:true,workspace:REPO}),{mode:0o600});
+    const home=path.join(fh,'image-home'),key=`${RUN}-${ATTEMPT}-${TEST_SHA}`,job=path.join(home,'.local/state/lcm-api-shared-build',key);
+    if(args[0]!=='verify-archive'&&!fs.existsSync(path.join(job,'lease.json'))) {
+      fs.mkdirSync(path.join(job,'context/apps/api'),{recursive:true,mode:0o700});fs.mkdirSync(path.join(job,'scratch'),{mode:0o700});
+      fs.copyFileSync(path.join(REPO,'apps/api/Dockerfile'),path.join(job,'context/apps/api/Dockerfile'));
+      const evidence={recipeKey:'9'.repeat(64),nodeVersion:PUBLIC_BASES.nodeVersion,inventory:{inputKey:'e'.repeat(64),packageKey:REFERENCE.packageKey,bytes:600480,files:[]},baseDigest:PUBLIC_BASES.nodeDigest,baseCached:true,pgCached:true,pgRef:PUBLIC_BASES.pgDigest,baseAccountingBytes:PUBLIC_BASES.nodeAccountingBytes,backend:'fixture-native-buildkit',sqlSha256:MIGRATION.sqlSha256};
+      fs.writeFileSync(path.join(job,'lease.json'),JSON.stringify({version:2,run:RUN,attempt:ATTEMPT,sha:TEST_SHA,key,context:'colima',stage:'ready',workspace:REPO,evidence,plan:estimate(evidence,false),resources:[],completed:[],preexistingImages:[],admissionFree:{host:26*GiB,guest:26*GiB},execution:'unit-fixture-not-real-build'}),{mode:0o600});
+    }
     return spawnSync("node", [path.join(API, "image.mjs"), ...args], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${FAKES}:${process.env.PATH}`, FAKE_HOST: fh,
         ...ciEnv,HOME:home,COLIMA_HOME:'',LIMA_HOME:'',DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:'',COLIMA_PROFILE:'',
-        LCM_BUILDER_PROFILE:profile,LCM_BUILDER_CONTEXT:context,
-        LCM_CI_API_STATE_DIR: path.join(job,`lcm-ci-api-${SHA12}`),...extraEnv },
+        LCM_BUILDER_PROFILE:'',LCM_BUILDER_CONTEXT:'colima',
+        LCM_CI_API_STATE_DIR: path.join(job,'scratch'),...extraEnv },
       stdin: "ignore",
     });
   };
@@ -846,22 +848,23 @@ describe("image.mjs guards (Mac Mini side)", () => {
   it('monitored parent/worker build uses only the leased context and profile (fake engine)',()=>{
     const h=makeHost({extraState:{df_avail_k:'26000000'}});
     const r=node(['build','--sha',TEST_SHA],h.fh);expect(r.status,r.stdout+r.stderr).toBe(0);
-    const calls=readCalls(h.fh);expect(calls).toContain(`docker --context colima-lcm-api-build-${RUN}-${ATTEMPT} build`);
-    expect(calls).toContain(`colima --profile lcm-api-build-${RUN}-${ATTEMPT} ssh -- df -Pk /var/lib/docker`);
+    const calls=readCalls(h.fh);expect(calls).toContain('docker --context colima build');
+    expect(calls).toContain('colima --profile default ssh -- df -Pk /var/lib/docker');
     expect(calls).not.toMatch(/^docker (?!--context)/m);
   });
   it('fake archive retains a small digest proof outside VM/scratch before transient artifact cleanup',()=>{
     const h=makeHost({extraState:{df_avail_k:'26000000'}}),arc=path.join(h.base,'image.tar.gz'),meta=path.join(h.base,'metadata.json');
+    expect(node(['build','--sha',TEST_SHA],h.fh).status).toBe(0);expect(node(['synthetic','--sha',TEST_SHA],h.fh).status).toBe(0);
     const r=node(['archive','--sha',TEST_SHA,'--out',arc,'--metadata',meta],h.fh);expect(r.status,r.stdout+r.stderr).toBe(0);
-    const proof=path.join(h.fh,'image-home/.local/state/lcm-api-build',`${RUN}-${ATTEMPT}`,'archive-metadata.json');
+    const proof=path.join(h.fh,'image-home/.local/state/lcm-api-shared-build',`${RUN}-${ATTEMPT}-${TEST_SHA}`,'archive-metadata.json');
     expect(JSON.parse(fs.readFileSync(proof,'utf8'))).toEqual(JSON.parse(fs.readFileSync(meta,'utf8')));
     expect(fs.statSync(proof).mode&0o777).toBe(0o600);
     fs.rmSync(arc);fs.rmSync(meta);expect(fs.existsSync(proof)).toBe(true);
-  });
+  },20000);
   it.each(['foreign-context','wrong-sha','worker-bypass'])('image CLI rejects %s before engine calls',mode=>{
     const h=makeHost({extraState:{df_avail_k:'26000000'}});
     const args=['build','--sha',mode==='wrong-sha'?'a'.repeat(40):TEST_SHA];if(mode==='worker-bypass')args.push('--profile-worker');
-    const r=node(args,h.fh,mode==='foreign-context'?{LCM_BUILDER_CONTEXT:'colima'}:{});
+    const r=node(args,h.fh,mode==='foreign-context'?{LCM_BUILDER_CONTEXT:'foreign'}:{});
     expect(r.status).toBe(1);expect(readCalls(h.fh)).toBe('');
   });
   it.each(['vm_measure_fail','vm_parse_fail'])('measurement failure halts capacity AND direct build: %s',flag=>{
@@ -933,10 +936,10 @@ describe("workflow structure (spec-as-content)", () => {
   it("image artifact retention is 1 day", () => {
     expect(yml).toMatch(/retention-days: 1\b/);
   });
-  it('builder is started explicitly, cleanup is always after upload, deploy stays native',()=>{
-    const start=yml.indexOf('run: node scripts/ci/api/build-profile.mjs start');
+  it('existing engine lease is admitted without VM lifecycle, cleanup is always after upload, deploy stays native',()=>{
+    const start=yml.indexOf('run: node scripts/ci/api/build-profile.mjs prepare');
     const upload=yml.indexOf('name: Upload API image artifact');
-    const clean=yml.indexOf("name: Delete only this job's marked builder");
+    const clean=yml.indexOf("name: Release only labelled own job resources");
     expect(start).toBeGreaterThan(0);expect(upload).toBeGreaterThan(start);expect(clean).toBeGreaterThan(upload);
     expect(yml.slice(clean,clean+180)).toContain('if: always()');
     expect(yml).toContain('node scripts/ci/api/build-profile.mjs native-capacity');

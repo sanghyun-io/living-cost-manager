@@ -10,6 +10,7 @@ printf 'docker %s\n' "$*" >>"$S/calls.log"
 if [ -n "${LCM_BUILDER_CONTEXT:-}" ]; then
   [ "${1:-}" = --context ] && [ "${2:-}" = "$LCM_BUILDER_CONTEXT" ] || exit 91
   shift 2
+  exec node "$(dirname "$0")/../shared-docker.mjs" "$@"
 fi
 
 read_state() { [ -f "$S/$1" ] && cat "$S/$1" || echo ""; }

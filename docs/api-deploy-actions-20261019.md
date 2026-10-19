@@ -1,5 +1,10 @@
 # Actions API promotion pipeline — feasibility + readiness (2026-10-19)
 
+**Current resource design: §11.** The unused §10 ephemeral-VM proposal is withdrawn
+(no VM was created). Its 22.7 GiB launch gate does not apply to reuse of the
+already-running engine. The physical 15 GiB policy floor is unchanged. Baseline
+feature 8a362056 was published; this follow-up remains local/unexecuted pending review.
+
 STATUS: readiness only. NOTHING in this document has been executed against
 production: no push of this branch, no workflow trigger, no OCI image load,
 no database migration, no service change, no opskv write, no registry
@@ -481,3 +486,145 @@ were cleaned by the fixture lifecycle; no real boot blob or VM was created.
 Host available was 23,996,136 KiB before and 23,979,296 KiB after a recorded full local
 checks; concurrent-session movement is not attributed to these tests. This is
 source/test readiness pending independent review, not physical startup proof.
+
+## 11. Existing-engine resource redesign — PROPOSED/NOT BUILT
+
+Owner explicitly approved replacing the unused new-VM path with existing runner/
+Docker reuse. The active path uses only `docker --context colima` and read-only
+`colima --profile default ssh -- df -Pk /var/lib/docker`. It contains no VM start,
+stop, delete, resize, context switch, shared prune, daemon maintenance, swap cleanup
+or tool installation. No new profile exists to remove. The earlier 4 GiB peak was
+an **uncalibrated estimate**, not an observed build peak; it is removed from the
+active forecast, rather than replaced with a smaller unexplained constant.
+
+### Read-only inputs and explicit caps
+
+| Input | Observation / meaning |
+|---|---|
+| Build context | 97 regular tracked allowlisted files, 600,586 B including `.dockerignore`; content-hashed. No untracked/private files or Darwin node_modules are sent. Symlinks and >3 MiB source context fail. |
+| Package fingerprint | `a09911e4e514d640bd1f238427a583aabf5f503671121ad3f1937a4712f39c2c`; changes require a new reference, never silent smaller fallback. |
+| Darwin dependencies | `du -sk node_modules` = 892,720 KiB (914,145,280 B). A local reference only: hardlink/APFS accounting is not unique physical usage or a Linux measurement. |
+| Linux dependency allowance | Twice that reference = 1,828,290,560 B; another equal allowance for package store. **Proposed uncalibrated caps**, to be independently reviewed and then sampled, not claims about actual Linux size. |
+| Old candidate | 29f8d0b runtime ~660,000,000 B and archive 153,910,829 B are historical SIZE inputs only. They do not prove this source/image works. |
+| Runtime cap | Historical runtime ×1.5, rounded up to MiB = 990,904,320 B. Streaming archive cap = runtime cap ×1.1 = 1,089,994,752 B. Both are enforced rejection limits, not measured new outputs. |
+| Other proposed allowances | Compile = 128 MiB + source bytes×8; synthetic PG volume 256 MiB (checked in its owned container), BuildKit metadata/cache allowance 256 MiB. Build-stage accounting cap = 4,786,507,856 B. |
+| Public Node base | Existing `node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1`, linux/arm64, Node **24.21.0**. API inspect size 62,065,778 B differs from listing 238 MB; forecast uses upper listing 239,000,000 B, not the smaller API number. |
+| Public PG base | Existing `postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea`; listing 411 MB, upper reference 412,000,000 B. |
+| Anonymous cache | Docker reports 136 cache records / 5.283 GB. No matching-input provenance: **zero warm credit**, no deletion. |
+| Native build backend | `docker --context colima buildx version` reports unknown command on this host. **BuildKit unavailable; blocked**, no install or unsafe legacy cancellation fallback. |
+
+The source Dockerfile is not modified. Only the private staged public context
+replaces BOTH mutable `FROM node:24-alpine` references with that same observed
+immutable digest; staged Dockerfile hash is recorded. Full install/build/deploy/
+Prisma engine generation still happens inside Linux. Host Node 24.18.0 remains
+the existing CI/native toolchain, not a source of shipped Darwin dependencies.
+Linux build/runtime both use 24.21.0; no claim of identical host/guest patch version.
+
+### Separate physical and logical admission
+
+Physical host requirement = **15 GiB floor + 1 GiB recovery + remaining additional
+host forecast×1.2**. Guest requirement = **2 GiB proposed LCM operational reserve
++ remaining additional guest forecast×1.2**. The 2 GiB proposal (~6.8% of measured
+29.36 GiB ext4 capacity) gives bounded-job headroom for other databases; their
+future growth is unknown, not guaranteed safe. It needs peer acceptance before
+execution and is NOT a global policy change or lowering the physical 15 GiB floor.
+Do not add host and nested guest allocations together as two physical reservations:
+host forecast already includes possible guest sparse-file growth once.
+
+For the observed cached public bases but **unproven dependency cache**:
+
+| Forecast (NOT actual sampled peak) | Additional host | Additional guest | Host free required | Guest free required |
+|---|---:|---:|---:|---:|
+| Cold/unverified cache | 7,405,275,738 B (~6.897 GiB) | 6,314,283,088 B (~5.881 GiB) | 26,066,200,070 B (~24.28 GiB) | 9,724,623,354 B (~9.06 GiB) |
+| Verified identical-input cache | Recomputed only from a protected successful same-input measurement + live retained inline-cache image; **not available now**. It must not be selected merely to fit free space. | | | |
+
+A read-only snapshot during this change had host 21,786,152,960 B (~20.29 GiB)
+and guest 8,025,591,808 B (~7.47 GiB). Thus **cold admission fails on both filesystems**,
+and BuildKit capability independently fails. There is no measured new build peak,
+no claim that 20 GiB is enough, and no measurement build performed here.
+If a base is absent, cold pull/extraction allowance increases; unknown metadata
+fails. A warm record must bind complete Linux input hash, package fingerprint,
+   base digest, build-recipe hash, backend version, public Node version, prior source/run/attempt,
+live image ID/inline cache, bounded outputs, SQL hash, archive digest and actual
+successful synthetic health. Lost/replayed/invalid cache proof falls back to the
+full cold forecast and fresh admission before any build, not a permissive skip.
+
+### Stage/ownership/measurement mechanics
+
+The overall forecast includes cumulative retained install/store/build/runtime
+layers, runtime export, archive, synthetic data and context. `--target build`
+first produces a job-labelled Linux intermediate; accounting size is checked
+against its cap. Final runtime uses its inline cache and gets a separate cap.
+Fresh per-stage admission counts only still-to-be-created outputs; persisted
+earlier outputs already occupy measured free space and are not pretended free.
+Anonymous/shared cache is never pruned. Completed BuildKit layers can remain on
+failure/cancel; their observed shared-volume growth is retained as evidence for
+review before another attempt, not promised reclaimed.
+
+Container/network names include run/attempt/digest and are DNS-safe; FULL source
+SHA/run/attempt labels and fresh-absence intents are mandatory. All executions
+and cleanup recheck immutable IDs/labels. A foreign same-name object, wrong run,
+changed ID or a preexisting (including untagged) image ID is preserved and fails
+cleanup. Only exact fresh own IDs/tags are removed; no pattern sweeps or cache
+prune. A successful intermediate inline-cache image is retained with protected
+proof for the next identical-input run; Main reviews its specific tag/ID after
+measurement/deployment. No forever/global cleanup rule is introduced.
+
+Archive is `docker save <immutable ID> | gzip -n -c` directly into one exclusive
+0600 bounded output. Both child statuses and both pipelines must succeed. The
+compressed bytes are streamed into SHA256; partial own output is removed on
+save/gzip/cap failure, while preexisting output is never overwritten/deleted.
+No plain tar or duplicate archive is materialized. Strict artifact metadata,
+native protected restore receipt, sealed DB identity, SQL hash 229a..., timeouts,
+OLD-image CAS and FE-needs-API-success remain unchanged.
+
+Parent monitoring samples host AND actual DockerRootDir free space every five
+seconds with bounded query timeouts. Abort thresholds are host **16.5 GiB** and
+guest **2.5 GiB** (respective reserve + margin), or unknown measurement. Cancellation
+signals only the owned detached worker group; native BuildKit receives SIGINT to
+cancel its solve context. No daemon-wide kill or assumption that legacy builder
+disconnect cancels is allowed. Completed cache may remain. GHA cleanup is always
+after upload; missing ownership is reported, not overridden. Production is never
+marked done from an image/resource sample.
+
+### Controlled measurement recipe — DO NOT RUN before peer review/admission
+
+1. Review this proposal, especially uncalibrated caps and the proposed 2 GiB
+   guest reserve. Confirm an ALREADY available native BuildKit backend; do not
+   install tools or silently use legacy mode as part of this recipe.
+2. Run `node scripts/ci/api/build-profile.mjs plan` for fresh read-only inputs/free
+   space. **Stop if either forecast or capability does not fit** (current result).
+3. For an explicitly local controlled measurement, set the same public identity
+   headers to fixed repo/workflow/main/Owner, SHA=`git rev-parse HEAD`, a unique
+   numeric local run ID, attempt=1, `GITHUB_ACTIONS=false`, real `GITHUB_WORKSPACE`,
+   and a fresh protected `GITHUB_ENV` file. This is labelled local measurement,
+   NOT a GitHub run or production approval proof. Never put credentials in argv.
+4. `node scripts/ci/api/build-profile.mjs prepare`; export only context=`colima`
+   and the computed own scratch path (do NOT source arbitrary env files).
+5. In a shell with an EXIT cleanup trap, run `image.mjs build --sha "$GITHUB_SHA"`,
+   then `synthetic`, then `archive --out .../image.tar.gz --metadata .../metadata.json`.
+   All use identical source/run/attempt headers and active monitoring. Finally
+   `node scripts/ci/api/build-profile.mjs teardown`; remove only that own transient
+   archive after retaining/uploading its small metadata. No actual measurement here.
+6. Inspect the 0600 job `measurement.json` and `archive-metadata.json` under
+   `~/.local/state/lcm-api-shared-build/<run>-<attempt>-<full-sha>`.
+   `kind=sampled-actual-not-atomic`, baseline, minimum sampled host/guest free,
+   per-sample stage/time/free, output accounting types, source/input/backend/base
+   and archive bindings are required. `sharedObservedDelta = baseline-minimum`
+   includes other activity; it is neither pure owned growth nor an atomic bound.
+   Failure/abort status cannot become passed or grant warm-cache credit.
+
+Before that first peer-reviewed admitted measurement, deployment remains blocked.
+No new VM, download, real image build, production restore/migration, push, tool
+install, daemon operation or paid resource was performed in this redesign.
+
+Source validation: **187 API pipeline tests**, **48 runner-kit tests**, **15 Python
+proof tests**, Node/Bash syntax, YAML and extracted image-job shell parse, and diff
+checks. VM-era architectural assertions were replaced with stateful shared-context
+ownership/cancellation tests; financial/restore/identity/metadata/real REST classifier
+assertions remain. Fake engine integration completes bounded build→synthetic→stream
+archive wiring; it is NOT Linux runtime/build evidence. Native PG tests use synthetic
+data only. The unchanged app business/frontend tree retains the prior user-reported
+848+1skip web / 210 shared / 478 API / Chrome30 proof; it was not rerun or re-labelled
+as a new image proof here. All owned test roots, synthetic native clusters and Node
+children are cleaned; shared images, volumes, caches and OS daemons are untouched.

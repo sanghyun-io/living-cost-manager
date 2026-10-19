@@ -311,9 +311,9 @@ jobs:
   # ---- API image build + synthetic health test (Mac Mini engine ONLY) ----
   # The OCI host stays runtime/deploy-only: no `docker build` on OCI as a CI
   # bypass. This job touches ONLY its own resources on the shared colima
-  # owned ephemeral profile (exact run/attempt lease + SHA; deleted after
-  # artifact upload). The shared default engine is never started, stopped,
-  # resized or pruned; only its read-only inventory is compared. The synthetic boot
+  # already-running shared colima context (own run/attempt/full-SHA lease).
+  # No VM start/stop/resize/context-switch/prune exists in this path. Physical
+  # host floor remains 15GiB; guest logical reserve is separately forecast. The synthetic boot
   # uses a dedicated --internal Docker network (no host port published, no
   # egress) with a throwaway database and per-run random secrets that are
   # generated in-memory and never printed. Registry re-pull of the current
@@ -352,10 +352,10 @@ jobs:
         with:
           node-version: 24.18.0
 
-      - name: Start fresh owned builder (22.7GiB startup gate, never shared default)
-        run: node scripts/ci/api/build-profile.mjs start
+      - name: Admit existing-engine task forecast and acquire own run lease (no VM lifecycle)
+        run: node scripts/ci/api/build-profile.mjs prepare
 
-      - name: Capacity budget (floor 15GiB + measured peak budget, never lowered)
+      - name: Capacity budget (physical floor 15GiB, evidence-derived estimate, separate guest reserve)
         run: node scripts/ci/api/image.mjs capacity
 
       - name: Build exact-SHA candidate image (RELEASE_SHA label pinned, linux/arm64)
@@ -383,7 +383,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Delete only this job's marked builder and transient archive (always, after upload)
+      - name: Release only labelled own job resources and transient archive (always, after upload)
         if: always()
         run: |
           set -eu

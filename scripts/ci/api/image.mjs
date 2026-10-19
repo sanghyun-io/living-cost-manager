@@ -2,10 +2,10 @@
 //   capacity → build → synthetic health test → save archive (+metadata) → verify
 //
 // Safety properties (behaviour-tested in pipeline.test.ts):
-//   - runs ONLY on the job's leased Mac Mini Colima profile; OCI is runtime only
+//   - uses ONLY the already-running colima context; OCI is runtime only
 //   - never starts/reconfigures/resets/prunes the shared engine; owned
-//     resources use exact `lcm-ci-*` names keyed by the 40-hex SHA and are
-//     removed by teardown; no global prune or default-engine operation here
+//     resources have run/attempt/full-SHA names and labels, plus fresh-absence
+//     receipts; teardown never prunes or deletes preexisting image IDs
 //   - the candidate image is health-tested against a synthetic Docker network
 //     marked --internal with NO published host ports and a throwaway database;
 //     the production DB is never reachable from this step (and synthetic
@@ -16,11 +16,11 @@
 import { spawnSync } from "node:child_process";
 import {validateMetadata} from './metadata.mjs';
 import {lifecycle} from './build-profile.mjs';
+import {streamArchive} from './archive-stream.mjs';
 import { randomBytes, createHash } from "node:crypto";
 import {
-  existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync,
+  mkdirSync, readFileSync, statSync, writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -52,6 +52,7 @@ function run(bin, args, opts = {}) {
 function docker(args, opts = {}) {
   if(!builder)fail('builder context required');
   builder.owned();builder.engine();
+  if(args[0]==='exec')args=[args[0],builder.check('container',args[1]),...args.slice(2)];
   return run("docker", ['--context',builder.id.context,...args], opts);
 }
 function dieUnlessSha(v, name = "sha") {
@@ -60,8 +61,8 @@ function dieUnlessSha(v, name = "sha") {
 }
 
 // ---- capacity --------------------------------------------------------------
-// Both host Data and the owned guest's actual DockerRootDir data mount must
-// have >=20.8GiB before a heavy phase. Cold startup separately requires 22.7.
+// Host physical floor+recovery is reserved ONCE. Guest logical headroom is a
+// separate task estimate and operational reserve, not a duplicate physical floor.
 let builder;
 try {
   // Archive verification is hash/metadata-only on the native deploy job; the
@@ -75,24 +76,32 @@ try {
     }
   }
 }catch{fail('owned builder or capacity budget not met');}
-function capacity() {try {const c=builder.capacity();console.log(`capacity: host=${c.host.toFixed(1)}GiB guest=${c.guest.toFixed(1)}GiB required>=20.8GiB floor=15GiB`);}catch{fail('capacity budget not met');}}
+function capacity() {try {builder.capacity();console.log('capacity: stage forecast admitted; physical floor=15GiB, recovery=1GiB; guest operational reserve=2GiB');}catch{fail('capacity budget not met');}}
 if (cmd === 'capacity') { capacity(); process.exit(0); }
 
 // ---- build ------------------------------------------------------------------
 const sha = dieUnlessSha(need("sha"));
-const imageName = IMAGE_NAME(sha);
+const imageName = builder?.tags.runtime ?? IMAGE_NAME(sha);
 const short = sha.slice(0, 12);
-const SYN = {
-  net: `lcm-ci-net-${short}`,
-  pg: `lcm-ci-pg-${short}`,
-  api: `lcm-ci-api-${short}`,
-};
+const SYN = builder?.names;
+const labelArgs=Object.entries(builder?.labels??{}).flatMap(([k,v])=>['--label',`${k}=${v}`]);
+let probeCount=0;
+function probe(args) {
+ const name=`${SYN.probe}-${++probeCount}`;builder.intent('container',name);
+ return docker(['run','--rm','--name',name,...labelArgs,...args]);
+}
 
 if (cmd === "build") {
   capacity();
-  docker(["build", "-f", "apps/api/Dockerfile", "--platform", "linux/arm64",
-    "--build-arg", `RELEASE_SHA=${sha}`, "-t", imageName, "."]);
-  const info = JSON.parse(docker(["image", "inspect", imageName]).stdout)[0];
+  const j=builder.owned(),context=join(builder.job,'context'),df=join(context,'apps/api/Dockerfile');
+  const common=['build','-f',df,'--platform','linux/arm64','--pull=false','--progress','plain','--build-arg',`RELEASE_SHA=${sha}`,'--build-arg','BUILDKIT_INLINE_CACHE=1',...labelArgs,'--label',`org.opencontainers.image.revision=${sha}`,'--label',`lcm-ci-input=${j.evidence.inventory.inputKey}`];
+  builder.intent('image',builder.tags.build);
+  docker([...common,...(j.cacheFrom?['--cache-from',j.cacheFrom]:[]),'--target','build','-t',builder.tags.build,context]);
+  builder.recordOutput('build');builder.done('linux-build');
+  capacity();builder.image('build');builder.intent('image',imageName);
+  docker([...common,'--cache-from',builder.tags.build,'-t',imageName,context]);
+  builder.recordOutput('runtime');builder.done('runtime');
+  const info = builder.image('runtime');
   const label = info.Config?.Labels?.["org.opencontainers.image.revision"];
   if (label !== sha) fail(`image revision label mismatch: ${label}`);
   if (info.Os !== "linux" || info.Architecture !== "arm64")
@@ -102,20 +111,14 @@ if (cmd === "build") {
 }
 
 if (cmd === "image-id") {
-  console.log(JSON.parse(docker(["image", "inspect", imageName]).stdout)[0].Id);
+  console.log(builder.image('runtime').Id);
   process.exit(0);
 }
 
 // ---- synthetic health test ----------------------------------------------------
 // Own resources only; every step wrapped by teardown on failure.
 function teardown() {
-  for (const c of [SYN.api, SYN.pg]) {
-    docker(["rm", "-f", "-v", c], { allowFail: true });
-  }
-  docker(["network", "rm", SYN.net], { allowFail: true });
-  // owned env files + saved-archive staging live in the owned state dir
-  const base = process.env.LCM_CI_API_STATE_DIR ?? join(tmpdir(), `lcm-ci-api-${short}`);
-  if (base.includes(`lcm-ci-api-${short}`)) rmSync(base, { recursive: true, force: true });
+  builder.cleanupSynthetic();
 }
 if (cmd === "teardown") {
   teardown();
@@ -124,8 +127,7 @@ if (cmd === "teardown") {
 }
 
 function mkTmp() {
-  const base = process.env.LCM_CI_API_STATE_DIR ??
-    join(tmpdir(), `lcm-ci-api-${short}`);
+  const base = join(builder.job,'scratch');
   mkdirSync(base, { recursive: true, mode: 0o700 });
   return base;
 }
@@ -151,9 +153,9 @@ function synthEnvFile() {
 }
 
 if (cmd === "synthetic") {
-  process.on("exit", teardown);
-  teardown(); // clean any residue of an interrupted earlier attempt of THIS sha
-  docker(["network", "create", "--internal", SYN.net]);
+  capacity();
+  builder.intent('network',SYN.net);
+  docker(["network", "create", "--internal",...labelArgs, SYN.net]);
   const { file: pgEnv } = (() => {
     const dir = mkTmp();
     const f = join(dir, "pgenv");
@@ -164,9 +166,10 @@ if (cmd === "synthetic") {
     ].join("\n") + "\n", { mode: 0o600 });
     return { dir, file: f };
   })();
-  docker(["run", "-d", "--name", SYN.pg, "--network", SYN.net,
+  builder.intent('container',SYN.pg);
+  docker(["run", "-d", "--name", SYN.pg, "--network", builder.check('network',SYN.net),
     "--network-alias", SYN.pg, "--env-file", pgEnv,
-    "--label", `lcm-ci-owner=${sha}`, "postgres:16-alpine"]);
+    ...labelArgs,'--memory','256m', builder.owned().evidence.pgRef]);
   // The postgres entrypoint runs a TEMPORARY server during initdb and shuts
   // it down before the real start — pg_isready alone races that window.
   // Require two consecutive successful SELECT 1 round-trips instead.
@@ -184,21 +187,22 @@ if (cmd === "synthetic") {
 
   const { file: appEnv } = synthEnvFile();
   // 1) image-bundled migration inventory + planning SQL hash equality
-  const mig = docker(["run", "--rm", "--network", SYN.net, imageName,
+  const mig = probe(["--network", builder.check('network',SYN.net), imageName,
     "sh", "-c", "ls prisma/migrations | grep -c '^20'"]);
   const migCount = Number(mig.stdout.trim());
   if (!Number.isFinite(migCount) || migCount < 12) fail(`image has ${mig.stdout.trim()} migrations (<12)`);
-  const sqlHash = docker(["run", "--rm", imageName, "sha256sum",
+  const sqlHash = probe(['--network','none', imageName, "sha256sum",
     `${MIGRATION.dir}/${MIGRATION.sqlFile}`]).stdout.trim().split(/\s+/)[0];
   if (sqlHash !== MIGRATION.sqlSha256) fail("planning migration SQL hash in image != pinned source hash");
 
   // 2) full migrate deploy on the throwaway DB (proves the baked client+CLI work)
-  docker(["run", "--rm", "--env-file", appEnv, "--network", SYN.net, imageName,
+  probe(["--env-file", appEnv, "--network", builder.check('network',SYN.net), imageName,
     "sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma"]);
 
   // 3) boot + health identity check (internal network only; no host port map)
-  docker(["run", "-d", "--name", SYN.api, "--network", SYN.net,
-    "--env-file", appEnv, "--label", `lcm-ci-owner=${sha}`, imageName]);
+  builder.intent('container',SYN.api);
+  docker(["run", "-d", "--name", SYN.api, "--network", builder.check('network',SYN.net),
+    "--env-file", appEnv,...labelArgs,'--memory','512m', imageName]);
   let body = "";
   for (let i = 0; i < 60; i++) {
     const r = docker(["exec", SYN.api, "node", "-e",
@@ -210,7 +214,10 @@ if (cmd === "synthetic") {
   }
   const health = JSON.parse(body);
   if (health.commitSha !== sha) fail(`health commitSha ${health.commitSha} != ${sha}`);
+  const pgBytes=Number(docker(['exec',SYN.pg,'du','-sk','/var/lib/postgresql/data']).stdout.trim().split(/\s+/)[0])*1024;
+  if(!Number.isFinite(pgBytes)||pgBytes<=0||pgBytes>builder.owned().plan.parts.syntheticPG)fail('synthetic PG footprint cap');
   teardown();
+  builder.done('synthetic');
   console.log(`synthetic: ok (migrations=${migCount} health=${health.commitSha} release=${health.releaseId})`);
   process.exit(0);
 }
@@ -220,29 +227,11 @@ if (cmd === "archive") {
   capacity();
   const out = need("out");
   const metaOut = need("metadata");
-  const image = JSON.parse(docker(["image", "inspect", imageName]).stdout)[0];
+  const image = builder.image('runtime');
   const imageId = image.Id;
   if (image.Os !== 'linux' || image.Architecture !== 'arm64' || image.Config?.Labels?.['org.opencontainers.image.revision'] !== sha) fail('image identity mismatch');
-  const tmp = mkTmp();
-  const plain = join(tmp, "image.tar");
-  rmSync(plain, { force: true });
-  rmSync(plain + ".gz", { force: true });
-  docker(["save", "-o", plain, imageId]); // by immutable ID, never by tag
-  const gz = join(tmp, "image.tar.gz");
-  run("gzip", ["-n", plain]); // consumes plain, produces plain + ".gz"
-  rmSync(plain, { force: true });
-  const src = plain + ".gz";
-  if (existsSync(out)) rmSync(out);
-  // move into place (same filesystem expected; fall back to copy)
-  try {
-    run("mv", [src, out]);
-  } catch {
-    run("cp", [src, out]);
-    rmSync(src);
-  }
-  const bytes = statSync(out).size;
-  if (bytes > BUDGET.oci.maxArchiveBytes) fail(`archive ${bytes} exceeds budget`);
-  const archiveSha = createHash("sha256").update(readFileSync(out)).digest("hex");
+  const streamed=await streamArchive({imageId,out,maxBytes:Math.min(BUDGET.oci.maxArchiveBytes,builder.owned().plan.archiveCap),log:join(builder.job,'archive-private.log')});
+  const bytes=streamed.bytes,archiveSha=streamed.sha256;
   const meta = {
     schema: "lcm-api-archive-v1",
     note: "imageId/archiveSha256 are docker content/archive digests, NOT OCI RepoDigests; re-pullability of the registry image is not established",
@@ -267,6 +256,7 @@ if (cmd === "archive") {
   // Preserve unique small digest evidence even if artifact upload later fails;
   // lifecycle cleanup removes bulk scratch/VM, never this job's proof journal.
   writeFileSync(join(builder.job,'archive-metadata.json'),JSON.stringify(meta)+'\n',{mode:0o600,flag:'wx'});
+  builder.done('archive');
   console.log(`archive: bytes=${bytes} sha256=${archiveSha.slice(0, 16)}… imageID=${imageId.slice(7, 19)}…`);
   process.exit(0);
 }

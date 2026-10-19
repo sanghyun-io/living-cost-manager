@@ -68,7 +68,8 @@ export const MIGRATION = Object.freeze({
 // OCI / 9.1 GiB free). Values are the policy formula: peak*1.2 + recovery
 // reserve; the floor is never lowered by this pipeline.
 export const BUDGET = Object.freeze({
-  mac: Object.freeze({ floorGib: 15, buildPeakGib: 4, reserveGib: 1 }),
+  // Physical host only. Task-specific additional estimates live in resource-budget.mjs.
+  mac: Object.freeze({ floorGib: 15, reserveGib: 1 }),
   oci: Object.freeze({
     // own writes: rollback archive ~0.7 GiB (reuse-if-valid), dump ≪ 1 GiB,
     // rehearsal temp DB ≤ dump*2.5, loaded candidate ~0.7 GiB.

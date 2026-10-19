@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-[ "${1:-}" = --profile ] && [ "${2:-}" = "lcm-api-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ] || exit 91
+[ "${1:-}" = --profile ] && [ "${2:-}" = default ] && [ "${3:-}" = ssh ] || exit 91
 printf 'colima %s\n' "$*" >>"$FAKE_HOST/state/calls.log"
 [ ! -f "$FAKE_HOST/state/vm_measure_fail" ] || exit 1
 if [ -f "$FAKE_HOST/state/vm_parse_fail" ]; then echo invalid; exit 0; fi
