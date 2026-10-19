@@ -147,7 +147,7 @@ p.$queryRawUnsafe("SELECT current_database() db,current_schema() schema,inet_ser
 
 # ---------------- args ----------------
 OP="${1:-}"; shift || true
-SHA=""; RUN=""; ATTEMPT=""; IMAGE_ID=""; ARCHIVE_SHA=""; ARCHIVE_BYTES=""; IMAGE_BYTES=""
+SHA=""; RUN=""; ATTEMPT=""; IMAGE_ID=""; ARCHIVE_SHA=""; ARCHIVE_BYTES=""; IMAGE_BYTES=""; AUDIT_SHA=""; BUILD_KIND=full-linux-build
 while [ $# -gt 0 ]; do
   case "$1" in
     --sha) SHA="${2:-}"; shift 2;;
@@ -157,6 +157,8 @@ while [ $# -gt 0 ]; do
     --archive-sha) ARCHIVE_SHA="${2:-}"; shift 2;;
     --archive-bytes) ARCHIVE_BYTES="${2:-}"; shift 2;;
     --image-bytes) IMAGE_BYTES="${2:-}"; shift 2;;
+    --audit-sha) AUDIT_SHA="${2:-}"; shift 2;;
+    --build-kind) BUILD_KIND="${2:-}"; shift 2;;
     *) halt 20 "unknown-arg";;
   esac
 done
@@ -275,6 +277,54 @@ verify_restore_receipt() {
 
 # ---------------- ops ----------------
 case "$OP" in
+  base-inspect)
+    require_compose
+    mkdir_receipts
+    [ "$(compose_backend_ref)" = "$OLD_REF" ] || halt 21 "base-compose-cas"
+    [ "$(docker inspect -f '{{.Image}}' "$BACKEND_CONTAINER" 2>>"$LOG")" = "$OLD_IMAGE_ID" ] || halt 21 "base-container-cas"
+    [[ "$AUDIT_SHA" =~ ^[a-f0-9]{64}$ ]] || halt 20 "audit-sha"
+    [ ! -L "$RECEIPTS/runtime-overlay.cjs" ] && [ "$(sha256sum "$RECEIPTS/runtime-overlay.cjs" | cut -d' ' -f1)" = "$AUDIT_SHA" ] || halt 23 "audit-source-pin"
+    info=$(docker image inspect "$OLD_IMAGE_ID" --format '{"imageId":{{json .Id}},"imageBytes":{{.Size}},"platform":"{{.Os}}/{{.Architecture}}","source":{{json (index .Config.Labels "org.opencontainers.image.revision")}},"envNames":[{{range $i,$e := .Config.Env}}{{if $i}},{{end}}{{json (index (split $e "=") 0)}}{{end}}]}' 2>>"$LOG") || halt 23 "base-meta"
+    python3 - "$info" "$OLD_IMAGE_ID" "$OLD_SHA" 2>>"$LOG" <<'PY' || halt 23 "base-env-or-identity"
+import json,sys
+m=json.loads(sys.argv[1]);assert m['imageId']==sys.argv[2] and m['source']==sys.argv[3] and m['platform']=='linux/arm64'
+assert set(m['envNames']) <= {'PATH','NODE_VERSION','YARN_VERSION','RELEASE_SHA','NODE_ENV'}
+PY
+    audit_name="lcm-base-audit-${RUN}-${ATTEMPT}-${SHA:0:12}"
+    [ -z "$(docker container ls -a --filter "name=^/$audit_name$" --format '{{.Names}}' 2>>"$LOG")" ] || halt 23 "base-audit-name-collision"
+    audit=$(timeout 60 docker run --rm --name "$audit_name" --label "lcm-ci-op=base-audit-${RUN}-${ATTEMPT}-${SHA}" --network none --read-only -i --entrypoint node "$OLD_IMAGE_ID" - audit <"$RECEIPTS/runtime-overlay.cjs" 2>>"$LOG") || halt 23 "base-safety-audit"
+    listing=$(docker image ls --no-trunc --format '{{.ID}}|{{.Size}}' 2>>"$LOG" | awk -F'|' -v id="$OLD_IMAGE_ID" '$1==id{print $2;exit}')
+    python3 - "$info" "$audit" "$listing" "$AUDIT_SHA" "$SHA" "$RUN" "$ATTEMPT" <<'PY'
+import json,sys,re,math
+m=json.loads(sys.argv[1]);a=json.loads(sys.argv[2]);s=re.fullmatch(r'([0-9.]+)(B|kB|MB|GB)',sys.argv[3]);assert s and a['safety'] is True
+m.update(audit=a,accountingBytes=max(m['imageBytes'],math.ceil((float(s[1])+1)*{'B':1,'kB':1000,'MB':1000000,'GB':1000000000}[s[2]])),auditSha256=sys.argv[4],forSource=sys.argv[5],run=sys.argv[6],attempt=sys.argv[7],archiveBytes=None,archiveSha256=None)
+print(json.dumps(m,separators=(',',':')))
+PY
+    ;;
+  base-archive-manifest)
+    # No DB query/dump/migration. Reuse the ONE protected immutable rollback archive.
+    metadata=$(bash "$0" base-inspect --sha "$SHA" --run "$RUN" --attempt "$ATTEMPT" --audit-sha "$AUDIT_SHA") || halt 23 "base-inspect-failed"
+    arc="$ROLLBACK_DIR/lcm-rollback-${OLD_IMAGE_ID:7:12}.tar.gz"
+    if [ ! -f "$arc" ]; then
+      accounting=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["accountingBytes"])' "$metadata")
+      [[ "$accounting" =~ ^[1-9][0-9]+$ ]] || halt 24 "base-accounting-unknown"
+      ensure_staging_dir; mkdir -p "$ROLLBACK_DIR"; chmod 700 "$ROLLBACK_DIR"
+      capacity_bytes "$STAGING_DIR" "$((accounting*2))"; capacity_bytes "$ROLLBACK_DIR" "$((accounting*2))"
+    fi
+    bash "$0" ensure-rollback --sha "$SHA" --run "$RUN" --attempt "$ATTEMPT" >>"$LOG" 2>&1 || halt 23 "base-retained-archive"
+    [ -f "$arc" ] && [ ! -L "$arc" ] || halt 23 "base-archive-missing"
+    python3 - "$metadata" "$(stat -c %s "$arc")" "$(sha256sum "$arc" | cut -d' ' -f1)" <<'PY'
+import json,sys
+m=json.loads(sys.argv[1]);m.update(archiveBytes=int(sys.argv[2]),archiveSha256=sys.argv[3]);print(json.dumps(m,separators=(',',':')))
+PY
+    ;;
+  base-archive-stream)
+    require_compose
+    [ "$(compose_backend_ref)" = "$OLD_REF" ] && [ "$(docker inspect -f '{{.Image}}' "$BACKEND_CONTAINER")" = "$OLD_IMAGE_ID" ] || halt 21 "base-stream-cas"
+    arc="$ROLLBACK_DIR/lcm-rollback-${OLD_IMAGE_ID:7:12}.tar.gz"
+    [[ "$ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ ]] && [ ! -L "$arc" ] && [ "$(sha256sum "$arc" | cut -d' ' -f1)" = "$ARCHIVE_SHA" ] || halt 23 "base-stream-integrity"
+    cat "$arc" # binary pipe ONLY, never Actions stdout/artifact
+    ;;
   transfer-capacity)
     mkdir_receipts
     transfer_capacity
@@ -370,13 +420,17 @@ SQL
     # The locally validated current-run metadata is streamed over the existing
     # authenticated SSH connection, then independently bound before docker load.
     head -c 16384 >"$RECEIPTS/image.metadata.json"
-    if ! python3 - "$RECEIPTS/image.metadata.json" "$SHA" "$RUN" "$ATTEMPT" "$IMAGE_ID" "$ARCHIVE_SHA" "$ARCHIVE_BYTES" "$IMAGE_BYTES" "$PENDING_SQL_SHA" "$PENDING_EXPECTED" 2>>"$LOG" <<'PY'
+    if ! python3 - "$RECEIPTS/image.metadata.json" "$SHA" "$RUN" "$ATTEMPT" "$IMAGE_ID" "$ARCHIVE_SHA" "$ARCHIVE_BYTES" "$IMAGE_BYTES" "$PENDING_SQL_SHA" "$PENDING_EXPECTED" "$BUILD_KIND" "$OLD_IMAGE_ID" "$OLD_SHA" 2>>"$LOG" <<'PY'
 import json,sys,re
 try:
-    path,sha,run,attempt,image,archive,abytes,ibytes,sql,migration=sys.argv[1:]
+    path,sha,run,attempt,image,archive,abytes,ibytes,sql,migration,kind,old,oldsha=sys.argv[1:]
     m=json.load(open(path))
-    expected=dict(schema='lcm-api-archive-v1',repo='sanghyun-io/living-cost-manager',workflowPath='.github/workflows/ci.yml',sha=sha,runId=run,runAttempt=attempt,imageId=image,archiveSha256=archive,archiveBytes=int(abytes),imageBytes=int(ibytes),platform='linux/arm64',releaseShaLabel=sha,migrationName=migration,migrationSqlSha256=sql,archivePath='image.tar.gz')
+    expected=dict(schema='lcm-api-archive-v1',repo='sanghyun-io/living-cost-manager',workflowPath='.github/workflows/ci.yml',sha=sha,runId=run,runAttempt=attempt,imageId=image,archiveSha256=archive,archiveBytes=int(abytes),imageBytes=int(ibytes),platform='linux/arm64',releaseShaLabel=sha,migrationName=migration,migrationSqlSha256=sql,archivePath='image.tar.gz',buildKind=kind)
     assert all(type(m.get(k)) is type(v) and m[k]==v for k,v in expected.items())
+    assert kind in ('runtime-overlay','full-linux-build')
+    if kind=='runtime-overlay':
+        assert m.get('baselineImageId')==old and m.get('baselineSource')==oldsha
+        assert all(re.fullmatch('[a-f0-9]{64}',str(m.get(k,''))) for k in ('dependencyProofSha256','bundleSha256','baselineSafetySha256','overlayRecipeSha256'))
     assert re.fullmatch(r'[1-9][0-9]*',run) and re.fullmatch(r'[1-9][0-9]*',attempt)
 except Exception:
     sys.exit(1)
@@ -412,6 +466,18 @@ PY
     [ "$lbl" = "$SHA" ] || halt 23 "loaded-revision-label-mismatch"
     [ "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$NEW_TAG" 2>>"$LOG")" = linux/arm64 ] || halt 23 "loaded-platform-mismatch"
     [ "$(docker image inspect -f '{{.Size}}' "$NEW_TAG" 2>>"$LOG")" = "$IMAGE_BYTES" ] || halt 23 "loaded-size-mismatch"
+    if [ "$BUILD_KIND" = runtime-overlay ]; then
+      [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["baselineSafetySha256"])' "$RECEIPTS/image.metadata.json")" = "$(sha256sum "$RECEIPTS/runtime-overlay.cjs" | cut -d' ' -f1)" ] || halt 23 "overlay-helper-source"
+      [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["overlayRecipeSha256"])' "$RECEIPTS/image.metadata.json")" = "$(sha256sum "$RECEIPTS/Dockerfile.runtime-overlay" | cut -d' ' -f1)" ] || halt 23 "overlay-recipe-source"
+      proof_args=$(python3 -c 'import json,sys;m=json.load(open(sys.argv[1]));print(m["bundleSha256"]+" "+m["dependencyProofSha256"]+" "+m["baselineSafetySha256"])' "$RECEIPTS/image.metadata.json")
+      # Digests only, strictly formatted above; fixed command, no env credentials/app startup.
+      timeout 60 docker run --rm --network none --read-only -i --entrypoint node "$NEW_TAG" - "$SHA" $proof_args >>"$LOG" 2>&1 <<'JS' || halt 23 "overlay-installed-code"
+const fs=require('fs'),crypto=require('crypto'),cp=require('child_process');
+const [source,bundle,dep,helper]=process.argv.slice(2),p=JSON.parse(fs.readFileSync('/opt/lcm-overlay-proof.json'));
+if(p.manifest.source!==source||p.manifest.bundleSha256!==bundle||p.manifest.dependencyProof.sha256!==dep||crypto.createHash('sha256').update(fs.readFileSync('/opt/lcm-overlay-verify.cjs')).digest('hex')!==helper)process.exit(1);
+cp.execFileSync('node',['/opt/lcm-overlay-verify.cjs','verify-installed'],{stdio:'inherit'});
+JS
+    fi
     printf '%s\n' "$id" >"$RECEIPTS/candidate-image.txt"
     chmod 600 "$RECEIPTS/candidate-image.txt"
     status "result=ok tag=$NEW_TAG image_id=$id"

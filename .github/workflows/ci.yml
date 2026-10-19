@@ -269,6 +269,17 @@ jobs:
         # Fake docker/ssh/curl/opskv, plus sequential local PG16 peer-only
         # synthetic restore. No Docker engine, network, SSH or production DB.
 
+      - name: Bind tested portable API/shared/prisma bundle to this source/run/attempt
+        run: node scripts/ci/api/runtime-overlay.mjs bundle dist-api-compiled
+
+      - name: Upload compiled overlay input (no node_modules, env, credentials or backups)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lcm-api-compiled-${{ github.sha }}-${{ github.run_attempt }}
+          path: dist-api-compiled
+          if-no-files-found: error
+          retention-days: 1
+
       # verify:pricing·public-smoke·브라우저 스크립트는 운영자 로컬 검증으로 유지
       # (Playwright browser 바이너리/pwsh 의존 → CI 계정 홈에 다운로드하지 않는다;
       # §docs/ci-self-hosted-runner-20261016.md §3).
@@ -326,9 +337,14 @@ jobs:
     needs: [preflight, build-test, needs-api-detect]
     if: needs.needs-api-detect.outputs.needs_api == 'true'
     runs-on: [self-hosted, macOS, ARM64, lcm-production]
+    environment:
+      name: production
+    env:
+      LCM_EXPECTED_BUILD_KIND: runtime-overlay
     timeout-minutes: 60
     permissions:
       contents: read
+      actions: read
     steps:
       - name: Verify repository and ref
         run: |
@@ -344,7 +360,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
           ref: ${{ github.sha }}
 
       - name: Setup Node (pinned exact 24.18.0)
@@ -352,8 +368,23 @@ jobs:
         with:
           node-version: 24.18.0
 
-      - name: Admit existing-engine task forecast and acquire own run lease (no VM lifecycle)
-        run: node scripts/ci/api/build-profile.mjs prepare
+      - name: Download this-run tested compiled input
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lcm-api-compiled-${{ github.sha }}-${{ github.run_attempt }}
+          path: dist-api-compiled
+
+      - name: Install pinned helper only after production environment approval (no DB operations)
+        run: node scripts/ci/api/deploy.mjs install-helper --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+
+      - name: Verify immutable runtime base metadata and nonsecret image safety (no export/dump yet)
+        run: node scripts/ci/api/deploy.mjs fetch-base-metadata --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" --out-dir "$GITHUB_WORKSPACE/.lcm-runtime-base"
+
+      - name: Admit verified runtime overlay and private client (incompatibility is a hard failure)
+        run: node scripts/ci/api/build-profile.mjs prepare-overlay dist-api-compiled .lcm-runtime-base/metadata.json
+
+      - name: Reuse or import verified code-only baseline (retained OCI archive, never GH artifact)
+        run: node scripts/ci/api/image.mjs baseline --sha "${{ github.sha }}"
 
       - name: Capacity budget (physical floor 15GiB, evidence-derived estimate, separate guest reserve)
         run: node scripts/ci/api/image.mjs capacity
@@ -378,7 +409,7 @@ jobs:
       - name: Upload API image artifact (1-day retention, quota-bounded)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: lcm-api-image-${{ github.sha }}
+          name: lcm-api-image-${{ github.sha }}-${{ github.run_attempt }}
           path: dist-api
           if-no-files-found: error
           retention-days: 1
@@ -391,6 +422,7 @@ jobs:
           node scripts/ci/api/build-profile.mjs teardown || rc=1
           rm -f dist-api/image.tar.gz dist-api/metadata.json
           if [ -d dist-api ]; then rmdir dist-api || rc=1; fi
+          rm -rf "$GITHUB_WORKSPACE/.lcm-runtime-base" "$GITHUB_WORKSPACE/dist-api-compiled"
           exit "$rc"
 
   # ---- Gated API promotion: backup → rehearse → migrate → promote → verify ----
@@ -412,6 +444,8 @@ jobs:
     environment:
       name: production
       url: https://api.gamja.top/living-cost-manager/v1/health
+    env:
+      LCM_EXPECTED_BUILD_KIND: runtime-overlay
     timeout-minutes: 45
     permissions:
       contents: read
@@ -435,7 +469,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
           ref: ${{ github.sha }}
 
       - name: Setup Node (pinned exact 24.18.0)
@@ -446,7 +480,7 @@ jobs:
       - name: Download this-run API image artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: lcm-api-image-${{ github.sha }}
+          name: lcm-api-image-${{ github.sha }}-${{ github.run_attempt }}
           path: dist-api
 
       - name: Verify archive hash + metadata binding before anything touches OCI

@@ -7,9 +7,13 @@ import {homedir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {REPO,WORKFLOW_PATH,MIGRATION} from './constants.mjs';
 import {validateMetadata} from './metadata.mjs';
+import {compatibility,verifyBundle,verifyBase,overlayEstimate,BASE,canonical} from './runtime-overlay.mjs';
+import {privateClient} from './buildx-client.mjs';
 import {GiB,RESERVES,PUBLIC_BASES,sourceInventory,estimate,admit,warmProofValid} from './resource-budget.mjs';
 export {RESERVES};
 const hash=b=>createHash('sha256').update(b).digest('hex');
+const shaFile=p=>hash(readFileSync(p));
+function copyTree(src,dest){const s=lstatSync(src);if(s.isSymbolicLink())throw Error('overlay-copy-symlink');if(s.isDirectory()){mkdirSync(dest,{recursive:true,mode:0o700});for(const n of readdirSync(src))copyTree(join(src,n),join(dest,n));}else copyFileSync(src,dest);}
 export function identity(env=process.env) {
  const {GITHUB_RUN_ID:run,GITHUB_RUN_ATTEMPT:attempt,GITHUB_SHA:sha}=env;
  if(!/^[1-9][0-9]{0,14}$/.test(run??'')||!/^[1-9][0-9]{0,3}$/.test(attempt??'')||!/^[a-f0-9]{40}$/.test(sha??'')||env.GITHUB_REPOSITORY!==REPO||env.GITHUB_WORKFLOW_REF!==`${REPO}/${WORKFLOW_PATH}@refs/heads/main`||env.GITHUB_REF!=='refs/heads/main'||env.GITHUB_EVENT_NAME!=='push'||env.GITHUB_ACTOR!=='sanghyun-io')throw Error('build-identity');
@@ -67,23 +71,30 @@ export async function watchChild(bin,args,{env=process.env,cwd,check,interval=50
  }finally{active=false;clearInterval(timer);clearTimeout(deadline);clearTimeout(killTimer);process.removeListener('SIGTERM',terminate);process.removeListener('SIGINT',terminate);closeSync(fd);}
 }
 const imageFormat='{"Id":{{json .Id}},"Size":{{.Size}},"Os":{{json .Os}},"Architecture":{{json .Architecture}},"Config":{"Labels":{{json .Config.Labels}}}}';
-export function lifecycle({env=process.env,home=homedir(),run=command,evidence:givenEvidence,watch=watchChild,interval=5000,report=r=>console.log(JSON.stringify(r))}={}) {
+export function lifecycle({env=process.env,home=homedir(),run=command,evidence:givenEvidence,watch=watchChild,interval=5000,report=r=>console.log(JSON.stringify(r)),clientFactory=privateClient}={}) {
  const id=identity(env),root=join(home,'.local/state/lcm-api-shared-build'),job=join(root,id.key),leaseFile=join(job,'lease.json'),log=join(job,'private.log'),metricsFile=join(job,'measurement.json');
  const tags={build:`lcm-ci-build-${id.key}:cache`,runtime:`lcm-ci-api-${id.key}:candidate`};
+ const baseTag=`lcm-ci-base-${id.key}:verified`;
  const resourceKey=`${id.run}-${id.attempt}-${id.sha.slice(0,12)}`; // DNS-safe; labels always bind FULL source SHA
  const names={net:`lcm-ci-net-${resourceKey}`,pg:`lcm-ci-pg-${resourceKey}`,api:`lcm-ci-api-${resourceKey}`,probe:`lcm-ci-probe-${resourceKey}`};
  const labels={'lcm-ci-owner':id.sha,'lcm-ci-run':id.run,'lcm-ci-attempt':id.attempt};
+ let client=null;
  for(const k of ['DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','COLIMA_HOME','COLIMA_PROFILE','LIMA_HOME','LCM_BUILDER_PROFILE'])if(env[k])throw Error('routing-env');
  if(env.LCM_BUILDER_CONTEXT!==undefined&&env.LCM_BUILDER_CONTEXT!=='colima')throw Error('context-binding');
  function safe(p) {const s=lstatSync(p);if(s.isSymbolicLink()||realpathSync(p)!==resolve(p)||s.uid!==process.getuid()||!s.isDirectory()||(s.mode&0o022))throw Error('state-owner');}
  function ensure(p) {let at=home;safe(at);for(const n of p.slice(home.length+1).split('/')){at=join(at,n);if(!existsSync(at))mkdirSync(at,{mode:0o700});safe(at);}}
  function json(p) {const s=lstatSync(p);if(s.isSymbolicLink()||s.uid!==process.getuid()||(s.mode&0o777)!==0o600)throw Error('proof-owner');return JSON.parse(readFileSync(p,'utf8'));}
- function owned() {safe(job);const j=json(leaseFile);for(const [k,v]of Object.entries({...id,version:2}))if(j[k]!==v)throw Error('lease-identity');if(!['ready','cleaned'].includes(j.stage)||!j.evidence.backend||!/^[a-f0-9]{64}$/.test(j.evidence.recipeKey??'')||j.evidence.nodeVersion!==PUBLIC_BASES.nodeVersion||j.evidence.sqlSha256!==MIGRATION.sqlSha256||JSON.stringify(j.plan)!==JSON.stringify(estimate(j.evidence,j.plan.profile==='verified-identical-input-cache')))throw Error('lease-budget-shape');return j;}
+ function owned() {safe(job);const j=json(leaseFile);for(const [k,v]of Object.entries({...id,version:2}))if(j[k]!==v)throw Error('lease-identity');
+  if(j.plan?.profile==='verified-runtime-overlay'){verifyBase(j.baseMetadata,false);if(!j.evidence.backend||j.evidence.sqlSha256!==MIGRATION.sqlSha256||canonical(j.plan)!==canonical(overlayEstimate(j.baseMetadata,j.bundleManifest,j.plan.localBase,j.plan.pgCached,j.plan.nativeGcReserve)))throw Error('overlay-lease-budget');if(!client&&j.stage!=='cleaned')client=clientFactory(join(job,'client'),{home,run:undefined});if(client?.nativeGcReserve>j.plan.nativeGcReserve)throw Error('native-gc-policy-drift');return j;}
+  if(!['ready','cleaned'].includes(j.stage)||!j.evidence.backend||!/^[a-f0-9]{64}$/.test(j.evidence.recipeKey??'')||j.evidence.nodeVersion!==PUBLIC_BASES.nodeVersion||j.evidence.sqlSha256!==MIGRATION.sqlSha256||JSON.stringify(j.plan)!==JSON.stringify(estimate(j.evidence,j.plan.profile==='verified-identical-input-cache')))throw Error('lease-budget-shape');return j;}
  const save=j=>writeFileSync(leaseFile,JSON.stringify(j)+'\n',{mode:0o600});
- const docker=(a)=>run('docker',['--context','colima',...a]);
+ const docker=(a)=>client?client.call(a):run('docker',['--context','colima',...a]);
+ const dockerArgs=()=>client?.prefix??['--context','colima'];
+ const dockerEnv=()=>client?{...env,...client.env}:env;
  function engine() {if(docker(['context','inspect','colima','--format','{{.Endpoints.docker.Host}}'])!==`unix://${home}/.colima/default/docker.sock`||docker(['version','--format','{{.Server.Os}}/{{.Server.Arch}}'])!=='linux/arm64')throw Error('engine-endpoint-or-platform');}
- function free() {return readFree(home,run);}
+ function free() {return readFree(home,client?(b,a,o)=>b==='docker'?client.call(a.slice(2)):run(b,a,o):run);}
  function remaining(j) {
+  if(j.plan.profile==='verified-runtime-overlay'){const phase=!j.completed.includes('baseline')?'import':!j.completed.includes('runtime')?'build':!j.completed.includes('synthetic')?'synthetic':'archive',s=j.plan.futureStages[phase];return {hostRequired:RESERVES.physicalFloor+RESERVES.physicalRecovery+Math.ceil(s.host*1.2),guestRequired:Math.max(RESERVES.guestOperational,j.plan.nativeGcReserve)+Math.ceil(s.guest*1.2)};}
   const p={...j.plan.parts};if(j.completed.includes('linux-build'))for(const k of ['linuxInstall','packageStore','compile','productionDeploy','basePull','context'])p[k]=0;
   if(j.completed.includes('runtime'))p.runtimeExport=0;if(j.completed.includes('synthetic')){p.syntheticPG=0;p.pgBasePull=0;}if(j.completed.includes('archive'))p.streamedArchive=0;
   const hostPeak=Object.values(p).reduce((a,b)=>a+b,0),guestPeak=hostPeak-p.context-p.streamedArchive;
@@ -92,10 +103,11 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
  function capacity() {let j=owned();if(j.plan.profile==='verified-identical-input-cache'&&!j.completed.includes('linux-build')&&!warmProofValid(j.cacheProof,j.evidence,inspect('image',j.cacheFrom))){j={...j,plan:estimate(j.evidence,false),cacheFrom:null,cacheProof:null};save(j);}const f=free(),r=remaining(j);if(f.host<r.hostRequired||f.guest<r.guestRequired)throw Error('capacity-budget');return {...f,...r};}
  function sample(stage) {
   const f=free();let m=existsSync(metricsFile)?json(metricsFile):{kind:'sampled-actual-not-atomic',sourceSha:id.sha,run:id.run,attempt:id.attempt,status:'in-progress',baseline:owned().admissionFree,min:owned().admissionFree,samples:[],stages:[]};
-  m.min={host:Math.min(m.min.host,f.host),guest:Math.min(m.min.guest,f.guest)};m.samples.push({at:new Date().toISOString(),stage,...f});m.samples=m.samples.slice(-1024);
+  m.requestedIntervalMs=owned().plan.profile==='verified-runtime-overlay'?500:interval;
+  m.min={host:Math.min(m.min.host,f.host),guest:Math.min(m.min.guest,f.guest)};m.samples.push({at:new Date().toISOString(),stage,substage:owned().substage??stage,...f});m.samples=m.samples.slice(-1024);
   m.sharedObservedDelta={host:Math.max(0,m.baseline.host-m.min.host),guest:Math.max(0,m.baseline.guest-m.min.guest)};
   writeFileSync(metricsFile,JSON.stringify(m)+'\n',{mode:0o600});
-  if(f.host<RESERVES.physicalFloor+RESERVES.physicalRecovery+RESERVES.margin||f.guest<RESERVES.guestOperational+RESERVES.margin)throw Error('capacity-abort');return f;
+  if(f.host<RESERVES.physicalFloor+RESERVES.physicalRecovery+RESERVES.margin||f.guest<Math.max(RESERVES.guestOperational+RESERVES.margin,owned().plan.nativeGcReserve??0))throw Error('capacity-abort');return f;
  }
  function inspect(kind,name) {
   const list=kind==='container'?docker(['container','ls','-a','--filter',`name=^/${name}$`,'--format','{{.Names}}']):kind==='network'?docker(['network','ls','--filter',`name=^${name}$`,'--format','{{.Name}}']):docker(['image','ls','--filter',`reference=${name}`,'--format','{{.Repository}}:{{.Tag}}']);
@@ -114,6 +126,7 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
  function check(kind,name) {const r=owned().resources.find(r=>r.kind===kind&&r.name===name);if(!r)throw Error('resource-not-registered');const x=verifyResource(r);if(!x)throw Error('resource-disappeared');return x.Id;}
  function recordOutput(which) {const bytes=accounting(which),j=owned(),cap=which==='build'?j.plan.buildImageCap:j.plan.runtimeCap;if(bytes>cap)throw Error('image-footprint-cap');j.outputs={...j.outputs,[which]:{kind:'image-accounting-upper-not-physical-peak',bytes}};save(j);return bytes;}
  function done(stage) {const j=owned();if(!j.completed.includes(stage))j.completed.push(stage);save(j);}
+ function markStage(substage){if(!['base-transfer','base-import','base-audit','overlay-apply-generate','synthetic-migrate','synthetic-planning','synthetic-health','archive-stream'].includes(substage))throw Error('substage');save({...owned(),substage});}
  function cleanupSynthetic() {
   let failed=false;for(const r of [...owned().resources].reverse().filter(r=>r.kind!=='image'))try{const x=verifyResource(r);if(!x)continue;if(r.kind==='container')docker(['rm','-f','-v',x.Id]);else docker(['network','rm',x.Id]);}catch{failed=true;}if(failed)throw Error('synthetic-cleanup-incomplete');
  }
@@ -125,9 +138,13 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
    if(r.kind==='container')docker(['rm','-f','-v',x.Id]);else if(r.kind==='network')docker(['network','rm',x.Id]);else docker(['image','rm',r.name]);
   }catch{failed=true;}
   if(failed)throw Error('resource-cleanup-incomplete');
-  for(const p of [join(job,'context'),join(job,'scratch')])if(existsSync(p)){safe(p);rmSync(p,{recursive:true});}
+  j=owned();if(j.baseAlias?.created){const x=inspect('image',baseTag);if(x){if(x.Id!==BASE.imageId||x.Config?.Labels?.['org.opencontainers.image.revision']!==BASE.source)throw Error('base-alias-drift');if(!j.baseAlias.preexisting&&!j.preexistingImages.includes(BASE.imageId))docker(['image','rm',baseTag]);else{j.retainedBaseAlias='preexisting immutable image ID preserved, including formerly untagged base';save(j);}}}
+  for(const p of [join(job,'context'),join(job,'scratch'),join(job,'client')])if(existsSync(p)){safe(p);rmSync(p,{recursive:true});}
   j={...owned(),stage:'cleaned',controllerPid:null,nonce:null};save(j);
   const lock=join(root,'active');if(existsSync(lock)){if(readFileSync(join(lock,'owner'),'utf8')!==id.key)throw Error('lease-lock-owner');rmSync(join(lock,'owner'));rmSync(lock,{recursive:true});}
+ }
+ function aliasBase() {const j=owned();if(inspect('image',baseTag))throw Error('base-alias-preexisting');const x=JSON.parse(docker(['image','inspect',BASE.imageId,'--format',imageFormat]));if(x.Id!==BASE.imageId||x.Os!=='linux'||x.Architecture!=='arm64'||x.Config?.Labels?.['org.opencontainers.image.revision']!==BASE.source)throw Error('loaded-base-identity');
+  save({...j,baseAlias:{tag:baseTag,imageId:BASE.imageId,preexisting:j.preexistingImages.includes(BASE.imageId),created:false}});docker(['tag',BASE.imageId,baseTag]);save({...owned(),baseAlias:{tag:baseTag,imageId:BASE.imageId,preexisting:j.preexistingImages.includes(BASE.imageId),created:true}});return baseTag;
  }
  async function prepare() {
   const workspace=realpathSync(env.GITHUB_WORKSPACE??'');if(run('git',['-C',workspace,'rev-parse','HEAD'])!==id.sha||run('git',['-C',workspace,'status','--porcelain','--untracked-files=normal'])!=='')throw Error('source-identity');
@@ -150,15 +167,33 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
    sample('prepared');if(!env.GITHUB_ENV)throw Error('github-env-required');writeFileSync(env.GITHUB_ENV,`LCM_BUILDER_CONTEXT=colima\nLCM_CI_API_STATE_DIR=${join(job,'scratch')}\n`,{flag:'a',mode:0o600});
   }catch{teardown();throw Error('prepare-failed');}
  }
+ async function prepareOverlay(bundleDir,baseFile) {
+  const workspace=realpathSync(env.GITHUB_WORKSPACE??'');if(run('git',['-C',workspace,'rev-parse','HEAD'])!==id.sha||run('git',['-C',workspace,'status','--porcelain','--untracked-files=no'])!=='')throw Error('overlay-source');
+  const proof=compatibility(workspace),manifest=verifyBundle(bundleDir,env,proof),base=verifyBase(JSON.parse(readFileSync(baseFile,'utf8')),false);
+  if(base.forSource!==id.sha||base.run!==id.run||base.attempt!==id.attempt||base.auditSha256!==manifest.files.find(f=>f.path==='tools/runtime-overlay.cjs')?.sha256||canonical(base.audit.apiCore)!==canonical(proof.apiCore)||canonical(base.audit.sharedCore)!==canonical(proof.sharedCore))throw Error('overlay-base-bundle-binding');
+  ensure(root);if(existsSync(job))throw Error('job-lease-preexisting');mkdirSync(job,{mode:0o700});
+  client=clientFactory(join(job,'client'),{home,create:true});engine();
+  const ids=docker(['image','ls','--no-trunc','--quiet']).split('\n').filter(Boolean),localBase=ids.includes(BASE.imageId),pgCached=!!docker(['image','ls','--filter','reference=postgres:16-alpine','--format','{{.Size}}']);
+  const plan=overlayEstimate(base,manifest,localBase,pgCached,client.nativeGcReserve??0),f=free();report({kind:plan.kind,profile:plan.profile,free:f,required:{host:plan.hostRequired,guest:plan.guestRequired},admitted:admit(plan,f).fits,sampledBuildPeak:null});if(!admit(plan,f).fits)throw Error('overlay-capacity');
+  mkdirSync(join(root,'active'),{mode:0o700});writeFileSync(join(root,'active/owner'),id.key,{mode:0o600,flag:'wx'});
+  const e={backend:client.backend,recipeKey:shaFile(join(workspace,'scripts/ci/api/runtime-overlay.cjs')),nodeVersion:base.audit.node.slice(1),sqlSha256:MIGRATION.sqlSha256,pgRef:PUBLIC_BASES.pgDigest,inventory:{inputKey:manifest.bundleSha256}};
+  save({...id,version:2,stage:'ready',workspace,evidence:e,baseMetadata:base,bundleManifest:manifest,plan,completed:[],resources:[],preexistingImages:ids,admissionFree:f,clientProof:{backend:client.backend,nativeGcReserve:plan.nativeGcReserve},retainedSharedCache:'No shared cache prune. Failed load/build may retain code-only blobs; unknown image IDs are preserved and require exact evidence review.',execution:env.GITHUB_ACTIONS==='true'?'github-actions':'local-controlled-measurement'});
+  try {
+   const context=join(job,'context');mkdirSync(context,{mode:0o700});mkdirSync(join(job,'scratch'),{mode:0o700});
+   copyTree(bundleDir,join(context,'bundle'));verifyBundle(join(context,'bundle'),env,proof);copyFileSync(join(bundleDir,'Dockerfile'),join(context,'Dockerfile'));writeFileSync(join(context,'baseline.json'),JSON.stringify(base),{mode:0o600});
+   sample('overlay-prepared');writeFileSync(env.GITHUB_ENV,`LCM_BUILDER_CONTEXT=colima\nLCM_CI_API_STATE_DIR=${join(job,'scratch')}\n`,{flag:'a',mode:0o600});
+  }catch{teardown();throw Error('overlay-prepare-failed');}
+ }
  async function runImage(args) {
-  const j=owned();if(j.controllerPid||args.includes('--profile-worker')||!['build','synthetic','archive'].includes(args[0])||args[args.indexOf('--sha')+1]!==id.sha)throw Error('image-operation');
+  const j=owned();if(j.controllerPid||args.includes('--profile-worker')||!['baseline','build','synthetic','archive'].includes(args[0])||args[args.indexOf('--sha')+1]!==id.sha)throw Error('image-operation');
   const nonce=randomBytes(24).toString('hex');
-  try{capacity();save({...owned(),controllerPid:process.pid,nonce});await watch(process.execPath,[fileURLToPath(new URL('./image.mjs',import.meta.url)),...args,'--profile-worker'],{env:{...env,DOCKER_BUILDKIT:'1',LCM_PROFILE_CONTROLLER_NONCE:nonce},cwd:j.workspace,log,interval,check:()=>sample(args[0])});if(args[0]==='archive')completeProof();}
+  try{capacity();save({...owned(),controllerPid:process.pid,nonce});await watch(process.execPath,[fileURLToPath(new URL('./image.mjs',import.meta.url)),...args,'--profile-worker'],{env:{...env,DOCKER_BUILDKIT:'1',LCM_PROFILE_CONTROLLER_NONCE:nonce},cwd:j.workspace,log,interval:j.plan.profile==='verified-runtime-overlay'?500:interval,check:()=>sample(args[0])});if(args[0]==='archive')completeProof();}
   catch{if(existsSync(metricsFile)){const m=json(metricsFile);m.status='failed-or-cancelled';writeFileSync(metricsFile,JSON.stringify(m),{mode:0o600});}teardown();throw Error('image-halted');}
   finally{save({...owned(),controllerPid:null,nonce:null});}
  }
  function worker() {const j=owned();if(j.controllerPid!==process.ppid||!j.nonce||j.nonce!==env.LCM_PROFILE_CONTROLLER_NONCE)throw Error('unmonitored-worker');}
  function completeProof() {
+  if(owned().plan.profile==='verified-runtime-overlay'){const j=owned(),m=json(metricsFile),archive=json(join(job,'archive-metadata.json'));if(!['baseline','runtime','synthetic','archive'].every(s=>j.completed.includes(s))||!j.outputs?.runtime||j.outputs.runtime.bytes>j.plan.runtimeCap)throw Error('overlay-measurement-incomplete');validateMetadata(archive,id.sha,env);writeFileSync(metricsFile,JSON.stringify({...m,status:'passed',execution:j.execution,buildKind:'runtime-overlay',baselineImageId:BASE.imageId,dependencyProofSha256:j.bundleManifest.dependencyProof.sha256,bundleSha256:j.bundleManifest.bundleSha256,outputs:j.outputs,archiveSha256:archive.archiveSha256}),{mode:0o600});return;}
   const j=owned(),m=json(metricsFile);if(!['linux-build','runtime','synthetic','archive'].every(s=>j.completed.includes(s))||m.kind!=='sampled-actual-not-atomic'||m.samples.length<2||!Number.isFinite(j.outputs?.build?.bytes)||j.outputs.build.bytes<=0||j.outputs.build.bytes>j.plan.buildImageCap||!Number.isFinite(j.outputs?.runtime?.bytes)||j.outputs.runtime.bytes<=0||j.outputs.runtime.bytes>j.plan.runtimeCap)throw Error('measurement-incomplete');
   const build=image('build');if(!build.Config.Labels?.['moby.buildkit.cache.v0'])throw Error('inline-cache-missing');
   const archive=json(join(job,'archive-metadata.json'));validateMetadata(archive,id.sha,env);if(archive.imageId!==image('runtime').Id||archive.archiveBytes>j.plan.archiveCap)throw Error('measurement-archive-binding');
@@ -166,7 +201,7 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
   const ref=join(root,`warm-${proof.inputKey}.json`);if(existsSync(ref)){const previous=json(ref);if(previous.kind!=='sampled-actual-not-atomic'||previous.inputKey!==proof.inputKey)throw Error('unknown-cache-proof-preserved');}
   writeFileSync(metricsFile,JSON.stringify(proof),{mode:0o600});writeFileSync(ref,JSON.stringify(proof),{mode:0o600});save({...j,keepBuildCache:true});
  }
- return {id,job,root,leaseFile,tags,names,labels,owned,engine,free,capacity,prepare,teardown,cleanupSynthetic,runImage,worker,intent,inspect,image,accounting,check,recordOutput,done,completeProof,sample};
+ return {id,job,root,leaseFile,tags,names,labels,owned,engine,free,capacity,prepare,prepareOverlay,teardown,cleanupSynthetic,runImage,worker,intent,inspect,image,accounting,check,recordOutput,done,markStage,completeProof,sample,dockerArgs,dockerEnv,aliasBase,baseTag};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
  try {
@@ -175,6 +210,6 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
    const free=readFree(home);
    console.log(JSON.stringify({evidence:e,forecast:plan,free,gate:admit(plan,free),backendAvailable:!!e.backend},null,2));
   }else if(process.argv[2]==='native-capacity') {if(parseFree(command('df',['-Pk',homedir()]),homedir(),false)<RESERVES.physicalFloor+RESERVES.physicalRecovery+0.2*GiB*1.2)throw Error('native-capacity');}
-  else {const l=lifecycle();if(process.argv[2]==='prepare')await l.prepare();else if(process.argv[2]==='teardown')l.teardown();else throw Error('operation');}
+  else {const l=lifecycle();if(process.argv[2]==='prepare-overlay')await l.prepareOverlay(process.argv[3],process.argv[4]);else if(process.argv[2]==='teardown')l.teardown();else throw Error('no-automatic-cold-route');}
  }catch{console.error('shared-build: gate-failed; inspect exact run/attempt/source private lease or read-only plan; no VM lifecycle fallback');process.exitCode=1;}
 }

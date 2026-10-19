@@ -1,6 +1,8 @@
 # Actions API promotion pipeline — feasibility + readiness (2026-10-19)
 
-**Current resource design: §11.** The unused §10 ephemeral-VM proposal is withdrawn
+**Current default resource design: §12 (verified runtime overlay).** §11 is the
+separate full-Linux/cold estimate, NOT a mandatory forecast for a compatible code-only
+release. The unused §10 ephemeral-VM proposal is withdrawn
 (no VM was created). Its 22.7 GiB launch gate does not apply to reuse of the
 already-running engine. The physical 15 GiB policy floor is unchanged. Baseline
 feature 8a362056 was published; this follow-up remains local/unexecuted pending review.
@@ -628,3 +630,151 @@ data only. The unchanged app business/frontend tree retains the prior user-repor
 848+1skip web / 210 shared / 478 API / Chrome30 proof; it was not rerun or re-labelled
 as a new image proof here. All owned test roots, synthetic native clusters and Node
 children are cleaned; shared images, volumes, caches and OS daemons are untouched.
+
+## 12. Verified runtime overlay — source-ready, NOT BUILT/EXPORTED/DEPLOYED
+
+The default image path now reuses the pinned current runtime ONLY when dependency
+compatibility is positively proven. There is no pnpm install, new OS/node base
+pull, anonymous-cache credit or VM in this path. Failure is a hard gate, not an
+automatic lower-budget cold fallback. The §11 cold profile remains separately
+larger and requires a separately reviewed private-client execution path.
+
+### Actual read-only evidence and local CLI installation
+
+- OCI backend/current-image CAS read-only metadata matched image ID
+  `sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f`,
+  source `a2c7bd9af46d84dc88b2a36656c25949b57076b0`, Linux arm64.
+  API inspect bytes=150971118; listing634MB gives conservative accounting635000000B.
+  These are image accounting inputs, not unique physical allocation measurements.
+- Image ENV **names only**: PATH/NODE_VERSION/YARN_VERSION/RELEASE_SHA/NODE_ENV.
+  No DATABASE/JWT/SMTP/provider value was read/copied. A fixed read-only/network-none
+  Node command (NOT app startup) passed the no-env/customer-file audit: Node24.19.0,
+  ABI137, Prisma6.19.3, shared realpath inside `/app/node_modules/.pnpm/...`.
+  Generated-client files measured20199170B/18 files. No archive was exported.
+- Current vs a2 API/shared/root package manifests match. Normalized **entire lock**
+  matches except the exact existing-snapshot `apps/web.devDependencies.esbuild`
+  importer addition `{specifier:0.28.0,version:0.28.0}`. Other snapshots/production/
+  native dependency changes fail. API/root/shared production links reaching web fail.
+- Buildx0.38.0 was installed through Homebrew core, no sudo/auto-update/cleanup, after
+  measured install admission16.8GiB (15+1 recovery+.5 margin+.25×1.2 forecast).
+  Public bottle/binary SHA/version/bytes and before/after df are in
+  `buildx-install-20261019.json`. Binary64727058B, package48files/65MB; managed
+  package/cache retained for legitimate CI reuse, not globally cleaned. Tap warnings
+  did not result in new tap trust. No new VM, builder container or daemon config.
+- Every overlay Docker call has `--config <own 0700 job/client> --context colima`.
+  Minimal private config has only currentContext; plugin symlink targets the pinned
+  Homebrew binary. No global config/auths/helpers are read/copied/edited. An exact
+  per-subprocess DOCKER_HOST points at the existing default Unix socket so explicit
+  `--builder default` uses the native **docker** driver. Read-only inspection proved
+  BuildKit0.30.0/running default; no bootstrap command. Socket/driver/binary drift fails.
+
+### Same-run artifact → approved baseline export → Linux regeneration
+
+Build-test compiles/tests first, then emits a bounded portable API/shared dist +
+current Prisma/schema/migrations + manifests/recipe/helper bundle. Exact source,
+run, attempt, dependency-proof digest, file sizes/count and each file SHA are bound.
+Only fixed paths/extensions are accepted; no symlinks/traversal/native modules/env/
+credentials/backups. Receiver recomputes baseline compatibility and all bytes.
+Attempt-scoped same-run artifacts avoid old-attempt replay. Checkout history is
+available only to read the fixed a2 baseline, never an arbitrary caller ref.
+
+The api-image job itself has the production environment gate **before** helper or
+base export. Root `base-inspect` checks current compose/container/image CAS, safe
+ENV names, the source-pinned fixed audit and native versions without DB queries.
+Then `base-archive-manifest` reuses the ONE retained protected rollback archive;
+only if absent is it generated with accounting-size capacity gates. No duplicate
+OCI export or public baseline artifact. A bounded authenticated SSH stream writes
+one exclusive private0600 local archive; SHA/bytes/identity are verified before
+load. Already-local identical base is explicitly PREEXISTING and not deleted.
+New local alias has an exact run/source lease; cleanup never guesses ownership
+from a name or deletes preexisting untagged image IDs. Local bulk archive is removed
+after load (including failure cleanup); the protected OCI rollback stays.
+
+`Dockerfile.runtime-overlay` uses that verified local alias; no base/dep install.
+Old API dist/Prisma and old shared source/dist are purged, shared destination is
+resolved and constrained inside `/app/node_modules`, and only the tested bundle
+is copied. API/shared package exports/core are checked against the audited base.
+All old generated-client JS is removed. Only the existing Linux native query-engine
+library is saved temporarily; existing Linux Prisma6.19.3 regenerates the **whole**
+new client inside a network-none RUN. The temporary library snapshot is then removed.
+Missing engines/generation fail, never install/download. Node major/ABI/native
+argon2 load are checked; no Darwin node_modules/client is shipped.
+
+Candidate verification checks exact API/shared/Prisma inventory (including no stale
+files), package exports, generated planning model and size cap. Internal owned PG
+then migrates the pinned SQL and performs WorkspacePlanningState create/update/find
+revision/payload checks on an OWN synthetic workspace, alongside SHA health.
+No customer DB, app startup during baseline audit, billing or outreach operation.
+Runtime source label/RELEASE_SHA is current; baseline image/source is consciously
+recorded as reused runtime, not relabelled as newly rebuilt OS/dependencies.
+
+Archive metadata now requires buildKind; overlay requires baseline ID/source,
+dependency proof, bundle hash, audit/helper hash and recipe hash. Local deploy
+recomputes source compatibility/recipe hashes. OCI load checks those fields and
+source-pinned verifier, then byte-verifies the embedded compiled manifest and new
+client BEFORE exposing the candidate to migrate/promote. A full-build artifact
+cannot masquerade as overlay under the overlay-only job environment.
+Native protected backup/actual isolated Mac restore receipt, sealed URL identity,
+SQL229a..., lock5s/statement30s, OLD-image CAS and KEEP rows/history rollback stay.
+
+### Evidence-derived forecast, not a measured build peak
+
+`runtime-overlay-readonly-inputs-20261019.json` retains exact input provenance.
+The 538419B/142-file local dist size reference is NOT a current same-run CI artifact.
+The actual CI bundle must be regenerated/tested/verified and replaces that number.
+Base archive compressed size is **not measured**; before transfer its cap is
+635000000×1.1=698500000B. Candidate generation/layer cap uses twice measured old
+client bytes + twice actual bundle bytes, rounded MiB: reference41943040B. Runtime
+cap676943040B; candidate gzip cap744637344B. No unexplained 3GiB replacement.
+
+Whole-job peaks include compressed base download, imported compressed blobs,
+resident base, extraction scratch, overlay/generation writes, PG volume and daemon
+save scratch + one streamed host archive. The local baseline archive and PG probe
+are removed before the final archive phase. Missing PG cache increases subsequent
+resident accounting; already-local base is separately credited only by exact ID.
+
+| Profile (ESTIMATE, not sampled peak) | Host additional peak | Guest additional peak | Host free required | Guest free required |
+|---|---:|---:|---:|---:|
+| Compatible overlay, base not yet local, PG cached | 2.127GiB | 1.433GiB | **18.553GiB** (15 physical +1 recovery +peak×1.2) | **7.434GiB**, including observed native-GC protection below |
+| Separate cold/full profile | ~6.897GiB | ~5.881GiB | ~24.28GiB | ~9.06GiB; incompatible overlay does not automatically invoke it |
+
+The LCM logical reserve proposal remains2GiB, not another Mac physical15GiB.
+Additionally the existing daemon reports GC Min Free Space5.588GiB. To avoid
+inducing shared automatic cache eviction, overlay admission uses the larger
+observed threshold plus rounding allowance and128MiB margin (**5.714GiB**), then
+future guest writes×1.2. No GC setting is changed or prune command invoked.
+This leaves only ~40MiB guest forecast headroom at the observed7.47GiB: **fresh
+gates may block**, and no guaranteed fit/reclaim is claimed. Host floor15 is unchanged.
+Initial admission includes cumulative residency. Later gates use current df and
+only still-future writes, not a second reservation of already-resident base/layers.
+
+Monitoring requests500ms samples per transfer/import/audit/generation/migrate/
+planning/health/archive substage. CLI/query latency is bounded but cadence is not
+an atomic guarantee. Baseline/minimum host APFS/guest DockerRootDir and shared
+observed deltas are kept; other actors can allocate/free during samples. Host
+abort16.5GiB and guest max(2.5GiB, observed-GC guard) stop only the owned worker/
+BuildKit request group, never daemon/other clients. All existing ownership/partial
+stream cleanup guards remain. Small proof/metadata remain; no net-zero claim.
+
+### First real measurement remains a peer-review gate
+
+No baseline export/load or candidate build occurred here. After independent review:
+use the new **same-run tested bundle**, fresh approved root base metadata and private
+client; run prepare-overlay → baseline → build → synthetic (including planning
+roundtrip) → streamed archive under the existing journal/EXIT cleanup. Prefer the
+gated Actions job for export; any explicitly controlled local measurement must
+retain execution=local-controlled-measurement and cannot be relabelled as a GHA
+deployment artifact. Inspect actual archive bytes, generated-client bytes, source/
+baseline proofs, minimum sampled space, other resource preservation and Linux health.
+Then review results before the already-approved Actions-only DB/API deployment.
+No repeated DB-scope approval, arbitrary floor reduction, secret copy or manual OCI build.
+
+Source verification for this overlay revision: pipeline **239**, runner kit **48**,
+Python **15**, Node/CJS/Bash/YAML/diff checks. Tests cover the real current Git
+compatibility proof, web-dev-only acceptance, API/native/snapshot/reachable-web
+rejection, source/run/attempt/hash/path/symlink bundle drift, baseline identity/
+ABI/Prisma/safety drift, pnpm path escapes, private plugin/socket/driver rejection,
+preexisting base preservation, exact own alias cleanup, strict overlay metadata,
+stream cap/child failure and the prior restore/SQL/identity/REST guards. New engine
+execution remains fake; actual readonly base and client capability observations
+are distinctly recorded and are not a candidate build/measurement proof.

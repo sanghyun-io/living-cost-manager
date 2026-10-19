@@ -46,7 +46,7 @@ const APPLIED11 = [
 const DIRS12 = [...APPLIED11, PENDING].sort();
 const DBPASS = "SENTINEL_DBPASS_4f2a";
 const ciEnv={GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',GITHUB_ACTOR:'sanghyun-io',GITHUB_SHA:TEST_SHA,GITHUB_REPOSITORY:'sanghyun-io/living-cost-manager',GITHUB_WORKFLOW_REF:'sanghyun-io/living-cost-manager/.github/workflows/ci.yml@refs/heads/main',GITHUB_RUN_ID:RUN,GITHUB_RUN_ATTEMPT:ATTEMPT};
-function boundMeta(run=RUN) {return {schema:'lcm-api-archive-v1',repo:ciEnv.GITHUB_REPOSITORY,workflowPath:'.github/workflows/ci.yml',platform:'linux/arm64',releaseShaLabel:TEST_SHA,migrationName:PENDING,runId:run,runAttempt:ATTEMPT,archivePath:'image.tar.gz',imageBytes:660000000};}
+function boundMeta(run=RUN) {return {buildKind:'full-linux-build',schema:'lcm-api-archive-v1',repo:ciEnv.GITHUB_REPOSITORY,workflowPath:'.github/workflows/ci.yml',platform:'linux/arm64',releaseShaLabel:TEST_SHA,migrationName:PENDING,runId:run,runAttempt:ATTEMPT,archivePath:'image.tar.gz',imageBytes:660000000};}
 
 beforeAll(() => {
   for (const f of fs.readdirSync(FAKES)) {

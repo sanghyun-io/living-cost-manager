@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import {validateMetadata} from './metadata.mjs';
 import {lifecycle} from './build-profile.mjs';
 import {streamArchive} from './archive-stream.mjs';
+import {BASE,verifyBase,canonical} from './runtime-overlay.mjs';
 import { randomBytes, createHash } from "node:crypto";
 import {
   mkdirSync, readFileSync, statSync, writeFileSync,
@@ -53,7 +54,7 @@ function docker(args, opts = {}) {
   if(!builder)fail('builder context required');
   builder.owned();builder.engine();
   if(args[0]==='exec')args=[args[0],builder.check('container',args[1]),...args.slice(2)];
-  return run("docker", ['--context',builder.id.context,...args], opts);
+  return run("docker", [...builder.dockerArgs(),...args], {...opts,env:builder.dockerEnv()});
 }
 function dieUnlessSha(v, name = "sha") {
   if (!SHA_RE.test(String(v))) fail(`${name} must be an exact 40-hex SHA`);
@@ -86,13 +87,41 @@ const short = sha.slice(0, 12);
 const SYN = builder?.names;
 const labelArgs=Object.entries(builder?.labels??{}).flatMap(([k,v])=>['--label',`${k}=${v}`]);
 let probeCount=0;
-function probe(args) {
+function probe(args,opts={}) {
  const name=`${SYN.probe}-${++probeCount}`;builder.intent('container',name);
- return docker(['run','--rm','--name',name,...labelArgs,...args]);
+ return docker(['run','--rm','--name',name,...labelArgs,...args],opts);
+}
+if(cmd==='baseline') {
+ const j=builder.owned();if(j.plan.profile!=='verified-runtime-overlay')fail('overlay base mode');capacity();
+ const dir=join(builder.job,'scratch/base-import');
+ try {
+  if(!j.plan.localBase){
+   builder.markStage('base-transfer');
+   run(process.execPath,[new URL('./deploy.mjs',import.meta.url).pathname,'fetch-runtime-base','--sha',sha,'--run',builder.id.run,'--attempt',builder.id.attempt,'--out-dir',dir]);
+   const m=verifyBase(JSON.parse(readFileSync(join(dir,'metadata.json'),'utf8')));if(m.auditSha256!==j.baseMetadata.auditSha256||m.archiveBytes>Math.ceil(j.baseMetadata.accountingBytes*1.1))fail('base transfer drift');
+   builder.markStage('base-import');docker(['load','-i',join(dir,'base.tar.gz')]);
+  }
+  builder.aliasBase();
+  builder.markStage('base-audit');
+  const audit=JSON.parse(probe(['--network','none','--read-only','-i','--entrypoint','node',builder.baseTag,'-','audit'],{input:readFileSync(join(builder.job,'context/bundle/tools/runtime-overlay.cjs'))}).stdout);
+  if(canonical(audit)!==canonical(j.baseMetadata.audit))fail('loaded baseline version or safety mismatch');
+ } finally {
+  // Only own code-image transfer, never the retained OCI rollback archive.
+  const {rmSync}=await import('node:fs');if(!j.plan.localBase)rmSync(dir,{recursive:true,force:true});
+ }
+ builder.done('baseline');process.exit(0);
 }
 
 if (cmd === "build") {
   capacity();
+  const overlay=builder.owned();if(overlay.plan.profile==='verified-runtime-overlay'){
+   if(!overlay.completed.includes('baseline'))fail('base not verified');
+   builder.markStage('overlay-apply-generate');builder.intent('image',imageName);
+   docker(['buildx','build','--builder','default','--load','--platform','linux/arm64','--network','none','--pull=false','-f',join(builder.job,'context/Dockerfile'),'--build-arg',`VERIFIED_BASE=${builder.baseTag}`,'--build-arg',`RELEASE_SHA=${sha}`,'--build-arg',`LCM_BASE_IMAGE_ID=${BASE.imageId}`,'--build-arg',`LCM_BUNDLE_SHA=${overlay.bundleManifest.bundleSha256}`,'--build-arg',`LCM_DEPENDENCY_PROOF_SHA=${overlay.bundleManifest.dependencyProof.sha256}`,...labelArgs,'-t',imageName,join(builder.job,'context')]);
+   builder.recordOutput('runtime');
+   probe(['--network','none',imageName,'node','/opt/lcm-overlay-verify.cjs','verify-installed']);
+   builder.done('runtime');process.exit(0);
+  }
   const j=builder.owned(),context=join(builder.job,'context'),df=join(context,'apps/api/Dockerfile');
   const common=['build','-f',df,'--platform','linux/arm64','--pull=false','--progress','plain','--build-arg',`RELEASE_SHA=${sha}`,'--build-arg','BUILDKIT_INLINE_CACHE=1',...labelArgs,'--label',`org.opencontainers.image.revision=${sha}`,'--label',`lcm-ci-input=${j.evidence.inventory.inputKey}`];
   builder.intent('image',builder.tags.build);
@@ -196,11 +225,12 @@ if (cmd === "synthetic") {
   if (sqlHash !== MIGRATION.sqlSha256) fail("planning migration SQL hash in image != pinned source hash");
 
   // 2) full migrate deploy on the throwaway DB (proves the baked client+CLI work)
-  probe(["--env-file", appEnv, "--network", builder.check('network',SYN.net), imageName,
+  builder.markStage('synthetic-migrate');probe(["--env-file", appEnv, "--network", builder.check('network',SYN.net), imageName,
     "sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma"]);
+  if(builder.owned().plan.profile==='verified-runtime-overlay'){builder.markStage('synthetic-planning');probe(['--env-file',appEnv,'--network',builder.check('network',SYN.net),imageName,'node','/opt/lcm-overlay-verify.cjs','smoke']);}
 
   // 3) boot + health identity check (internal network only; no host port map)
-  builder.intent('container',SYN.api);
+  builder.markStage('synthetic-health');builder.intent('container',SYN.api);
   docker(["run", "-d", "--name", SYN.api, "--network", builder.check('network',SYN.net),
     "--env-file", appEnv,...labelArgs,'--memory','512m', imageName]);
   let body = "";
@@ -230,9 +260,10 @@ if (cmd === "archive") {
   const image = builder.image('runtime');
   const imageId = image.Id;
   if (image.Os !== 'linux' || image.Architecture !== 'arm64' || image.Config?.Labels?.['org.opencontainers.image.revision'] !== sha) fail('image identity mismatch');
-  const streamed=await streamArchive({imageId,out,maxBytes:Math.min(BUDGET.oci.maxArchiveBytes,builder.owned().plan.archiveCap),log:join(builder.job,'archive-private.log')});
+  builder.markStage('archive-stream');const streamed=await streamArchive({imageId,out,maxBytes:Math.min(BUDGET.oci.maxArchiveBytes,builder.owned().plan.archiveCap),log:join(builder.job,'archive-private.log'),dockerPrefix:builder.dockerArgs(),env:builder.dockerEnv()});
   const bytes=streamed.bytes,archiveSha=streamed.sha256;
   const meta = {
+    buildKind:builder.owned().plan.profile==='verified-runtime-overlay'?'runtime-overlay':'full-linux-build',
     schema: "lcm-api-archive-v1",
     note: "imageId/archiveSha256 are docker content/archive digests, NOT OCI RepoDigests; re-pullability of the registry image is not established",
     repo: "sanghyun-io/living-cost-manager",
@@ -251,6 +282,7 @@ if (cmd === "archive") {
     archiveSha256: archiveSha,
     createdAt: new Date().toISOString(),
   };
+  if(meta.buildKind==='runtime-overlay'){const j=builder.owned();Object.assign(meta,{baselineImageId:BASE.imageId,baselineSource:BASE.source,dependencyProofSha256:j.bundleManifest.dependencyProof.sha256,bundleSha256:j.bundleManifest.bundleSha256,baselineSafetySha256:j.baseMetadata.auditSha256,overlayRecipeSha256:j.bundleManifest.files.find(f=>f.path==='Dockerfile').sha256});}
   try { validateMetadata(meta, sha); } catch { fail('metadata identity invalid'); }
   writeFileSync(metaOut, JSON.stringify(meta, null, 2) + "\n");
   // Preserve unique small digest evidence even if artifact upload later fails;

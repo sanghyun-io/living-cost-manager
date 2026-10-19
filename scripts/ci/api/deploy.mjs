@@ -7,6 +7,8 @@ import {join} from 'node:path';
 import {PROD,SHA_RE,IMAGE_NAME} from './constants.mjs';
 import {validateMetadata} from './metadata.mjs';
 import {rehearse,parseManifest,localTools} from './local-restore.mjs';
+import {verifyBase,compatibility} from './runtime-overlay.mjs';
+import {receiveVerified} from './verified-transfer.mjs';
 const args=process.argv.slice(2),cmd=args[0];
 const flag=n=>{const i=args.indexOf(`--${n}`);return i<0?undefined:args[i+1]};
 const need=n=>{const v=flag(n);if(!v)throw Error('missing-argument');return v};
@@ -52,15 +54,26 @@ try {
    ssh(['sudo','install','-d','-m','700',id.dir]);
    ssh(['sudo','bash','-c',`umask 077; cat > ${quote(id.dir+'/deploy-host.sh')}; chmod 0500 ${quote(id.dir+'/deploy-host.sh')}`],src,null);
    if(ssh(['sudo','sha256sum',id.dir+'/deploy-host.sh']).trim().split(/\s+/)[0]!==hash(src))throw Error('helper hash mismatch');
+   for(const name of ['runtime-overlay.cjs','Dockerfile.runtime-overlay']){const data=readFileSync(new URL('./'+name,import.meta.url));ssh(['sudo','bash','-c',`umask 077; cat > ${quote(id.dir+'/'+name)}; chmod 0500 ${quote(id.dir+'/'+name)}`],data,null);if(ssh(['sudo','sha256sum',id.dir+'/'+name]).trim().split(/\s+/)[0]!==hash(data))throw Error('helper hash mismatch');}
    op('install-check',id);
+  } else if(cmd==='fetch-base-metadata'||cmd==='fetch-runtime-base') {
+   const auditSha=hash(readFileSync(new URL('./runtime-overlay.cjs',import.meta.url))),operation=cmd==='fetch-base-metadata'?'base-inspect':'base-archive-manifest';
+   const parts=['sudo','bash',id.dir+'/deploy-host.sh',operation,'--sha',id.sha,'--run',id.run,'--attempt',id.attempt,'--audit-sha',auditSha];
+   const meta=JSON.parse(ssh(parts));verifyBase(meta,cmd==='fetch-runtime-base');if(meta.auditSha256!==auditSha||meta.forSource!==id.sha||meta.run!==id.run||meta.attempt!==id.attempt)throw Error('base-metadata-binding');
+   const dir=need('out-dir');mkdirSync(dir,{mode:0o700});writeFileSync(join(dir,'metadata.json'),JSON.stringify(meta),{mode:0o600,flag:'wx'});
+   if(cmd==='fetch-runtime-base') {
+    const stream=['sudo','bash',id.dir+'/deploy-host.sh','base-archive-stream','--sha',id.sha,'--run',id.run,'--attempt',id.attempt,'--archive-sha',meta.archiveSha256];
+    await receiveVerified({bin:process.env.LCM_SSH_BIN??'ssh',args:['-o','BatchMode=yes',PROD.host,remoteCommand(stream)],out:join(dir,'base.tar.gz'),bytes:meta.archiveBytes,sha256:meta.archiveSha256,log:join(dir,'private-transfer.log')});
+   }
   } else if(cmd==='send-archive') {
    const m=JSON.parse(readFileSync(need('metadata'),'utf8')),archive=readFileSync(need('archive'));
    validateMetadata(m,id.sha);
+   if(m.buildKind==='runtime-overlay'&&(m.dependencyProofSha256!==compatibility(process.cwd()).sha256||m.baselineSafetySha256!==hash(readFileSync(new URL('./runtime-overlay.cjs',import.meta.url)))||m.overlayRecipeSha256!==hash(readFileSync(new URL('./Dockerfile.runtime-overlay',import.meta.url)))))throw Error('overlay-source-binding');
    if(m.runId!==id.run||m.runAttempt!==id.attempt||archive.length!==m.archiveBytes||hash(archive)!==m.archiveSha256)throw Error('archive-binding');
    // Capacity check BEFORE transfer, including compressed copy and uncompressed load.
    op('transfer-capacity',id,['--archive-bytes',String(m.archiveBytes),'--image-bytes',String(m.imageBytes)]);
    ssh(['sudo','bash','-c',`umask 077; cat > ${quote(id.dir+'/image.tar.gz')}`],archive,null);
-   op('load-image',id,['--image-id',m.imageId,'--archive-sha',m.archiveSha256,'--archive-bytes',String(m.archiveBytes),'--image-bytes',String(m.imageBytes)],JSON.stringify(m));
+   op('load-image',id,['--image-id',m.imageId,'--archive-sha',m.archiveSha256,'--archive-bytes',String(m.archiveBytes),'--image-bytes',String(m.imageBytes),'--build-kind',m.buildKind],JSON.stringify(m));
   } else if(cmd==='fetch-backup-copy') {
    const dir=need('out-dir');
    const text=ssh(['sudo','cat',id.dir+'/backup.manifest']);

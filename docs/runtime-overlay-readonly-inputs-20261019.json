@@ -1,0 +1,174 @@
+{
+  "observation": {
+    "kind": "actual-readonly-baseline-observation-not-export-or-build",
+    "at": "2026-10-19T07:53:58.146Z",
+    "imageId": "sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f",
+    "source": "a2c7bd9af46d84dc88b2a36656c25949b57076b0",
+    "imageBytes": 150971118,
+    "accountingBytes": 635000000,
+    "platform": "linux/arm64",
+    "envNames": [
+      "PATH",
+      "NODE_VERSION",
+      "YARN_VERSION",
+      "RELEASE_SHA",
+      "NODE_ENV"
+    ],
+    "audit": {
+      "node": "v24.19.0",
+      "nodeMajor": 24,
+      "abi": "137",
+      "platform": "linux/arm64",
+      "prisma": "6.19.3",
+      "sharedPath": "/app/node_modules/.pnpm/@living-cost-manager+shared@file+packages+shared/node_modules/@living-cost-manager/shared",
+      "generatedBytes": 20199170,
+      "generatedFiles": 18,
+      "safety": true,
+      "apiCore": {
+        "name": "@living-cost-manager/api",
+        "version": "0.5.0",
+        "type": "module",
+        "main": "dist/app.js",
+        "types": "dist/app.d.ts",
+        "exports": {
+          ".": {
+            "types": "./dist/app.d.ts",
+            "default": "./dist/app.js"
+          }
+        }
+      },
+      "sharedCore": {
+        "name": "@living-cost-manager/shared",
+        "version": "0.5.0",
+        "type": "module",
+        "main": "dist/index.js",
+        "types": "dist/index.d.ts",
+        "exports": {
+          ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+          }
+        }
+      }
+    },
+    "auditSha256": "da68002de7b044d6fada0b74a050083ca5211565bb78090833cc75c74109eba1",
+    "archiveBytes": null,
+    "archiveSha256": null
+  },
+  "bundleSizeReference": {
+    "bytes": 538419,
+    "kind": "existing-local-compiled-output-size-only-not-same-run-artifact",
+    "files": 142
+  },
+  "dependencyProof": {
+    "baselineSource": "a2c7bd9af46d84dc88b2a36656c25949b57076b0",
+    "baselineImageId": "sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f",
+    "platform": "linux/arm64",
+    "nodeMajor": 24,
+    "abi": "137",
+    "prisma": "6.19.3",
+    "packageHashes": {
+      "package.json": "8f1cc32a6ec7924d48f0f322c6b49e80c5f386a8714f70f932c2e80fd06a159f",
+      "apps/api/package.json": "25260f8dc368259fb5dc5bb958f714f3ae64e543d7a4631e577b882585cccc2c",
+      "packages/shared/package.json": "b6bba82d0b3866a8d7beccf437bb2725b44fd2483952eaeaac0f654b2f5c3713"
+    },
+    "normalizedLockSha256": "f7f990c1816dd346cec4fcc900f6d5c5a3225952cf547cbae4073eabe446211e",
+    "apiCore": {
+      "name": "@living-cost-manager/api",
+      "version": "0.5.0",
+      "type": "module",
+      "main": "dist/app.js",
+      "types": "dist/app.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/app.d.ts",
+          "default": "./dist/app.js"
+        }
+      }
+    },
+    "sharedCore": {
+      "name": "@living-cost-manager/shared",
+      "version": "0.5.0",
+      "type": "module",
+      "main": "dist/index.js",
+      "types": "dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        }
+      }
+    },
+    "sha256": "48201e53b64c5bcec8c9ced421f5932befd3f64b3debb03cfbab7ff6194056ec"
+  },
+  "forecast": {
+    "kind": "estimate-from-verified-baseline-and-caps-not-measured-peak",
+    "profile": "verified-runtime-overlay",
+    "stages": {
+      "import": {
+        "host": 2153563969,
+        "guest": 1420971118
+      },
+      "build": {
+        "host": 862007009,
+        "guest": 861468590
+      },
+      "synthetic": {
+        "host": 1130442465,
+        "guest": 1096349614
+      },
+      "archive": {
+        "host": 2283587394,
+        "guest": 1538411630
+      }
+    },
+    "futureStages": {
+      "import": {
+        "host": 2153563969,
+        "guest": 1420971118
+      },
+      "build": {
+        "host": 76035891,
+        "guest": 75497472
+      },
+      "synthetic": {
+        "host": 302528307,
+        "guest": 301989888
+      },
+      "archive": {
+        "host": 1455673236,
+        "guest": 710497472
+      }
+    },
+    "hostPeak": 2283587394,
+    "guestPeak": 1538411630,
+    "hostRequired": 19920174057,
+    "guestRequired": 7981454739,
+    "runtimeCap": 676943040,
+    "archiveCap": 744637345,
+    "deltaCap": 41943040,
+    "baseResident": 785971118,
+    "localBase": false,
+    "pgCached": true,
+    "nativeGcReserve": 6135360783,
+    "assumptions": [
+      "No pnpm install/full Linux builder or new VM",
+      "Cold import includes compressed content + resident image + extraction scratch; local archive deleted after verified load",
+      "Archive conservatively includes daemon export scratch as well as one host gzip file",
+      "Fresh phase df includes all persisted earlier allocations; sampled deltas include other clients",
+      "Generated-client cap twice fresh baseline measured bytes, input capped and verified; native generation/smoke still required",
+      "Observed native GC headroom is also reserved to avoid inducing shared cache eviction; no GC configuration is changed"
+    ]
+  },
+  "sampledActualPeak": null,
+  "candidateBuildExecuted": false,
+  "baseExportExecuted": false,
+  "nativeClient": {
+    "backend": "github.com/docker/buildx v0.38.0 Homebrew",
+    "buildkit": "v0.30.0",
+    "driver": "docker",
+    "builder": "default",
+    "nativeGcReserveBytes": 6135360783,
+    "kind": "actual-readonly-existing-daemon-metadata"
+  }
+}

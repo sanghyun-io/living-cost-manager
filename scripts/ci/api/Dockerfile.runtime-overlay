@@ -1,0 +1,17 @@
+ARG VERIFIED_BASE
+FROM ${VERIFIED_BASE}
+ARG RELEASE_SHA
+ARG LCM_BASE_IMAGE_ID
+ARG LCM_BUNDLE_SHA
+ARG LCM_DEPENDENCY_PROOF_SHA
+ENV RELEASE_SHA=${RELEASE_SHA}
+LABEL org.opencontainers.image.revision=${RELEASE_SHA}
+LABEL lcm.runtime-baseline=${LCM_BASE_IMAGE_ID}
+LABEL lcm.compiled-bundle=${LCM_BUNDLE_SHA}
+WORKDIR /app
+COPY bundle/ /opt/lcm-overlay-input/
+COPY baseline.json /opt/lcm-baseline.json
+RUN --network=none node /opt/lcm-overlay-input/tools/runtime-overlay.cjs apply \
+ && node /opt/lcm-overlay-input/tools/runtime-overlay.cjs generate \
+ && node /opt/lcm-overlay-input/tools/runtime-overlay.cjs finalize
+CMD ["node", "dist/server.js"]

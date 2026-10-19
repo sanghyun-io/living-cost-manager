@@ -1,0 +1,21 @@
+{
+  "kind": "actual-local-cli-install-not-image-build",
+  "date": "2026-10-19",
+  "route": "Homebrew core docker-buildx bottled formula, no sudo, no auto update/cleanup",
+  "version": "0.38.0",
+  "bottleUrl": "https://ghcr.io/v2/homebrew/core/docker-buildx/blobs/sha256:4accfcfd6ebc0f7ef47db24b93447bd5e1751cc74b2e1874e8f2e11b0e02d806",
+  "bottleSha256": "4accfcfd6ebc0f7ef47db24b93447bd5e1751cc74b2e1874e8f2e11b0e02d806",
+  "binary": "/opt/homebrew/opt/docker-buildx/bin/docker-buildx",
+  "binarySha256": "cad958b66cf6a0ade495bb9560341509dd8747e61345ba14303207f9bac2d9a3",
+  "binaryBytes": 64727058,
+  "packageFiles": 48,
+  "packageReportedSize": "65MB",
+  "hostFreeBeforeKiB": 21127436,
+  "hostFreeAfterKiB": 21042780,
+  "admissionGiB": 16.8,
+  "globalDockerConfigChanged": false,
+  "privateClientCapability": "driver docker, default builder, running existing colima daemon; BuildKit v0.30.0; no bootstrap/create builder or VM",
+  "privateClientNote": "DOCKER_HOST pinned per subprocess to existing default Unix socket; private context colima and private cli-plugin symlink only",
+  "cleanup": "five own temporary private client capability directories removed by EXIT/finally guards (including the corrected empty-directory capability fixture); Homebrew-managed binary/cache retained for CI use, no global cleanup",
+  "attribution": "df includes concurrent activity; no net-zero space claim; no new taps were trusted"
+}
