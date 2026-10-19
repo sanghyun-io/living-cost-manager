@@ -37,6 +37,12 @@ export function readFree(home,run=command) {
  const target=run('docker',[...d,'info','--format','{{.DockerRootDir}}']);if(target!=='/var/lib/docker')throw Error('docker-root');
  return {host:parseFree(run('df',['-Pk',home]),home,false),guest:parseFree(run('colima',['--profile','default','ssh','--','df','-Pk',target]),target)};
 }
+export function pinnedPgCache(docker) {
+ try {
+  const p=JSON.parse(docker(['image','inspect',PUBLIC_BASES.pgDigest,'--format','{"Id":{{json .Id}},"RepoDigests":{{json .RepoDigests}},"Os":{{json .Os}},"Architecture":{{json .Architecture}}}']));
+  return p?.Id===PUBLIC_BASES.pgImageId&&Array.isArray(p.RepoDigests)&&p.RepoDigests.includes(PUBLIC_BASES.pgDigest)&&p.Os==='linux'&&p.Architecture==='arm64';
+ }catch{return false;} // No positive proof: charge the existing pull/import allowance.
+}
 export function inspectEvidence(workspace,run=command) {
  const inventory=sourceInventory(workspace,run('git',['-C',workspace,'ls-files','-z']).split('\0').filter(Boolean));
  const recipeKey=hash(['scripts/ci/api/image.mjs','scripts/ci/api/build-profile.mjs','scripts/ci/api/resource-budget.mjs'].map(p=>p+'\0'+hash(readFileSync(join(workspace,p)))).join('\n'));
@@ -50,11 +56,10 @@ export function inspectEvidence(workspace,run=command) {
   nodeVersion=JSON.parse(run('docker',[...d,'image','inspect',PUBLIC_BASES.nodeDigest,'--format','{{json .Config.Env}}'])).find(x=>x.startsWith('NODE_VERSION='))?.slice(13);
   if(!digest||!/^sha256:[a-f0-9]{64}$/.test(b.Id??'')||!Number.isSafeInteger(b.Size)||b.Size<=0||b.Os!=='linux'||b.Architecture!=='arm64'||nodeVersion!==PUBLIC_BASES.nodeVersion)throw Error('base-identity');
  }
- const pgListed=run('docker',[...d,'image','ls','--filter','reference=postgres:16-alpine','--format','{{.Size}}']);
- let pg=null;if(pgListed){const p=JSON.parse(run('docker',[...d,'image','inspect','postgres:16-alpine','--format','{"Id":{{json .Id}},"RepoDigests":{{json .RepoDigests}},"Os":{{json .Os}},"Architecture":{{json .Architecture}}}']));pg=p.Id;if(!/^sha256:[a-f0-9]{64}$/.test(pg??'')||!p.RepoDigests?.includes(PUBLIC_BASES.pgDigest)||p.Os!=='linux'||p.Architecture!=='arm64')throw Error('synthetic-base-identity');}
+ const pgCached=pinnedPgCache(a=>run('docker',[...d,...a])),pg=pgCached?PUBLIC_BASES.pgImageId:null;
  let backend;try{backend=run('docker',[...d,'buildx','version']);}catch{backend=null;}
  const sqlSha256=hash(readFileSync(join(workspace,MIGRATION.dir,'migration.sql')));if(sqlSha256!==MIGRATION.sqlSha256)throw Error('sql-pin');
- return {kind:'read-only-input-evidence',inventory,recipeKey,baseDigest:digest,baseId:b.Id??null,baseCached:!!listed,baseAccountingBytes:Math.max(b.Size??0,listing),baseInspectBytes:b.Size??null,baseListingUpperBytes:listing,nodeVersion,pgCached:!!pgListed,pgId:pg,pgRef:pg??PUBLIC_BASES.pgDigest,backend,sqlSha256};
+ return {kind:'read-only-input-evidence',inventory,recipeKey,baseDigest:digest,baseId:b.Id??null,baseCached:!!listed,baseAccountingBytes:Math.max(b.Size??0,listing),baseInspectBytes:b.Size??null,baseListingUpperBytes:listing,nodeVersion,pgCached,pgId:pg,pgRef:PUBLIC_BASES.pgDigest,backend,sqlSha256};
 }
 // Cancellation goes to this detached child's group only. For image workers this
 // includes the native BuildKit CLI, whose SIGINT cancels its solve context. A
@@ -85,7 +90,7 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
  function ensure(p) {let at=home;safe(at);for(const n of p.slice(home.length+1).split('/')){at=join(at,n);if(!existsSync(at))mkdirSync(at,{mode:0o700});safe(at);}}
  function json(p) {const s=lstatSync(p);if(s.isSymbolicLink()||s.uid!==process.getuid()||(s.mode&0o777)!==0o600)throw Error('proof-owner');return JSON.parse(readFileSync(p,'utf8'));}
  function owned() {safe(job);const j=json(leaseFile);for(const [k,v]of Object.entries({...id,version:2}))if(j[k]!==v)throw Error('lease-identity');
-  if(j.plan?.profile==='verified-runtime-overlay'){verifyBase(j.baseMetadata,false);if(!j.evidence.backend||j.evidence.sqlSha256!==MIGRATION.sqlSha256||canonical(j.plan)!==canonical(overlayEstimate(j.baseMetadata,j.bundleManifest,j.plan.localBase,j.plan.pgCached,j.plan.nativeGcReserve)))throw Error('overlay-lease-budget');if(!client&&j.stage!=='cleaned')client=clientFactory(join(job,'client'),{home,run:undefined});if(client?.nativeGcReserve>j.plan.nativeGcReserve)throw Error('native-gc-policy-drift');return j;}
+  if(j.plan?.profile==='verified-runtime-overlay'){verifyBase(j.baseMetadata,false);if(!j.evidence.backend||j.evidence.sqlSha256!==MIGRATION.sqlSha256||canonical(j.plan)!==canonical(overlayEstimate(j.baseMetadata,j.bundleManifest,j.plan.localBase,j.plan.pgCached,j.plan.nativeGcReserve)))throw Error('overlay-lease-budget');if(!client&&j.stage!=='cleaned')client=clientFactory(join(job,'client'),{home,run:undefined});return j;}
   if(!['ready','cleaned'].includes(j.stage)||!j.evidence.backend||!/^[a-f0-9]{64}$/.test(j.evidence.recipeKey??'')||j.evidence.nodeVersion!==PUBLIC_BASES.nodeVersion||j.evidence.sqlSha256!==MIGRATION.sqlSha256||JSON.stringify(j.plan)!==JSON.stringify(estimate(j.evidence,j.plan.profile==='verified-identical-input-cache')))throw Error('lease-budget-shape');return j;}
  const save=j=>writeFileSync(leaseFile,JSON.stringify(j)+'\n',{mode:0o600});
  const docker=(a)=>client?client.call(a):run('docker',['--context','colima',...a]);
@@ -94,7 +99,7 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
  function engine() {if(docker(['context','inspect','colima','--format','{{.Endpoints.docker.Host}}'])!==`unix://${home}/.colima/default/docker.sock`||docker(['version','--format','{{.Server.Os}}/{{.Server.Arch}}'])!=='linux/arm64')throw Error('engine-endpoint-or-platform');}
  function free() {return readFree(home,client?(b,a,o)=>b==='docker'?client.call(a.slice(2)):run(b,a,o):run);}
  function remaining(j) {
-  if(j.plan.profile==='verified-runtime-overlay'){const phase=!j.completed.includes('baseline')?'import':!j.completed.includes('runtime')?'build':!j.completed.includes('synthetic')?'synthetic':'archive',s=j.plan.futureStages[phase];return {hostRequired:RESERVES.physicalFloor+RESERVES.physicalRecovery+Math.ceil(s.host*1.2),guestRequired:Math.max(RESERVES.guestOperational,j.plan.nativeGcReserve)+Math.ceil(s.guest*1.2)};}
+  if(j.plan.profile==='verified-runtime-overlay'){const phase=!j.completed.includes('baseline')?'import':!j.completed.includes('runtime')?'build':!j.completed.includes('synthetic')?'synthetic':'archive',s=j.plan.futureStages[phase];return {hostRequired:RESERVES.physicalFloor+RESERVES.physicalRecovery+Math.ceil(s.host*1.2),guestRequired:RESERVES.guestOperational+Math.ceil(s.guest*1.2)};}
   const p={...j.plan.parts};if(j.completed.includes('linux-build'))for(const k of ['linuxInstall','packageStore','compile','productionDeploy','basePull','context'])p[k]=0;
   if(j.completed.includes('runtime'))p.runtimeExport=0;if(j.completed.includes('synthetic')){p.syntheticPG=0;p.pgBasePull=0;}if(j.completed.includes('archive'))p.streamedArchive=0;
   const hostPeak=Object.values(p).reduce((a,b)=>a+b,0),guestPeak=hostPeak-p.context-p.streamedArchive;
@@ -104,10 +109,12 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
  function sample(stage) {
   const f=free();let m=existsSync(metricsFile)?json(metricsFile):{kind:'sampled-actual-not-atomic',sourceSha:id.sha,run:id.run,attempt:id.attempt,status:'in-progress',baseline:owned().admissionFree,min:owned().admissionFree,samples:[],stages:[]};
   m.requestedIntervalMs=owned().plan.profile==='verified-runtime-overlay'?500:interval;
+  m.gcAdvisory={role:'not-admission-or-abort',atAdmission:owned().plan.nativeGcReserve??null,current:client?.nativeGcReserve??null,status:client?.gcObservation?.status??(Number.isFinite(client?.nativeGcReserve)?'reported':'not-reported')};
+  m.sharedFreeSpaceCaveat='Existing engine automatic GC and other actors may allocate/free shared cache; free delta is not pure owned growth, an atomic peak or an upper bound.';
   m.min={host:Math.min(m.min.host,f.host),guest:Math.min(m.min.guest,f.guest)};m.samples.push({at:new Date().toISOString(),stage,substage:owned().substage??stage,...f});m.samples=m.samples.slice(-1024);
   m.sharedObservedDelta={host:Math.max(0,m.baseline.host-m.min.host),guest:Math.max(0,m.baseline.guest-m.min.guest)};
   writeFileSync(metricsFile,JSON.stringify(m)+'\n',{mode:0o600});
-  if(f.host<RESERVES.physicalFloor+RESERVES.physicalRecovery+RESERVES.margin||f.guest<Math.max(RESERVES.guestOperational+RESERVES.margin,owned().plan.nativeGcReserve??0))throw Error('capacity-abort');return f;
+  if(f.host<RESERVES.physicalFloor+RESERVES.physicalRecovery+RESERVES.margin||f.guest<RESERVES.guestOperational+RESERVES.margin)throw Error('capacity-abort');return f;
  }
  function inspect(kind,name) {
   const list=kind==='container'?docker(['container','ls','-a','--filter',`name=^/${name}$`,'--format','{{.Names}}']):kind==='network'?docker(['network','ls','--filter',`name=^${name}$`,'--format','{{.Name}}']):docker(['image','ls','--filter',`reference=${name}`,'--format','{{.Repository}}:{{.Tag}}']);
@@ -174,11 +181,11 @@ export function lifecycle({env=process.env,home=homedir(),run=command,evidence:g
   if(base.forSource!==id.sha||base.run!==id.run||base.attempt!==id.attempt||base.auditSha256!==manifest.files.find(f=>f.path==='tools/runtime-overlay.cjs')?.sha256||canonical(base.audit.apiCore)!==canonical(proof.apiCore)||canonical(base.audit.sharedCore)!==canonical(proof.sharedCore))throw Error('overlay-base-bundle-binding');
   ensure(root);if(existsSync(job))throw Error('job-lease-preexisting');mkdirSync(job,{mode:0o700});
   client=clientFactory(join(job,'client'),{home,create:true});engine();
-  const ids=docker(['image','ls','--no-trunc','--quiet']).split('\n').filter(Boolean),localBase=ids.includes(BASE.imageId),pgCached=!!docker(['image','ls','--filter','reference=postgres:16-alpine','--format','{{.Size}}']);
-  const plan=overlayEstimate(base,manifest,localBase,pgCached,client.nativeGcReserve??0),f=free();report({kind:plan.kind,profile:plan.profile,free:f,required:{host:plan.hostRequired,guest:plan.guestRequired},admitted:admit(plan,f).fits,sampledBuildPeak:null});if(!admit(plan,f).fits)throw Error('overlay-capacity');
+  const ids=docker(['image','ls','--no-trunc','--quiet']).split('\n').filter(Boolean),localBase=ids.includes(BASE.imageId),pgCached=pinnedPgCache(docker);
+  const plan=overlayEstimate(base,manifest,localBase,pgCached,client.nativeGcReserve),f=free();report({kind:plan.kind,profile:plan.profile,free:f,required:{host:plan.hostRequired,guest:plan.guestRequired},gcObservation:client.gcObservation??{kind:'advisory-existing-daemon-gc',legacyGuardBytes:plan.nativeGcReserve,role:'not-admission-or-abort'},admitted:admit(plan,f).fits,sampledBuildPeak:null});if(!admit(plan,f).fits)throw Error('overlay-capacity');
   mkdirSync(join(root,'active'),{mode:0o700});writeFileSync(join(root,'active/owner'),id.key,{mode:0o600,flag:'wx'});
   const e={backend:client.backend,recipeKey:shaFile(join(workspace,'scripts/ci/api/runtime-overlay.cjs')),nodeVersion:base.audit.node.slice(1),sqlSha256:MIGRATION.sqlSha256,pgRef:PUBLIC_BASES.pgDigest,inventory:{inputKey:manifest.bundleSha256}};
-  save({...id,version:2,stage:'ready',workspace,evidence:e,baseMetadata:base,bundleManifest:manifest,plan,completed:[],resources:[],preexistingImages:ids,admissionFree:f,clientProof:{backend:client.backend,nativeGcReserve:plan.nativeGcReserve},retainedSharedCache:'No shared cache prune. Failed load/build may retain code-only blobs; unknown image IDs are preserved and require exact evidence review.',execution:env.GITHUB_ACTIONS==='true'?'github-actions':'local-controlled-measurement'});
+  save({...id,version:2,stage:'ready',workspace,evidence:e,baseMetadata:base,bundleManifest:manifest,plan,completed:[],resources:[],preexistingImages:ids,admissionFree:f,clientProof:{backend:client.backend,nativeGcReserve:plan.nativeGcReserve,gcRole:'advisory-only'},retainedSharedCache:'No manual shared cache prune or new auto-deleter. Existing daemon automatic GC may free unreferenced build cache, affecting other projects cold-cache performance. Failed load/build may retain code-only blobs; unknown image IDs are preserved for exact evidence review.',execution:env.GITHUB_ACTIONS==='true'?'github-actions':'local-controlled-measurement'});
   try {
    const context=join(job,'context');mkdirSync(context,{mode:0o700});mkdirSync(join(job,'scratch'),{mode:0o700});
    copyTree(bundleDir,join(context,'bundle'));verifyBundle(join(context,'bundle'),env,proof);copyFileSync(join(bundleDir,'Dockerfile'),join(context,'Dockerfile'));writeFileSync(join(context,'baseline.json'),JSON.stringify(base),{mode:0o600});

@@ -1,7 +1,7 @@
 import {it,expect,afterEach,describe} from 'vitest';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,realpathSync,statSync,symlinkSync} from 'node:fs';
 import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';import {spawn,spawnSync} from 'node:child_process';
-import {identity,lifecycle,watchChild,parseFree,inspectEvidence} from './build-profile.mjs';
+import {identity,lifecycle,watchChild,parseFree,inspectEvidence,pinnedPgCache} from './build-profile.mjs';
 import {GiB,REFERENCE,PUBLIC_BASES,RESERVES,estimate,admit,warmProofValid,sourceInventory} from './resource-budget.mjs';
 import {MIGRATION} from './constants.mjs';
 const roots:string[]=[];afterEach(()=>{for(const p of roots.splice(0))rmSync(p,{recursive:true,force:true});});
@@ -69,12 +69,19 @@ describe('shared engine forecast/lease/owned cleanup',()=>{
   const calls:any[]=[];const run=(bin,a)=>{calls.push([bin,a]);if(bin==='git'){const r=spawnSync(bin,a,{encoding:'utf8'});expect(r.status).toBe(0);return r.stdout.trim();}
    expect(a.slice(0,2)).toEqual(['--context','colima']);if(a.includes('buildx'))return 'existing BuildKit fixture';if(a.includes('ls'))return mode==='uncached'?'':a.join(' ').includes('postgres')?'411MB':'238MB';
    if(a.includes('{{json .Config.Env}}'))return JSON.stringify(['NODE_VERSION=24.21.0']);
-   return JSON.stringify(a.join(' ').includes('postgres')?{Id:'sha256:'+'2'.repeat(64),RepoDigests:[PUBLIC_BASES.pgDigest],Os:'linux',Architecture:'arm64'}:{Id:'sha256:'+'1'.repeat(64),Size:62065778,RepoDigests:mode==='foreign-tag'?[]:[PUBLIC_BASES.nodeDigest],Os:'linux',Architecture:'arm64'});
+   if(mode==='uncached'&&a.includes(PUBLIC_BASES.pgDigest))throw Error('pinned-image-absent');
+   return JSON.stringify(a.join(' ').includes('postgres')?{Id:PUBLIC_BASES.pgImageId,RepoDigests:[PUBLIC_BASES.pgDigest],Os:'linux',Architecture:'arm64'}:{Id:'sha256:'+'1'.repeat(64),Size:62065778,RepoDigests:mode==='foreign-tag'?[]:[PUBLIC_BASES.nodeDigest],Os:'linux',Architecture:'arm64'});
   };
   const root=resolve(import.meta.dirname,'../../..');
   if(mode==='foreign-tag'){expect(()=>inspectEvidence(root,run)).toThrow('base-identity');expect(calls.some(c=>c[1].includes('{{json .Config.Env}}'))).toBe(false);}
   else{const e=inspectEvidence(root,run);expect(e.baseCached).toBe(mode==='cached');expect(e.pgCached).toBe(mode==='cached');expect(e.baseDigest).toBe(PUBLIC_BASES.nodeDigest);if(mode==='cached')expect(e.baseId).not.toBe(e.baseDigest.slice(5));}
   expect(calls.filter(c=>c[0]==='docker').every(c=>!c[1].some(x=>['pull','build','prune','rm'].includes(x)))).toBe(true);
+ });
+ it.each(['exact','mutable-tag-only','wrong-id','wrong-digest','wrong-platform','wrong-os','invalid-json','query-error'])('pinned PG cache proof %s never credits an unrelated mutable tag',mode=>{
+  const calls:any[]=[];const p={Id:PUBLIC_BASES.pgImageId,RepoDigests:[PUBLIC_BASES.pgDigest],Os:'linux',Architecture:'arm64'};
+  const cached=pinnedPgCache(a=>{calls.push(a);expect(a[2]).toBe(PUBLIC_BASES.pgDigest);if(mode==='mutable-tag-only'||mode==='query-error')throw Error('unproven-cache');if(mode==='invalid-json')return 'invalid';if(mode==='wrong-id')p.Id='sha256:'+'c'.repeat(64);if(mode==='wrong-digest')p.RepoDigests=['postgres@sha256:'+'c'.repeat(64)];if(mode==='wrong-platform')p.Architecture='amd64';if(mode==='wrong-os')p.Os='windows';return JSON.stringify(p);});
+  expect(cached).toBe(mode==='exact');expect(calls).toHaveLength(1);expect(calls[0].slice(0,2)).toEqual(['image','inspect']);
+  const f=fixture(),plan=estimate({...f.evidence,pgCached:cached});expect(plan.parts.pgBasePull).toBe(cached?0:PUBLIC_BASES.pgAccountingBytes*2);
  });
  it.each(['host','guest','badHost','badGuest','wrongMount','badEndpoint','badPlatform'])('bad/insufficient %s blocks before any mutation',async field=>{
   const f=fixture();if(field==='host')f.state.host=19.5*GiB;else if(field==='guest')f.state.guest=7.5*GiB;else f.state[field]=true;

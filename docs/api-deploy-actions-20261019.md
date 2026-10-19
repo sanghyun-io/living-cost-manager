@@ -1,6 +1,6 @@
 # Actions API promotion pipeline — feasibility + readiness (2026-10-19)
 
-**Current default resource design: §12 (verified runtime overlay).** §11 is the
+**Current resource gates: §16; build design: §12 (verified runtime overlay).** §11 is the
 separate full-Linux/cold estimate, NOT a mandatory forecast for a compatible code-only
 release. The unused §10 ephemeral-VM proposal is withdrawn
 (no VM was created). Its 22.7 GiB launch gate does not apply to reuse of the
@@ -990,3 +990,70 @@ test roots/clusters/children and temporary KV fixture files were cleaned. No liv
 KV value read/write, remote helper upload/backup retry, image build, migration,
 promotion, OS action or Git push occurred. Existing protected failed-run evidence
 and customer data were not modified or deleted.
+
+## 16. Remove the unintended automatic-GC hard reserve — code only
+
+Owner explicitly approved this derived-budget correction. The earlier extra
+promise that an LCM job must never induce normal daemon automatic GC was not a
+business requirement or the physical disk policy. It is withdrawn, NOT implemented
+by deleting cache or changing GC settings. Existing Docker/BuildKit maintenance
+of unreferenced build cache may run under its existing configuration; it respects
+in-use references and is distinct from our forbidden manual/global prune or a new
+custom auto-deleter. Other projects can experience cold-cache/rebuild performance
+costs. No claim is made that shared cache/free space remains constant.
+
+Active admission and abort gates now use:
+- Host physical **15GiB +1GiB recovery + future estimated writes×1.2**; runtime
+  abort stays **16.5GiB**. Central floor/warn/critical and Home policies unchanged.
+- Guest logical **2GiB LCM operating/recovery headroom + future estimated writes×1.2**;
+  runtime abort **2.5GiB**. This is a task-specific logical-volume budget, not a
+  second reservation of the Mac physical15GiB or a global disk-policy change.
+- Native GC fields/changes are **ADVISORY ONLY**. Reported thresholds are retained
+  as provenance, never `max(...)` admission/abort reserve or lease-drift failure.
+  Missing optional GC rules are `not-reported`, not unknown filesystem space.
+  Actual endpoint/socket/version/driver/platform and df/device/positive-free checks
+  remain mandatory; unknown real capacity still aborts. Plan canonical byte/bounds
+  validation is deterministic and does not change when advisory observations drift.
+
+No source/input/regeneration/import/export/probe bounds were reduced. With the
+same recorded baseline635000000B accounting/client20199170B and local compiled
+SIZE reference538419B (NOT a fresh CI identity), compatible no-local-base/PG-cached
+overlay remains host peak estimate2283587394B/guest1538411630B. Host requirement is
+unchanged19920174057B (~18.553GiB). Guest requirement is **3993577604B (~3.719GiB)**,
+not7981454739B (~7.434GiB) derived from the unrelated daemon GC threshold. Separate
+cold/full estimate is not selected or lowered. Fresh actual CI bundle/base/cache
+evidence still determines each run; no universal fixed18.553/3.719 admission value.
+
+Read-only snapshot during this correction: host20.424GiB, actual DockerRootDir
+guest6.594GiB; exact pinned PG cache verified. Numeric size-reference forecast fits,
+but this is not execution permission, an atomic reservation or a new sampled peak.
+Other actors' node/nginx images and all existing contexts/volumes remain untouched;
+even identified unused own-lineage cache was not pruned. No build/backup/deploy ran.
+
+PG cache credit now inspects the **exact**
+`postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea`
+and requires its separately observed local image ID, RepoDigest and linux/arm64
+metadata to match. A mutable `postgres:16-alpine` tag alone cannot grant credit.
+Absent, malformed, mismatched or unproven identity charges the existing824000000B
+pull/import/resident allowance (including later stages), not a surprise unbudgeted
+pull. No PG image/tag is changed or removed. Config ID and RepoDigest are distinct
+identity fields, even where the observed engine reports equal strings.
+
+Sampler provenance explicitly notes existing automatic maintenance and other
+clients can allocate/free shared space during work. `baseline-minimum` is not pure
+task usage, an atomic peak or an upper bound: the actual847 shared delta~0.54GiB
+does NOT replace forecast bounds. Tests cover large/missing/changing advisory GC
+metadata without changing budgets, actual invalid host/guest df still failing,
+project2.5/host16.5 aborts, and exact/mutable-drift/wrong-ID/digest/platform PG cache
+cases. Financial/restore/identity/metadata/verifier and full CLI tests are retained.
+
+No daemon/config/GC rule change, prune, cache/image/volume deletion, VM action,
+root signal, tool install, key write, image build, customer backup retry, DDL,
+promotion or push occurred. Dbae's reviewed CIDR/serving-release/KV fixes remain;
+first new-SHA Actions retry requires independent review of this source change.
+
+Validation: **303 pipeline tests**, **48 runner tests**, **15 Python proof tests**,
+Node/CJS/Bash/YAML/diff checks pass. All prior financial/auth/metadata/verifier/
+restore and full CLI assertions are retained. Test-owned roots/clusters/children
+and one small read-only private-client audit config were cleaned; no real build,
+manual GC/prune, image/tag/volume deletion, key write or production action occurred.

@@ -7,7 +7,9 @@ export const GiB=1024**3,MiB=1024**2;
 export const SYNTHETIC_PG_CAP=256*MiB;
 export const REFERENCE=Object.freeze({kind:'measured-darwin-reference-not-linux',at:'2026-10-19',dependencyBytes:914145280,packageKey:'a09911e4e514d640bd1f238427a583aabf5f503671121ad3f1937a4712f39c2c',historicalRuntimeBytes:660000000,historicalArchiveBytes:153910829,sourceBytes:600480,sourceFiles:96});
 export const RESERVES=Object.freeze({physicalFloor:BUDGET.mac.floorGib*GiB,physicalRecovery:BUDGET.mac.reserveGib*GiB,guestOperational:2*GiB,margin:GiB/2});
-export const PUBLIC_BASES=Object.freeze({nodeDigest:'node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1',nodeVersion:'24.21.0',nodeAccountingBytes:239000000,pgDigest:'postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea',pgAccountingBytes:412000000});
+// pgImageId is the separately observed local engine identity, not derived by
+// treating a registry RepoDigest as a universally equivalent config digest.
+export const PUBLIC_BASES=Object.freeze({nodeDigest:'node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1',nodeVersion:'24.21.0',nodeAccountingBytes:239000000,pgDigest:'postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea',pgImageId:'sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea',pgAccountingBytes:412000000});
 const packages=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','apps/api/package.json','apps/web/package.json','packages/shared/package.json'].sort();
 const hash=b=>createHash('sha256').update(b).digest('hex');
 export function sourceInventory(root,tracked) {

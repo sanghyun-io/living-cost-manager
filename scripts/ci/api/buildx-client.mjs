@@ -17,10 +17,10 @@ export function privateClient(dir,{home,create=false,tool=TOOL,run}={}) {
  // Buildx inspect(default) can succeed via DOCKER_HOST while build(default)
  // rejects --context colima before creating any solve history.
  const inspect=call(['buildx','inspect','colima']);if(!/^Driver:\s+docker\s*$/m.test(inspect)||!/^Status:\s+running\s*$/m.test(inspect)||!/^Endpoint:\s+colima\s*$/m.test(inspect))throw Error('builder-not-native-context');
- // Avoid inducing the existing shared daemon's automatic cache GC. This is
- // observed daemon metadata, NOT a new daemon configuration or global policy.
+ // Advisory only. Existing daemon automatic GC is normal shared-engine
+ // maintenance; observing it does not authorize us to prune or change settings.
  const gc=[...inspect.matchAll(/Min Free Space:\s+([0-9.]+)(GiB|MiB)/g)].map(m=>(+m[1]+.001)*(m[2]==='GiB'?1024**3:1024**2));
- if(!gc.length)throw Error('native-gc-headroom-unknown');
- const nativeGcReserve=Math.ceil(Math.max(...gc)+128*1024**2);
- return {dir,prefix,env,call,backend:call(['buildx','version']),builderInspection:inspect,nativeGcReserve};
+ const nativeGcReserve=gc.length?Math.ceil(Math.max(...gc)+128*1024**2):null;
+ const gcObservation={kind:'advisory-existing-daemon-gc',status:gc.length?'reported':'not-reported',legacyGuardBytes:nativeGcReserve,role:'not-admission-or-abort'};
+ return {dir,prefix,env,call,backend:call(['buildx','version']),builderInspection:inspect,nativeGcReserve,gcObservation};
 }
