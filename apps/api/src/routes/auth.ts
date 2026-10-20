@@ -6,7 +6,9 @@ import {
   refreshRequestSchema,
   registerRequestSchema,
   resetPasswordRequestSchema,
+  updateThemeRequestSchema,
   verifyEmailRequestSchema,
+  normalizeStoredUiTheme,
   type UserDto,
   type WorkspaceDto
 } from "@living-cost-manager/shared";
@@ -23,6 +25,7 @@ type UserRecord = {
   name: string;
   tokenVersion: number;
   emailVerifiedAt: Date | null;
+  uiTheme: string;
 };
 
 function toUserDto(user: UserRecord): UserDto {
@@ -30,7 +33,10 @@ function toUserDto(user: UserRecord): UserDto {
     id: user.id,
     email: user.email,
     name: user.name,
-    emailVerified: user.emailVerifiedAt !== null
+    emailVerified: user.emailVerifiedAt !== null,
+    // Read-side fallback only: legacy/corrupt stored values surface as 'jade'
+    // and are never rewritten by a GET (same marshal rule as /me/theme).
+    uiTheme: normalizeStoredUiTheme(user.uiTheme)
   };
 }
 
@@ -362,4 +368,37 @@ export async function authRoutes(app: FastifyInstance) {
       user: toUserDto(user)
     };
   });
+
+  // Personal UI theme (Owner-approved additive User.uiTheme column). Same
+  // policy as the product tour: `authenticate` only — this is the caller's own
+  // harmless UI preference, so email verification, workspace membership and
+  // any owner/editor/viewer role are NOT required (a viewer changing their own
+  // theme touches no shared or private intent). Identity is request.user.sub
+  // only; the body carries nothing but the theme id and unknown keys (e.g. a
+  // userId) are rejected. Last-write-wins is acceptable for a single
+  // preference: no revision column, no CAS, and a theme write never rotates
+  // tokenVersion or touches name/password/membership/coaching/tour/snapshot
+  // state (Prisma's @updatedAt on the User row is the only side effect).
+  app.put(
+    "/me/theme",
+    {
+      preHandler: app.authenticate,
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" } }
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      const parsed = updateThemeRequestSchema.safeParse(request.body);
+      if (!parsed.success) throw app.httpErrors.badRequest("Invalid theme");
+      try {
+        const updated = await app.prisma.user.update({
+          where: { id: request.user.sub },
+          data: { uiTheme: parsed.data.uiTheme }
+        });
+        return { uiTheme: normalizeStoredUiTheme(updated.uiTheme) };
+      } catch {
+        // Missing migration/DB failure is generic; never expose SQL or data.
+        throw app.httpErrors.internalServerError("Theme state unavailable");
+      }
+    }
+  );
 }

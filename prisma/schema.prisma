@@ -14,6 +14,9 @@ model User {
   passwordHash    String
   tokenVersion    Int               @default(0)
   emailVerifiedAt DateTime?
+  // Personal UI theme id only (jade/aqua/violet/raspberry/tangerine; DB CHECK).
+  // Not workspace, billing, consent or coaching semantics.
+  uiTheme         String            @default("jade")
   memberships     WorkspaceMember[]
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]

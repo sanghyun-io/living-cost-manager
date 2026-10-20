@@ -72,7 +72,8 @@ describe("auth routes", () => {
       id: expect.any(String),
       email: `${runId}-register@example.com`,
       name: "Mina",
-      emailVerified: false
+      emailVerified: false,
+      uiTheme: "jade"
     });
     expect(body.user).not.toHaveProperty("passwordHash");
     expect(body.workspace).toEqual({
@@ -227,7 +228,8 @@ describe("auth routes", () => {
         id: expect.any(String),
         email,
         name: "Me User",
-        emailVerified: false
+        emailVerified: false,
+        uiTheme: "jade"
       }
     });
   });

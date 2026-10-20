@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { uiThemeSchema } from "./userTheme.js";
 import { workspaceDtoSchema } from "./workspace.js";
 
 const idSchema = z.string().min(1);
@@ -19,6 +20,11 @@ export const userDtoSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   emailVerified: z.boolean().optional(),
+  // Additive: the API always sends a validated id; optional keeps responses
+  // from a pre-migration server parseable during rollout (client then uses
+  // its own default). Clients must never trust the raw value blindly —
+  // normalizeStoredUiTheme remains the fallback path.
+  uiTheme: uiThemeSchema.optional(),
 });
 
 export const authResponseSchema = z.object({
