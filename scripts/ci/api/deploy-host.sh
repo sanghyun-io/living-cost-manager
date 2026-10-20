@@ -14,11 +14,11 @@
 #     records. Raw stderr goes to 0600 receipt logs. Secrets (env values,
 #     dumps, provider rows) are never echoed and never placed in argv.
 #   * The migration applies ONLY when the pending inventory computed from the
-#     LOADED candidate image is exactly the one approved WorkspacePlanning-
-#     State migration. Anything else halts (code 22).
+#     LOADED candidate image is exactly the one approved User.uiTheme
+#     migration. Anything else halts (code 22).
 #   * Rollback = compose image revert to the pinned OLD ref + backend
-#     recreate ONLY. It never touches the database; the WorkspacePlanningState
-#     table and its rows are retained by policy. No destructive verbs exist
+#     recreate ONLY. It never touches the database; User.uiTheme choices,
+#     planning and financial rows are retained by policy. No destructive verbs exist
 #     in this file against the production database (the ONLY DROP is the
 #     rehearsal temp database created minutes earlier by this same job).
 set -euo pipefail
@@ -38,9 +38,12 @@ LCM_ROOT="${LCM_ROOT:-/opt/livingcost}"
 COMPOSE_FILE=$LCM_ROOT/docker-compose.yml
 COMPOSE_PROJECT=livingcost
 BACKEND_CONTAINER=livingcost-backend
-OLD_SHA=a2c7bd9af46d84dc88b2a36656c25949b57076b0
-OLD_REF='lcm-coaching-a2c7bd9af46d84dc88b2a36656c25949b57076b0@sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f'
-OLD_IMAGE_ID=sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f
+OLD_SHA=02c70d1b9f463c000cfe8dc7132cab7b23d459ff
+OLD_REF='lcm-ci-api-02c70d1b9f463c000cfe8dc7132cab7b23d459ff:candidate'
+OLD_IMAGE_ID=sha256:5afa33fb3d3c42d54a58e0957f4098c922318060967d86b2f26e76454a7d48e0
+# Immutable dependency donor, never this release's rollback target.
+BASE_SHA=a2c7bd9af46d84dc88b2a36656c25949b57076b0
+BASE_IMAGE_ID=sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f
 PG_CONTAINER=gamja-data-postgres
 PG_SUPERUSER=gamja_admin
 DB_NAME=livingcost
@@ -50,20 +53,20 @@ BACKUPS_ROOT=$LCM_ROOT/backups
 ROLLBACK_DIR=$LCM_ROOT/backups/rollback
 REMINDER_TIMER=livingcost-reminders.timer
 BACKEND_DB_NETWORK=gamja-data_default
-PENDING_EXPECTED=20261018110000_workspace_planning_state
-PENDING_SQL_SHA=229a1fa43233f74fef9110bf4d56307efbee93da1f8baeac3a3347588d1feb35
-TABLES_BEFORE=24
-MIG_ROWS_BEFORE=12
-APPLIED_BEFORE=11
+PENDING_EXPECTED=20261020120000_add_user_ui_theme
+PENDING_SQL_SHA=1ba3540c796a3e198803a6b9e3c49c60ae300adb5e329505cd25f5be9e06386b
+TABLES_BEFORE=25
+MIG_ROWS_BEFORE=13
+APPLIED_BEFORE=12
 # P1 fix: trusted root-owned staging directory for temporary sensitive files
 # (dumps, rollback archives). mktemp-ONLY, exclusive open, no predictable paths.
 STAGING_DIR="/var/lib/gamja-lcm-ci"
 # Pinned known-applied set BEFORE promotion (names only; measured read-only
-# 2026-10-19: exactly these 11 finished rows + 12 total rows incl. one
+# 2026-10-20: exactly these 12 finished rows + 13 total rows incl. one
 # pre-historical failed-marker of the initial migration which Prisma treats
 # as applied baseline — see docs; a re-run of `migrate deploy` on the same
 # image succeeded with these rows present in the 2026-10-15 paired release).
-APPLIED_EXPECTED="20260522000000_initial 20260526000000_auth_hardening 20260527120000_add_is_end_of_month 20260528000000_add_workspace_sync_version 20260529100000_add_push_subscription 20260605000000_add_push_delivery 20261003000000_billing_anchor_renewal 20261006160000_budget_templates 20261007120000_service_billing_foundation 20261010000000_user_product_tour_state 20261015120000_private_coaching_preferences"
+APPLIED_EXPECTED="20260522000000_initial 20260526000000_auth_hardening 20260527120000_add_is_end_of_month 20260528000000_add_workspace_sync_version 20260529100000_add_push_subscription 20260605000000_add_push_delivery 20261003000000_billing_anchor_renewal 20261006160000_budget_templates 20261007120000_service_billing_foundation 20261010000000_user_product_tour_state 20261015120000_private_coaching_preferences 20261018110000_workspace_planning_state"
 OCI_FLOOR_GIB=4
 MAX_DUMP_BYTES=1073741824
 MAX_ARCHIVE_BYTES=3221225472
@@ -143,6 +146,7 @@ const {PrismaClient}=require("@prisma/client"); const p=new PrismaClient();
 p.$queryRawUnsafe("SELECT current_database() db,current_schema() schema,host(inet_server_addr()) addr,inet_server_port() port").then(r=>{const x=r[0];process.stdout.write([x.db,x.schema,x.addr,x.port].join("|"))}).catch(()=>{process.exitCode=1}).finally(()=>p.$disconnect());
 ' 2>>"$LOG") || halt 25 "db-identity-probe"
   [ "$actual" = "$DB_NAME|$DB_SCHEMA|$expected_ip|5432" ] || halt 25 "db-identity-mismatch"
+  printf '%s\n' "$actual" >"$RECEIPTS/db-identity.txt"
 }
 
 # ---------------- args ----------------
@@ -218,6 +222,14 @@ SELECT migration_name FROM lcm._prisma_migrations
 WHERE finished_at IS NOT NULL ORDER BY 1;
 SQL
 }
+verify_theme_catalog() {
+  local valid
+  valid=$(db <<'SQL'
+SELECT (SELECT count(*)=1 FROM information_schema.columns WHERE table_schema='lcm' AND table_name='User' AND column_name='uiTheme' AND data_type='text' AND is_nullable='NO' AND column_default='''jade''::text') AND (SELECT count(*)=1 FROM pg_constraint WHERE conrelid='lcm."User"'::regclass AND conname='User_uiTheme_check' AND contype='c' AND convalidated AND pg_get_constraintdef(oid)='CHECK (("uiTheme" = ANY (ARRAY[''jade''::text, ''aqua''::text, ''violet''::text, ''raspberry''::text, ''tangerine''::text])))');
+SQL
+  ) || halt 28 "theme-catalog-query"
+  [ "$valid" = t ] || halt 28 "theme-catalog-mismatch"
+}
 classify() {
   # echoes: fresh | promote-only | promoted | halt:<code>:<reason>
   local ref applied aborted planning_applied a extra n
@@ -229,6 +241,12 @@ WHERE finished_at IS NULL AND rolled_back_at IS NULL;
 SQL
   ); then echo "halt:25:db-unreachable"; return; fi
   [ -z "$aborted" ] || { echo "halt:22:aborted-migration-rows"; return; }
+  local ledger
+  ledger=$(db <<'SQL'
+SELECT md5(string_agg(migration_name||':'||checksum||':'||(finished_at IS NOT NULL)::text||':'||(rolled_back_at IS NOT NULL)::text,'|' ORDER BY migration_name,checksum)) FROM lcm._prisma_migrations WHERE migration_name <> '20261020120000_add_user_ui_theme';
+SQL
+  ) || { echo "halt:25:history-query"; return; }
+  [ "$ledger" = d1667e6927e50ab9af3f5fae4ee96de7 ] || { echo "halt:22:baseline-history-drift"; return; }
   extra=0
   for a in $applied; do
     case " $APPLIED_EXPECTED $PENDING_EXPECTED " in
@@ -240,13 +258,38 @@ SQL
   n=$(printf '%s\n' $applied | grep -c . || true)
   planning_applied=0
   printf '%s\n' "$applied" | grep -qx "$PENDING_EXPECTED" && planning_applied=1
+  local tables history theme
+  tables=$(db <<'SQL'
+SELECT count(*) FROM information_schema.tables WHERE table_schema='lcm';
+SQL
+  ) || { echo "halt:25:catalog-query"; return; }
+  history=$(db <<'SQL'
+SELECT count(*) FROM lcm._prisma_migrations;
+SQL
+  ) || { echo "halt:25:catalog-query"; return; }
+  theme=$(db <<'SQL'
+SELECT count(*)=1 FROM information_schema.columns WHERE table_schema='lcm' AND table_name='User' AND column_name='uiTheme';
+SQL
+  ) || { echo "halt:25:catalog-query"; return; }
+  [ "$tables" = "$TABLES_BEFORE" ] && [ "$history" = "$((MIG_ROWS_BEFORE+planning_applied))" ] || { echo "halt:22:catalog-count-drift"; return; }
+  if [ "$planning_applied" = 0 ]; then
+    [ "$theme" = f ] || { echo "halt:22:untracked-theme-column"; return; }
+  else
+    [ "$theme" = t ] || { echo "halt:22:applied-theme-column-missing"; return; }
+    local checksum
+    checksum=$(db <<'SQL'
+SELECT checksum FROM lcm._prisma_migrations WHERE migration_name='20261020120000_add_user_ui_theme' AND finished_at IS NOT NULL;
+SQL
+    ) || { echo "halt:25:catalog-query"; return; }
+    [ "$checksum" = "$PENDING_SQL_SHA" ] || { echo "halt:22:applied-theme-checksum"; return; }
+  fi
   case "$ref" in
     "$OLD_REF")
       if [ "$planning_applied" = 0 ] && [ "$n" = "$APPLIED_BEFORE" ]; then echo fresh
       elif [ "$planning_applied" = 1 ] && [ "$n" = "$((APPLIED_BEFORE+1))" ]; then echo promote-only
       else echo "halt:22:applied-count"; fi ;;
     "$NEW_REF")
-      if [ "$planning_applied" = 1 ]; then echo promoted
+      if [ "$planning_applied" = 1 ] && [ "$n" = "$((APPLIED_BEFORE+1))" ]; then echo promoted
       else echo "halt:29:compose-candidate-without-migration"; fi ;;
     "") echo "halt:20:compose-parse";;
     *)  echo "halt:21:compose-cas-stale";;
@@ -274,8 +317,8 @@ transfer_capacity() {
   capacity_bytes "$root" "$((ARCHIVE_BYTES+IMAGE_BYTES))"
 }
 receipt_expected() {
-  printf 'verified=true\nsource=%s\nrun=%s\nattempt=%s\ndumpSha=%s\nsqlSha=%s\nhelperSha=%s\nproof=%s\n' \
-    "$SHA" "$RUN" "$ATTEMPT" "$(manifest_get sha256)" "$PENDING_SQL_SHA" "$(sha256sum "$0" | cut -d' ' -f1)" "$1"
+  printf 'verified=true\nsource=%s\nrun=%s\nattempt=%s\ndumpSha=%s\nsqlSha=%s\nhelperSha=%s\nproof=%s\nimage=%s\ndbIdentity=%s\nexpires=%s\n' \
+    "$SHA" "$RUN" "$ATTEMPT" "$(manifest_get sha256)" "$PENDING_SQL_SHA" "$(sha256sum "$0" | cut -d' ' -f1)" "$1" "$(manifest_get image)" "$(manifest_get dbIdentity)" "$(manifest_get expires)"
 }
 verify_restore_receipt() {
   local f="$RECEIPTS/local-restore.receipt" proof
@@ -286,6 +329,10 @@ verify_restore_receipt() {
   proof=$(sed -n 's/^proof=//p' "$f")
   [[ "$proof" =~ ^[a-f0-9]{64}$ ]] || halt 25 "local-restore-proof-invalid"
   cmp -s "$f" <(receipt_expected "$proof") || halt 25 "local-restore-receipt-binding"
+  local expires
+  expires=$(manifest_get expires)
+  [[ "$expires" =~ ^[0-9]{10}$ ]] && [ "$expires" -gt "$(date +%s)" ] || halt 25 "local-restore-receipt-expired"
+  [ "$(manifest_get image)" = "$(cat "$RECEIPTS/candidate-image.txt")" ] && [ "$(manifest_get dbIdentity)" = "$(cat "$RECEIPTS/db-identity.txt")" ] || halt 25 "local-restore-target-binding"
   local dump
   dump=$(manifest_get dump)
   [[ "$dump" =~ ^[A-Za-z0-9._-]+$ ]] || halt 25 "dump-path-invalid"
@@ -315,16 +362,16 @@ case "$OP" in
     [ "$(docker inspect -f '{{.Image}}' "$BACKEND_CONTAINER" 2>>"$LOG")" = "$OLD_IMAGE_ID" ] || halt 21 "base-container-cas"
     [[ "$AUDIT_SHA" =~ ^[a-f0-9]{64}$ ]] || halt 20 "audit-sha"
     [ ! -L "$RECEIPTS/runtime-overlay.cjs" ] && [ "$(sha256sum "$RECEIPTS/runtime-overlay.cjs" | cut -d' ' -f1)" = "$AUDIT_SHA" ] || halt 23 "audit-source-pin"
-    info=$(docker image inspect "$OLD_IMAGE_ID" --format '{"imageId":{{json .Id}},"imageBytes":{{.Size}},"platform":"{{.Os}}/{{.Architecture}}","source":{{json (index .Config.Labels "org.opencontainers.image.revision")}},"envNames":[{{range $i,$e := .Config.Env}}{{if $i}},{{end}}{{json (index (split $e "=") 0)}}{{end}}]}' 2>>"$LOG") || halt 23 "base-meta"
-    python3 - "$info" "$OLD_IMAGE_ID" "$OLD_SHA" 2>>"$LOG" <<'PY' || halt 23 "base-env-or-identity"
+    info=$(docker image inspect "$BASE_IMAGE_ID" --format '{"imageId":{{json .Id}},"imageBytes":{{.Size}},"platform":"{{.Os}}/{{.Architecture}}","source":{{json (index .Config.Labels "org.opencontainers.image.revision")}},"envNames":[{{range $i,$e := .Config.Env}}{{if $i}},{{end}}{{json (index (split $e "=") 0)}}{{end}}]}' 2>>"$LOG") || halt 23 "base-meta"
+    python3 - "$info" "$BASE_IMAGE_ID" "$BASE_SHA" 2>>"$LOG" <<'PY' || halt 23 "base-env-or-identity"
 import json,sys
 m=json.loads(sys.argv[1]);assert m['imageId']==sys.argv[2] and m['source']==sys.argv[3] and m['platform']=='linux/arm64'
 assert set(m['envNames']) <= {'PATH','NODE_VERSION','YARN_VERSION','RELEASE_SHA','NODE_ENV'}
 PY
     audit_name="lcm-base-audit-${RUN}-${ATTEMPT}-${SHA:0:12}"
     [ -z "$(docker container ls -a --filter "name=^/$audit_name$" --format '{{.Names}}' 2>>"$LOG")" ] || halt 23 "base-audit-name-collision"
-    audit=$(timeout 60 docker run --rm --name "$audit_name" --label "lcm-ci-op=base-audit-${RUN}-${ATTEMPT}-${SHA}" --network none --read-only -i --entrypoint node "$OLD_IMAGE_ID" - audit <"$RECEIPTS/runtime-overlay.cjs" 2>>"$LOG") || halt 23 "base-safety-audit"
-    listing=$(docker image ls --no-trunc --format '{{.ID}}|{{.Size}}' 2>>"$LOG" | awk -F'|' -v id="$OLD_IMAGE_ID" '$1==id{print $2;exit}')
+    audit=$(timeout 60 docker run --rm --name "$audit_name" --label "lcm-ci-op=base-audit-${RUN}-${ATTEMPT}-${SHA}" --network none --read-only -i --entrypoint node "$BASE_IMAGE_ID" - audit <"$RECEIPTS/runtime-overlay.cjs" 2>>"$LOG") || halt 23 "base-safety-audit"
+    listing=$(docker image ls --no-trunc --format '{{.ID}}|{{.Size}}' 2>>"$LOG" | awk -F'|' -v id="$BASE_IMAGE_ID" '$1==id{print $2;exit}')
     python3 - "$info" "$audit" "$listing" "$AUDIT_SHA" "$SHA" "$RUN" "$ATTEMPT" <<'PY'
 import json,sys,re,math
 m=json.loads(sys.argv[1]);a=json.loads(sys.argv[2]);s=re.fullmatch(r'([0-9.]+)(B|kB|MB|GB)',sys.argv[3]);assert s and a['safety'] is True
@@ -335,15 +382,13 @@ PY
   base-archive-manifest)
     # No DB query/dump/migration. Reuse the ONE protected immutable rollback archive.
     metadata=$(bash "$0" base-inspect --sha "$SHA" --run "$RUN" --attempt "$ATTEMPT" --audit-sha "$AUDIT_SHA") || halt 23 "base-inspect-failed"
-    arc="$ROLLBACK_DIR/lcm-rollback-${OLD_IMAGE_ID:7:12}.tar.gz"
-    if [ ! -f "$arc" ]; then
-      accounting=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["accountingBytes"])' "$metadata")
-      [[ "$accounting" =~ ^[1-9][0-9]+$ ]] || halt 24 "base-accounting-unknown"
-      ensure_staging_dir; mkdir -p "$ROLLBACK_DIR"; chmod 700 "$ROLLBACK_DIR"
-      capacity_bytes "$STAGING_DIR" "$((accounting*2))"; capacity_bytes "$ROLLBACK_DIR" "$((accounting*2))"
-    fi
-    bash "$0" ensure-rollback --sha "$SHA" --run "$RUN" --attempt "$ATTEMPT" >>"$LOG" 2>&1 || halt 23 "base-retained-archive"
-    [ -f "$arc" ] && [ ! -L "$arc" ] || halt 23 "base-archive-missing"
+    arc="$ROLLBACK_DIR/lcm-rollback-${BASE_IMAGE_ID:7:12}.tar.gz"
+    # Dependency input is pre-existing retained evidence, not a serving-image
+    # rollback. Missing/mismatched input fails closed; never regenerate here.
+    [ -f "$arc" ] && [ ! -L "$arc" ] && [ -f "$arc.meta" ] && [ ! -L "$arc.meta" ] || halt 23 "base-archive-missing"
+    [ "$(stat -c %u "$arc")" = 0 ] && [ "$(stat -c %a "$arc")" = 600 ] && [ "$(stat -c %u "$arc.meta")" = 0 ] && [ "$(stat -c %a "$arc.meta")" = 600 ] || halt 23 "base-archive-private"
+    grep -qx "image_id=$BASE_IMAGE_ID" "$arc.meta" && grep -qx "revision=$BASE_SHA" "$arc.meta" || halt 23 "base-retained-identity"
+    [ "$(stat -c %s "$arc")" = "$(sed -n 's/^bytes=//p' "$arc.meta")" ] && [ "$(sha256sum "$arc" | cut -d' ' -f1)" = "$(sed -n 's/^sha256=//p' "$arc.meta")" ] || halt 23 "base-retained-integrity"
     python3 - "$metadata" "$(stat -c %s "$arc")" "$(sha256sum "$arc" | cut -d' ' -f1)" <<'PY'
 import json,sys
 m=json.loads(sys.argv[1]);m.update(archiveBytes=int(sys.argv[2]),archiveSha256=sys.argv[3]);print(json.dumps(m,separators=(',',':')))
@@ -352,7 +397,7 @@ PY
   base-archive-stream)
     require_compose
     [ "$(compose_backend_ref)" = "$OLD_REF" ] && [ "$(docker inspect -f '{{.Image}}' "$BACKEND_CONTAINER")" = "$OLD_IMAGE_ID" ] || halt 21 "base-stream-cas"
-    arc="$ROLLBACK_DIR/lcm-rollback-${OLD_IMAGE_ID:7:12}.tar.gz"
+    arc="$ROLLBACK_DIR/lcm-rollback-${BASE_IMAGE_ID:7:12}.tar.gz"
     [[ "$ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ ]] && [ ! -L "$arc" ] && [ "$(sha256sum "$arc" | cut -d' ' -f1)" = "$ARCHIVE_SHA" ] || halt 23 "base-stream-integrity"
     cat "$arc" # binary pipe ONLY, never Actions stdout/artifact
     ;;
@@ -400,14 +445,22 @@ SQL
   ensure-rollback)
     require_compose
     mkdir_receipts
+    [ "$(compose_backend_ref)" = "$OLD_REF" ] && [ "$(docker inspect -f '{{.Image}}' "$BACKEND_CONTAINER")" = "$OLD_IMAGE_ID" ] || halt 21 "rollback-serving-cas"
     ROLL_TGZ="$ROLLBACK_DIR/lcm-rollback-${OLD_IMAGE_ID:7:12}.tar.gz"
     ROLL_META="$ROLL_TGZ.meta"
+    [ ! -L "$ROLL_TGZ" ] && [ ! -L "$ROLL_META" ] || halt 23 "rollback-symlink"
+    if [ "$LCM_ROOT" = /opt/livingcost ] && [ -e "$ROLL_TGZ" ]; then
+      [ "$(stat -c %u "$ROLL_TGZ")" = 0 ] && [ "$(stat -c %a "$ROLL_TGZ")" = 600 ] && [ "$(stat -c %u "$ROLL_META")" = 0 ] && [ "$(stat -c %a "$ROLL_META")" = 600 ] || halt 23 "rollback-not-private"
+    fi
     if [ -f "$ROLL_TGZ" ] && [ -f "$ROLL_META" ] \
        && grep -q "^image_id=$OLD_IMAGE_ID$" "$ROLL_META" \
+       && grep -qx "revision=$OLD_SHA" "$ROLL_META" \
+       && [ "$(stat -c %s "$ROLL_TGZ")" = "$(sed -n 's/^bytes=//p' "$ROLL_META")" ] \
        && [ "$(sha256sum "$ROLL_TGZ" | cut -d' ' -f1)" = "$(sed -n 's/^sha256=//p' "$ROLL_META" | head -1)" ]; then
       status "result=ok rollback=reused bytes=$(stat -c %s "$ROLL_TGZ")"
       exit 0
     fi
+    [ ! -e "$ROLL_TGZ" ] && [ ! -e "$ROLL_META" ] || halt 23 "rollback-existing-invalid-preserved"
     df_ok || halt 24 "oci-capacity-below-floor"
     mkdir -p "$ROLLBACK_DIR"; chmod 700 "$ROLLBACK_DIR"
     docker image inspect "$OLD_IMAGE_ID" >/dev/null 2>>"$LOG" \
@@ -426,7 +479,7 @@ SQL
     capacity_bytes "$ROLLBACK_DIR" "$((img_sz*2))"
     # P1: use secure mktemp under trusted staging dir (no predictable /tmp)
     tmp=$(secure_mktemp "lcm-rollback-XXXXXX.tar.gz")
-    if ! docker save "$OLD_IMAGE_ID" | gzip -n >"$tmp" 2>>"$LOG"; then
+    if ! docker save "$OLD_IMAGE_ID" 2>>"$LOG" | gzip -n 2>>"$LOG" | head -c "$((MAX_ARCHIVE_BYTES+1))" >"$tmp" 2>>"$LOG"; then
       rm -f "$tmp"; halt 25 "rollback-save-failed"
     fi
     sz=$(stat -c %s "$tmp")
@@ -451,7 +504,7 @@ SQL
     # The locally validated current-run metadata is streamed over the existing
     # authenticated SSH connection, then independently bound before docker load.
     head -c 16384 >"$RECEIPTS/image.metadata.json"
-    if ! python3 - "$RECEIPTS/image.metadata.json" "$SHA" "$RUN" "$ATTEMPT" "$IMAGE_ID" "$ARCHIVE_SHA" "$ARCHIVE_BYTES" "$IMAGE_BYTES" "$PENDING_SQL_SHA" "$PENDING_EXPECTED" "$BUILD_KIND" "$OLD_IMAGE_ID" "$OLD_SHA" 2>>"$LOG" <<'PY'
+    if ! python3 - "$RECEIPTS/image.metadata.json" "$SHA" "$RUN" "$ATTEMPT" "$IMAGE_ID" "$ARCHIVE_SHA" "$ARCHIVE_BYTES" "$IMAGE_BYTES" "$PENDING_SQL_SHA" "$PENDING_EXPECTED" "$BUILD_KIND" "$BASE_IMAGE_ID" "$BASE_SHA" 2>>"$LOG" <<'PY'
 import json,sys,re
 try:
     path,sha,run,attempt,image,archive,abytes,ibytes,sql,migration,kind,old,oldsha=sys.argv[1:]
@@ -575,22 +628,24 @@ SQL
       printf 'sha256=%s\n' "$ds"
       printf 'db=%s\nschema=%s\nstamp=%s\nstate=%s\n' "$DB_NAME" "$DB_SCHEMA" "$STAMP" "$STATE"
       printf 'tables=%s\nmig_rows=%s\napplied=%s\n' "$TABLES" "$HR" "$AP"
+      printf 'source=%s\nrun=%s\nattempt=%s\nimage=%s\ndbIdentity=%s\nexpires=%s\n' "$SHA" "$RUN" "$ATTEMPT" "$(cat "$RECEIPTS/candidate-image.txt")" "$(cat "$RECEIPTS/db-identity.txt")" "$(( $(date +%s)+3600 ))"
     } >"$RECEIPTS/backup.manifest"
     backup_step fingerprints
-    # structural fingerprints of PRE-EXISTING tables (new table excluded)
+    # All old columns/constraints, including User/planning; ignore only the
+    # one approved new column and its explicitly named CHECK.
     COL=$(db <<'SQL'
 SELECT md5(string_agg(r, '|' ORDER BY r)) FROM (
-  SELECT table_name||'.'||column_name||':'||data_type||':len-'||coalesce(character_maximum_length::text,'-') AS r
+   SELECT table_name||'.'||column_name||':'||data_type||':len-'||coalesce(character_maximum_length::text,'-')||':'||is_nullable||':'||coalesce(column_default,'-') AS r
   FROM information_schema.columns
-  WHERE table_schema='lcm' AND table_name<>'WorkspacePlanningState') s;
+   WHERE table_schema='lcm' AND NOT (table_name='User' AND column_name='uiTheme')) s;
 SQL
 ) || halt 25 "db-query-failed"
     CON=$(db <<'SQL'
 SELECT md5(string_agg(r, '|' ORDER BY r)) FROM (
-  SELECT con.conname||':'||c.relname AS r FROM pg_constraint con
+   SELECT con.conname||':'||c.relname||':'||pg_get_constraintdef(con.oid)||':'||con.convalidated::text AS r FROM pg_constraint con
   JOIN pg_class c ON c.oid=con.conrelid
   JOIN pg_namespace n ON n.oid=c.relnamespace
-  WHERE n.nspname='lcm' AND c.relname<>'WorkspacePlanningState') s;
+   WHERE n.nspname='lcm' AND NOT (c.relname='User' AND con.conname='User_uiTheme_check')) s;
 SQL
 ) || halt 25 "db-query-failed"
     printf 'cols=%s\n' "$COL" >"$RECEIPTS/columns.before.sha"
@@ -644,6 +699,7 @@ SQL
     verify_restore_receipt
     # P2: verify DB connection identity BEFORE any SQL mutation
     verify_db_identity
+    verify_restore_receipt
     REC_ID=$(sed -n '1p' "$RECEIPTS/candidate-image.txt" 2>/dev/null || echo none)
     [ "$REC_ID" != none ] || halt 23 "candidate-image-not-loaded"
     if [ -n "$IMAGE_ID" ] && [ "$IMAGE_ID" != "$REC_ID" ]; then halt 23 "candidate-image-id-arg-drift"; fi
@@ -681,11 +737,12 @@ SQL
       halt 26 "migrate-failed rc=$rc inspect-before-any-retry compose-untouched"
     fi
     planning_now=$(db <<'SQL'
-SELECT to_regclass('lcm."WorkspacePlanningState"') IS NOT NULL;
+SELECT count(*)=1 FROM information_schema.columns WHERE table_schema='lcm' AND table_name='User' AND column_name='uiTheme' AND data_type='text' AND is_nullable='NO' AND column_default='''jade''::text';
 SQL
 ) || planning_now=?
     [ "$planning_now" = t ] || halt 26 "planning-table-absent-after-migrate"
-    status "result=ok planning_table=created"
+    verify_theme_catalog
+    status "result=ok user_theme=added planning_table=retained"
     ;;
 
   promote)
@@ -751,11 +808,12 @@ PY
     mkdir_receipts
     STATE=$(classify)
     [ "$STATE" = promoted ] || halt 29 "verify-requires-promoted-state"
+    verify_theme_catalog
     TABLES=$(db <<'SQL'
 SELECT count(*) FROM information_schema.tables WHERE table_schema='lcm';
 SQL
 ) || halt 25 "db-query-failed"
-    [ "$TABLES" = "$((TABLES_BEFORE+1))" ] || halt 28 "tables-after-mismatch"
+    [ "$TABLES" = "$TABLES_BEFORE" ] || halt 28 "tables-after-mismatch"
     AP=$(printf '%s\n' "$(catalog_applied)" | grep -c . || true)
     [ "$AP" = "$((APPLIED_BEFORE+1))" ] || halt 28 "applied-count-mismatch"
     HR=$(db <<'SQL'
@@ -765,29 +823,25 @@ SQL
     [ "$HR" = "$((MIG_ROWS_BEFORE+1))" ] || halt 28 "history-rows-mismatch"
     COL=$(db <<'SQL'
 SELECT md5(string_agg(r, '|' ORDER BY r)) FROM (
-  SELECT table_name||'.'||column_name||':'||data_type||':len-'||coalesce(character_maximum_length::text,'-') AS r
+   SELECT table_name||'.'||column_name||':'||data_type||':len-'||coalesce(character_maximum_length::text,'-')||':'||is_nullable||':'||coalesce(column_default,'-') AS r
   FROM information_schema.columns
-  WHERE table_schema='lcm' AND table_name<>'WorkspacePlanningState') s;
+   WHERE table_schema='lcm' AND NOT (table_name='User' AND column_name='uiTheme')) s;
 SQL
 ) || halt 25 "db-query-failed"
     want_col=$(sed -n 's/^cols=//p' "$RECEIPTS/columns.before.sha" | head -1)
     [ "$COL" = "$want_col" ] || halt 28 "existing-columns-changed"
     CON=$(db <<'SQL'
 SELECT md5(string_agg(r, '|' ORDER BY r)) FROM (
-  SELECT con.conname||':'||c.relname AS r FROM pg_constraint con
+   SELECT con.conname||':'||c.relname||':'||pg_get_constraintdef(con.oid)||':'||con.convalidated::text AS r FROM pg_constraint con
   JOIN pg_class c ON c.oid=con.conrelid
   JOIN pg_namespace n ON n.oid=c.relnamespace
-  WHERE n.nspname='lcm' AND c.relname<>'WorkspacePlanningState') s;
+   WHERE n.nspname='lcm' AND NOT (c.relname='User' AND con.conname='User_uiTheme_check')) s;
 SQL
 ) || halt 25 "db-query-failed"
     want_con=$(sed -n 's/^cons=//p' "$RECEIPTS/constraints.before.sha" | head -1)
     [ "$CON" = "$want_con" ] || halt 28 "existing-constraints-changed"
-    EMPTY=$(db <<'SQL'
-SELECT count(*)=0 FROM lcm."WorkspacePlanningState";
-SQL
-) || EMPTY=?
-    printf 'tables=%s\napplied=%s\nhistory=%s\nplanning_empty_at_release=%s\nverified_at=%s\n' \
-      "$TABLES" "$AP" "$HR" "$EMPTY" "$(date -u +%FT%TZ)" >"$RECEIPTS/verify.json"
+    printf 'tables=%s\napplied=%s\nhistory=%s\ntheme_catalog=verified\nverified_at=%s\n' \
+      "$TABLES" "$AP" "$HR" "$(date -u +%FT%TZ)" >"$RECEIPTS/verify.json"
     chmod 600 "$RECEIPTS/verify.json"
     status "result=ok tables=$TABLES applied=$AP history=$HR"
     ;;

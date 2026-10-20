@@ -31,17 +31,26 @@ it('actual PG16 custom dump -> isolated peer restore -> pinned Prisma migration 
   // a literal tests this without adding TCP/trust or touching a customer DB.
   expect(query("SELECT '172.18.0.7'::inet::text || '|' || host('172.18.0.7'::inet)")).toBe('172.18.0.7/32|172.18.0.7');
   query(`INSERT INTO lcm."Workspace" (id,name,"updatedAt") VALUES ('synthetic','PRIVATE_ROW_SENTINEL',now())`);
+  query(`INSERT INTO lcm."User" (id,email,name,"passwordHash","updatedAt") VALUES ('synthetic-user','synthetic@example.invalid','PRIVATE_USER_SENTINEL','synthetic-not-a-real-hash',now()); INSERT INTO lcm."Category" (id,"workspaceId",label) VALUES ('category','synthetic','synthetic'); INSERT INTO lcm."FixedCost" (id,"workspaceId",name,"categoryId","paymentMethodId",amount,"billingDay","updatedAt") VALUES ('cost','synthetic','PRIVATE_FINANCE_SENTINEL','category','synthetic',12345,7,now()); INSERT INTO lcm."WorkspacePlanningState" ("workspaceId","payloadJson","updatedAt") VALUES ('synthetic','{"synthetic":true}',now())`);
   const tables=query(`SELECT count(*) FROM pg_tables WHERE schemaname='lcm'`),mig=query('SELECT count(*) FROM lcm._prisma_migrations'),dbbytes=query('SELECT pg_database_size(current_database())');
   io.run(join(s.pgBinDir,'pg_dump'),[...pgArgs(s),'-d',s.db,'-Fc','-f',join(backup,'synthetic.dump')]);
   const dump=readFileSync(join(backup,'synthetic.dump'));
   writeFileSync(join(backup,'backup.manifest'),`dump=synthetic.dump\nsha256=${hash(dump)}\nbytes=${dump.length}\ndb=livingcost\nschema=lcm\ntables=${tables}\nmig_rows=${mig}\napplied=${mig}\ndb_bytes=${dbbytes}\n`,{mode:0o600});
   // Simulate starter succeeded but state output was lost: cleanup uses the
+  const mf=join(backup,'backup.manifest');
+  writeFileSync(mf,readFileSync(mf,'utf8')+`source=${'b'.repeat(40)}\nrun=123\nattempt=1\nimage=sha256:${'c'.repeat(64)}\ndbIdentity=livingcost|lcm|172.19.0.2|5432\nexpires=${Math.floor(Date.now()/1000)+3600}\n`);
   // exclusively owned known cluster paths, not a guessed stdout URL.
   unlinkSync(join(src,'state.json'));
   stopPG(src,io.run);stopped=true;
   const proof=rehearse({backupDir:backup,stateDir:dst,log:join(backup,'private.log'),sha:'b'.repeat(40),runId:'123',attempt:'1',root});
   expect(proof.verified).toBe('true');expect(proof.dumpSha).toBe(hash(dump));expect(proof.sqlSha).toBe(MIGRATION.sqlSha256);
   expect(existsSync(dst)).toBe(false);
+  // Same restored snapshot: changing ANY old User/financial/planning column
+  // must invalidate the proof; only the single new User.uiTheme is ignored.
+  for(const sql of [`UPDATE lcm."User" SET name='mutated'`,`UPDATE lcm."FixedCost" SET amount=999`,`UPDATE lcm."WorkspacePlanningState" SET revision=99`]){
+   const run=(bin:string,args:string[],opts:any={})=>{const out=io.run(bin,args,opts);if(args[0]==='migrate'){const st=JSON.parse(readFileSync(join(dst,'state.json'),'utf8'));io.run(join(st.pgBinDir,'psql'),[...pgArgs(st),'-d',st.db,'-XAt','-v','ON_ERROR_STOP=1','-c',sql]);}return out;};
+   expect(()=>rehearse({backupDir:backup,stateDir:dst,log:join(backup,'private.log'),sha:'b'.repeat(40),runId:'123',attempt:'1',root},{run})).toThrow('local-restore-failed');expect(existsSync(dst)).toBe(false);
+  }
   expect(()=>rehearse({backupDir:backup,stateDir:dst,log:join(backup,'private.log'),sha:'b'.repeat(40),runId:'123',attempt:'1',root},{stop:(dir:string,run:Function)=>{stopPG(dir,run);throw Error('stop-failed-after-success');}})).toThrow('local-cleanup-failed');
   expect(existsSync(dst)).toBe(false);
   // Even a valid hash cannot turn a non-restorable dump into a permission receipt.
@@ -58,6 +67,7 @@ it('actual PG16 custom dump -> isolated peer restore -> pinned Prisma migration 
 function fakeBackup() {
  const b=mkdtempSync(join(tmpdir(),'lr-f-'));writeFileSync(join(b,'x.dump'),'dump');
  writeFileSync(join(b,'backup.manifest'),`dump=x.dump\nsha256=${hash(Buffer.from('dump'))}\nbytes=4\ndb=livingcost\nschema=lcm\ntables=24\nmig_rows=12\napplied=11\ndb_bytes=1024\n`);
+ const mf=join(b,'backup.manifest');writeFileSync(mf,readFileSync(mf,'utf8')+`source=${'b'.repeat(40)}\nrun=123\nattempt=1\nimage=sha256:${'c'.repeat(64)}\ndbIdentity=livingcost|lcm|172.19.0.2|5432\nexpires=${Math.floor(Date.now()/1000)+3600}\n`);
  return b;
 }
 it.each(['missing-state','restore-exit','stop-failed','manifest-missing'])('fails closed with cleanup/no receipt: %s',mode=>{

@@ -1057,3 +1057,9 @@ Node/CJS/Bash/YAML/diff checks pass. All prior financial/auth/metadata/verifier/
 restore and full CLI assertions are retained. Test-owned roots/clusters/children
 and one small read-only private-client audit config were cleaned; no real build,
 manual GC/prune, image/tag/volume deletion, key write or production action occurred.
+# Follow-up release (2026-10-20, local only)
+
+The records below describe the planning-table release and remain historical.
+For the next User.uiTheme release, see [user-theme-deploy-20261020.md](user-theme-deploy-20261020.md).
+Current rollback CAS is 02c70d1b / 5afa33fb, distinct from the retained immutable
+a2c7bd9 / 5d133132 dependency donor. No new deployment is claimed here.

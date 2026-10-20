@@ -56,15 +56,15 @@ if(mode==='df'||mode==='colima') {
     const source=readFileSync(0);if(createHash('sha256').update(source).digest('hex')!==c.transport.auditSha256)throw Error('fixture-audit-source');save(c.transport.audit);
    }else if(last==='verify-installed')save();
    else if(last==='smoke'){s.planningSmoke={create:true,update:true,find:true,revision:2};save();}
-   else if(a.includes('sha256sum'))save('229a1fa43233f74fef9110bf4d56307efbee93da1f8baeac3a3347588d1feb35  migration.sql');
-   else if(last==="ls prisma/migrations | grep -c '^20'")save('12');
+   else if(a.includes('sha256sum'))save('1ba3540c796a3e198803a6b9e3c49c60ae300adb5e329505cd25f5be9e06386b  migration.sql');
+   else if(last==="ls prisma/migrations | grep -c '^20'")save('13');
    else if(last==='./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma'){s.migrated=true;save();}
    else throw Error('fixture-unhandled-probe');
   }else{s.container[name]={Id:id(name),Labels:labels()};save(s.container[name].Id);}
  }else if(cmd==='exec'){
   if(!Object.values(s.container).some(x=>x.Id===a[1]))throw Error('fixture-exec-not-owned-id');
   if(a[2]==='du')save(`${c.mode==='pg-overcap'?262145:20480} /var/lib/postgresql/data`);
-  else if(a[2]==='node'){if(!s.migrated||!s.planningSmoke)throw Error('fixture-health-before-planning');save({commitSha:process.env.GITHUB_SHA,releaseId:'synthetic-overlay'});}
+  else if(a[2]==='node'){if(!s.migrated||!s.planningSmoke)throw Error('fixture-health-before-planning');if(last.includes('.apiSmoke()')){mark('theme-api-smoke');save();}else save({commitSha:process.env.GITHUB_SHA,releaseId:'synthetic-overlay'});}
   else if(last==='SELECT 1')save('1');else if(last==='CREATE SCHEMA IF NOT EXISTS lcm')save();else throw Error('fixture-unhandled-exec');
  }else if(cmd==='rm'||a[1]==='rm'){
   const kind=cmd==='rm'?'container':cmd,target=last;for(const [name,x]of Object.entries(s[kind]))if(name===target||x.Id===target){if(name==='foreign-container'||name==='foreign-network'||name==='foreign-image')throw Error('fixture-foreign-mutation');delete s[kind][name];}save();

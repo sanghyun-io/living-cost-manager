@@ -5,7 +5,7 @@
 // constants; api-deploy.mjs cross-checks that the installed helper's SHA
 // matches this checkout before trusting any remote output (source pinning).
 //
-// PRODUCTION TRUTH (measured read-only on 2026-10-19; drift ⇒ the helper's
+// PRODUCTION TRUTH (measured read-only on 2026-10-20; drift ⇒ the helper's
 // CAS checks halt — see docs/api-deploy-actions-20261019.md). Remote registry
 // re-pull of the current image is NOT established, so rollback depends on the
 // host-side docker-save rollback archive (ensure-rollback op), never on a
@@ -21,7 +21,7 @@ export const IDENTITY = Object.freeze({
 });
 
 // Production API image CAS + rollback target (pinned from read-only host
-// evidence 2026-10-19; gamja-ops assets/services.yaml deployment block is the
+// evidence 2026-10-20; gamja-ops assets/services.yaml deployment block is the
 // registry source of truth for the same values).
 export const PROD = Object.freeze({
   host: "gamja-oci", // existing SSH config alias (ubuntu, pinned user-known-hosts file)
@@ -31,11 +31,11 @@ export const PROD = Object.freeze({
   apiPort: 4000,
   apiBasePath: "/living-cost-manager/v1",
   publicHealthUrl: "https://api.gamja.top/living-cost-manager/v1/health",
-  currentReleaseSha: "a2c7bd9af46d84dc88b2a36656c25949b57076b0",
+  currentReleaseSha: "02c70d1b9f463c000cfe8dc7132cab7b23d459ff",
   currentImageId:
-    "sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f",
+    "sha256:5afa33fb3d3c42d54a58e0957f4098c922318060967d86b2f26e76454a7d48e0",
   currentComposeImageRef:
-    "lcm-coaching-a2c7bd9af46d84dc88b2a36656c25949b57076b0@sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f",
+    "lcm-ci-api-02c70d1b9f463c000cfe8dc7132cab7b23d459ff:candidate",
   // Post-promotion the compose backend image string is replaced by this
   // exact pinned tag (docker-load preserves RepoTags; no registry exists to
   // digest-pin against, so every remote op re-verifies tag→imageID equality).
@@ -50,17 +50,17 @@ export const PROD = Object.freeze({
   reminderTimer: "livingcost-reminders.timer",
 });
 
-// The single approved additive migration (explicit Owner approval 2026-10-19
+// The single approved additive migration (explicit Owner approval 2026-10-20
 // covers ONLY this migration on this target). Any other pending item halts.
 export const MIGRATION = Object.freeze({
-  name: "20261018110000_workspace_planning_state",
-  dir: "prisma/migrations/20261018110000_workspace_planning_state",
+  name: "20261020120000_add_user_ui_theme",
+  dir: "prisma/migrations/20261020120000_add_user_ui_theme",
   sqlFile: "migration.sql",
   sqlSha256:
-    "229a1fa43233f74fef9110bf4d56307efbee93da1f8baeac3a3347588d1feb35",
-  expectedAppliedCount: 11, // rows with finished_at NOT NULL before promotion
-  expectedHistoryRows: 12, // total _prisma_migrations rows before promotion
-  expectedTablesBefore: 24, // tables in schema lcm including _prisma_migrations
+    "1ba3540c796a3e198803a6b9e3c49c60ae300adb5e329505cd25f5be9e06386b",
+  expectedAppliedCount: 12, // rows with finished_at NOT NULL before promotion
+  expectedHistoryRows: 13, // total _prisma_migrations rows before promotion
+  expectedTablesBefore: 25, // column addition: no new table
   expectedTablesAfter: 25,
 });
 

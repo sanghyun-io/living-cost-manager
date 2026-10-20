@@ -229,7 +229,7 @@ if (cmd === "synthetic") {
   const mig = probe(["--network", builder.check('network',SYN.net), imageName,
     "sh", "-c", "ls prisma/migrations | grep -c '^20'"]);
   const migCount = Number(mig.stdout.trim());
-  if (!Number.isFinite(migCount) || migCount < 12) fail(`image has ${mig.stdout.trim()} migrations (<12)`);
+  if (migCount !== 13) fail('image migration inventory must contain exactly 13 migrations');
   const sqlHash = probe(['--network','none', imageName, "sha256sum",
     `${MIGRATION.dir}/${MIGRATION.sqlFile}`]).stdout.trim().split(/\s+/)[0];
   if (sqlHash !== MIGRATION.sqlSha256) fail("planning migration SQL hash in image != pinned source hash");
@@ -254,6 +254,7 @@ if (cmd === "synthetic") {
   }
   const health = JSON.parse(body);
   if (health.commitSha !== sha) fail(`health commitSha ${health.commitSha} != ${sha}`);
+  if(builder.owned().plan.profile==='verified-runtime-overlay')docker(['exec',SYN.api,'node','-e',"require('/opt/lcm-overlay-verify.cjs').apiSmoke().catch(()=>{console.error('synthetic-theme-gate');process.exitCode=1})"]);
   const pgKiB=docker(['exec',SYN.pg,'du','-sk','/var/lib/postgresql/data']).stdout.trim().match(/^([1-9][0-9]*)[ \t]+\/var\/lib\/postgresql\/data$/)?.[1];
   const pgBytes=Number(pgKiB)*1024,pgCap=builder.owned().plan.syntheticPgCap;
   if(!Number.isSafeInteger(pgBytes)||pgBytes<=0||!Number.isSafeInteger(pgCap)||pgCap<=0||pgBytes>pgCap)fail('synthetic PG footprint cap');

@@ -46,7 +46,7 @@ it('whole overlay CLI sequence shares ONE lease and fake engine across baseline 
 it('overlay synthetic CLI reaches the real PG footprint/cap/cleanup handler from a valid prebuilt candidate fixture',async()=>{
  const f=await fixture('normal',true);const r=f.cli('synthetic');expect(r.status,r.stdout+r.stderr+' '+f.diagnostic()).toBe(0);expect(r.stdout).toContain('monitored operation ok');
  const j=JSON.parse(readFileSync(f.l.leaseFile,'utf8'));expect(j.completed).toContain('synthetic');expect(f.commands().some(x=>x.mode==='docker'&&x.args.includes('du'))).toBe(true);
- const s=JSON.parse(readFileSync(join(f.root,'engine.json'),'utf8'));expect(s.planningSmoke.revision).toBe(2);expect(s.container).toEqual({'foreign-container':f.foreign});f.l.teardown();
+ const s=JSON.parse(readFileSync(join(f.root,'engine.json'),'utf8'));expect(s.planningSmoke.revision).toBe(2);expect(existsSync(join(f.root,'theme-api-smoke'))).toBe(true);expect(s.container).toEqual({'foreign-container':f.foreign});f.l.teardown();
 },20000);
 it('direct baseline worker flag cannot bypass the leased controller before any export/import',async()=>{const f=await fixture();const r=f.cli('baseline',['--profile-worker']);expect(r.status).toBe(1);expect(f.commands().some(x=>x.mode==='server'||x.mode==='docker'&&x.args[0]==='load')).toBe(false);f.l.teardown();},20000);
 it('actual build handler failure preserves Docker stderr privately and reports only operation/status publicly',async()=>{

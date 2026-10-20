@@ -6,7 +6,8 @@ import {fileURLToPath} from 'node:url';
 import {PROD,MIGRATION,REPO} from './constants.mjs';
 import {identity} from './build-profile.mjs';
 import {GiB,MiB,RESERVES,SYNTHETIC_PG_CAP} from './resource-budget.mjs';
-export const BASE=Object.freeze({source:PROD.currentReleaseSha,imageId:PROD.currentImageId,node:'v24.19.0',nodeMajor:24,abi:'137',prisma:'6.19.3',platform:'linux/arm64'});
+// Immutable dependency donor, NOT the currently serving image or rollback target.
+export const BASE=Object.freeze({source:'a2c7bd9af46d84dc88b2a36656c25949b57076b0',imageId:'sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f',node:'v24.19.0',nodeMajor:24,abi:'137',prisma:'6.19.3',platform:'linux/arm64'});
 export const sha=b=>createHash('sha256').update(b).digest('hex');
 export const canonical=x=>JSON.stringify(x&&typeof x==='object'?Array.isArray(x)?x.map(v=>JSON.parse(canonical(v))):Object.fromEntries(Object.keys(x).sort().map(k=>[k,JSON.parse(canonical(x[k]))])):x);
 export const core=p=>Object.fromEntries(['name','version','type','main','types','exports'].filter(k=>p[k]!==undefined).map(k=>[k,p[k]]));

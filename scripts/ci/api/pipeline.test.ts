@@ -42,6 +42,7 @@ const APPLIED11 = [
   "20261007120000_service_billing_foundation",
   "20261010000000_user_product_tour_state",
   "20261015120000_private_coaching_preferences",
+  "20261018110000_workspace_planning_state",
 ].sort();
 const DIRS12 = [...APPLIED11, PENDING].sort();
 const DBPASS = "SENTINEL_DBPASS_4f2a";
@@ -121,9 +122,10 @@ function makeHost(opts: HostOpts = {}) {
   const def: Record<string, string> = {
     applied_txt: (opts.applied ?? APPLIED11).join("\n") + "\n",
     aborted_txt: "",
-    tables: "24",
-    migrows: "12",
-    planning_present: "f",
+    tables: "25",
+    migrows: "13",
+    planning_present: "t",
+    theme_present: "f",
     planning_zero: "t",
     cols_hash: "colsA",
     cons_hash: "consA",
@@ -152,7 +154,7 @@ function makeHost(opts: HostOpts = {}) {
   w("applied.txt", (opts.applied ?? APPLIED11).join("\n") + "\n");
   w("aborted.txt", def.aborted_txt);
   for (const [k, v] of Object.entries({
-    tables: def.tables, migrows: def.migrows, planning_present: def.planning_present,
+    tables: def.tables, migrows: def.migrows, planning_present: def.planning_present,theme_present:def.theme_present,
     planning_zero: def.planning_zero, cols_hash: def.cols_hash, cons_hash: def.cons_hash,
     container_running: def.container_running, container_image: def.container_image,
     health_local: def.health_local, health_public: def.health_public,
@@ -208,7 +210,8 @@ function authorizeRestore(h:ReturnType<typeof makeHost>,attempt=ATTEMPT,run=RUN)
  const ds=m.match(/^sha256=(.+)$/m)![1];
  const helperSha=createHash('sha256').update(fs.readFileSync(path.join(API,'deploy-host.sh'))).digest('hex');
  const receipt=`verified=true\nsource=${TEST_SHA}\nrun=${run}\nattempt=${attempt}\ndumpSha=${ds}\nsqlSha=${MIGRATION.sqlSha256}\nhelperSha=${helperSha}\nproof=${'a'.repeat(64)}\n`;
- fs.writeFileSync(path.join(rd,'local-restore.receipt'),receipt,{mode:0o600});
+  const bindings=['image','dbIdentity','expires'].map(k=>`${k}=${m.match(new RegExp(`^${k}=(.+)$`,'m'))![1]}\n`).join('');
+  fs.writeFileSync(path.join(rd,'local-restore.receipt'),receipt+bindings,{mode:0o600});
 }
 function readCalls(fh: string) {
   const p = path.join(fh, "state", "calls.log");
@@ -249,7 +252,7 @@ describe("host helper — preflight CAS/identity", () => {
     const h = makeHost();
     const r = helper(h, "preflight");
     expect(r.status, r.stdout + "|" + r.stderr).toBe(0);
-    expect(r.stdout).toContain("state=fresh tables=24");
+    expect(r.stdout).toContain("state=fresh tables=25");
     const pre = fs.readFileSync(path.join(h.rd, "preflight.json"), "utf8");
     expect(pre).toContain("reminder_timer=active");
   });
@@ -314,8 +317,8 @@ describe("host helper — rollback archive", () => {
 
 describe("host helper — archive load + backup + rehearse", () => {
   it('reproduces the inet CIDR identity failure on847, then current host(inet) passes without skipping any identity check',()=>{
-    const h=makeHost(),old=spawnSync('git',['show','847b9372d5cb394646d9d381f57657529881bee1:scripts/ci/api/deploy-host.sh'],{cwd:REPO,encoding:'utf8'});expect(old.status).toBe(0);
-    const file=path.join(h.base,'before-host-cast.sh');fs.writeFileSync(file,old.stdout);
+    const h=makeHost();
+    const file=path.join(h.base,'before-host-cast.sh');fs.writeFileSync(file,fs.readFileSync(path.join(API,'deploy-host.sh'),'utf8').replace('host(inet_server_addr())','inet_server_addr()::text'));
     const r=spawnSync('bash',[file,'backup','--sha',TEST_SHA,'--run',RUN,'--attempt',ATTEMPT],{encoding:'utf8',env:helperEnv(h.fh)});
     expect(r.status).toBe(25);expect(r.stdout).toContain('db-identity-mismatch');expect(readCalls(h.fh)).not.toContain('pg_dump');expect(fs.existsSync(path.join(h.rd,'backup.manifest'))).toBe(false);
     const fixed=helper(h,'backup');expect(fixed.status,fixed.stdout+fixed.stderr).toBe(0);const status=JSON.parse(fs.readFileSync(path.join(h.rd,'backup-status.json'),'utf8'));expect(status.outcome).toBe('complete');expect(status.substep).toBe('complete');expect(fs.statSync(path.join(h.rd,'backup-status.json')).mode&0o777).toBe(0o600);
@@ -365,8 +368,8 @@ describe("host helper — archive load + backup + rehearse", () => {
     expect(r.status, `stdout: ${r.stdout}\nstderr: ${r.stderr}`).toBe(0);
     const man = fs.readFileSync(path.join(h.rd, "backup.manifest"), "utf8");
     expect(man).toContain("bytes=90867");
-    expect(man).toContain("tables=24");
-    expect(man).toContain("mig_rows=12");
+    expect(man).toContain("tables=25");
+    expect(man).toContain("mig_rows=13");
     const dump = man.match(/^dump=(.+)$/m)![1];
     const dm = fs.statSync(path.join(h.rd, dump));
     expect(dm.mode & 0o777).toBe(0o600);
@@ -454,13 +457,15 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     const r=helper(h,'load-image',['--image-id',CAND_ID,'--archive-sha',createHash('sha256').update('x').digest('hex')]);
     expect(r.status).toBe(24);expect(readCalls(h.fh)).not.toContain('docker load');
   });
-  it.each(['missing','replayed-attempt','different-dump','hash-only'])('rejects %s restore authority before SQL',mode=>{
+  it.each(['missing','replayed-attempt','different-dump','hash-only','expired','wrong-image','wrong-db'])('rejects %s restore authority before SQL',mode=>{
     const h=makeHost();helper(h,'backup');
     if(mode==='hash-only')helper(h,'rehearse');
-    if(mode==='replayed-attempt'||mode==='different-dump') {
+    if(['replayed-attempt','different-dump','expired','wrong-image','wrong-db'].includes(mode)) {
       authorizeRestore(h);
       const f=path.join(h.rd,'local-restore.receipt');
       fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(mode==='replayed-attempt'?'attempt=1':'dumpSha=',mode==='replayed-attempt'?'attempt=2':'dumpSha=bad'));
+      if(mode==='expired'){const m=path.join(h.rd,'backup.manifest');fs.writeFileSync(m,fs.readFileSync(m,'utf8').replace(/^expires=.+$/m,'expires=1000000000'));authorizeRestore(h);}
+      if(mode==='wrong-image'||mode==='wrong-db'){authorizeRestore(h);fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(mode==='wrong-image'?'image=sha256:':'dbIdentity=livingcost',mode==='wrong-image'?'image=sha256:bad':'dbIdentity=wrong'));}
     }
     expect(helper(h,'migrate').status).toBe(25);
     expect(readCalls(h.fh)).not.toContain('migrate deploy');
@@ -552,7 +557,7 @@ describe("host helper — migrate / promote / verify / rollback", () => {
     const rv = helper(h, "verify");
     expect(rv.status, rv.stdout + rv.stderr).toBe(0);
     expect(rv.stdout).toContain("tables=25");
-    expect(rv.stdout).toContain("applied=12");
+    expect(rv.stdout).toContain("applied=13");
     // P2 fix: the ONLY destructive SQL verb ever executed is the rehearsal temp db
     // which is now deferred to Mac Mini. Production PG has NO CREATE/DROP DATABASE.
     const calls = readCalls(h.fh);

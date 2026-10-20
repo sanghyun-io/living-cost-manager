@@ -59,14 +59,16 @@ export function stopPG(dir, run) {
   rmSync(dir,{recursive:true,force:true});
 }
 // Each row is hashed IN PostgreSQL; no customer rows are returned or logged.
-function fingerprint(s,run) {
+export function fingerprint(s,run,ignoreTheme=true) {
   const q=sql=>run(join(s.pgBinDir,'psql'),[...pgArgs(s),'-d',s.db,'-XAt','-v','ON_ERROR_STOP=1','-c',sql]);
-  const names=JSON.parse(q(`SELECT coalesce(json_agg(tablename ORDER BY tablename),'[]') FROM pg_tables WHERE schemaname='lcm' AND tablename NOT IN ('_prisma_migrations','WorkspacePlanningState')`));
-  const rows=names.map(n=>[n,q(`SELECT md5(coalesce(string_agg(h,',' ORDER BY h),'')) FROM (SELECT md5(row_to_json(t)::text) h FROM lcm."${n.replaceAll('"','""')}" t) x`)]);
-  const structure=q(`SELECT md5(string_agg(row_to_json(c)::text,',' ORDER BY table_name,ordinal_position)) FROM information_schema.columns c WHERE table_schema='lcm' AND table_name<>'WorkspacePlanningState'`);
-  const constraints=q(`SELECT md5(string_agg(pg_get_constraintdef(c.oid),',' ORDER BY c.conname,c.conrelid::regclass::text)) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='lcm' AND c.conrelid<>coalesce(to_regclass('lcm."WorkspacePlanningState"'),0)`);
+  const names=JSON.parse(q(`SELECT coalesce(json_agg(tablename ORDER BY tablename),'[]') FROM pg_tables WHERE schemaname='lcm' AND tablename<>'_prisma_migrations'`));
+  // Canonical JSONB of ALL existing columns, excluding exactly the one new
+  // approved field. User rows and planning/financial tables remain covered.
+  const rows=names.map(n=>[n,q(`SELECT md5(coalesce(string_agg(h,',' ORDER BY h),'')) FROM (SELECT md5((${n==='User'&&ignoreTheme?"to_jsonb(t)-'uiTheme'":"to_jsonb(t)"})::text) h FROM lcm."${n.replaceAll('"','""')}" t) x`)]);
+  const structure=q(`SELECT md5(string_agg(row_to_json(c)::text,',' ORDER BY table_name,ordinal_position)) FROM information_schema.columns c WHERE table_schema='lcm'${ignoreTheme?" AND NOT (table_name='User' AND column_name='uiTheme')":""}`);
+  const constraints=q(`SELECT md5(string_agg(pg_get_constraintdef(c.oid),',' ORDER BY c.conname,c.conrelid::regclass::text)) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace JOIN pg_class r ON r.oid=c.conrelid WHERE n.nspname='lcm'${ignoreTheme?" AND NOT (r.relname='User' AND c.conname='User_uiTheme_check')":""}`);
   const history=q(`SELECT coalesce(json_agg(t ORDER BY migration_name,id),'[]') FROM lcm._prisma_migrations t WHERE migration_name<>'${MIGRATION.name}'`);
-  return {proof:hash(JSON.stringify({rows,structure,constraints,history})),tables:+q(`SELECT count(*) FROM pg_tables WHERE schemaname='lcm'`),history:+q('SELECT count(*) FROM lcm._prisma_migrations'),applied:+q('SELECT count(*) FROM lcm._prisma_migrations WHERE finished_at IS NOT NULL'),planning:q(`SELECT to_regclass('lcm."WorkspacePlanningState"') IS NOT NULL`)==='t'};
+  return {proof:hash(JSON.stringify({rows,structure,constraints,history})),tables:+q(`SELECT count(*) FROM pg_tables WHERE schemaname='lcm'`),history:+q('SELECT count(*) FROM lcm._prisma_migrations'),applied:+q('SELECT count(*) FROM lcm._prisma_migrations WHERE finished_at IS NOT NULL'),theme:q(`SELECT count(*)=1 FROM information_schema.columns WHERE table_schema='lcm' AND table_name='User' AND column_name='uiTheme'`)==='t'};
 }
 export function rehearse({backupDir,stateDir,log,sha,runId,attempt,root=process.cwd()}, deps={}) {
   if(existsSync(stateDir)) throw Error('local-state-already-exists');
@@ -75,6 +77,7 @@ export function rehearse({backupDir,stateDir,log,sha,runId,attempt,root=process.
   try {
     const tools=localTools(root);
     const m=parseManifest(readFileSync(join(backupDir,'backup.manifest'),'utf8'));
+    if(m.source!==sha||m.run!==runId||m.attempt!==attempt||!/^sha256:[a-f0-9]{64}$/.test(m.image??'')||!/^livingcost\|lcm\|[0-9.]+\|5432$/.test(m.dbIdentity??'')||!/^\d{10}$/.test(m.expires??'')||+m.expires<=Date.now()/1000)throw Error('manifest-target-binding');
     const dump=readFileSync(join(backupDir,m.dump));
     if(dump.length!==+m.bytes || hash(dump)!==m.sha256) throw Error('dump-integrity');
     const free=run('df',['-Pk',backupDir]).split('\n')[1]?.trim().split(/\s+/)[3];
@@ -85,19 +88,26 @@ export function rehearse({backupDir,stateDir,log,sha,runId,attempt,root=process.
     const s=JSON.parse(readFileSync(join(stateDir,'state.json'),'utf8'));
     if(s.db!=='lcm_restore_test_db' || s.socketDir!==join(stateDir,'s') || s.osUsername!==userInfo().username || !Number.isInteger(s.port)) throw Error('state');
     run(join(s.pgBinDir,'pg_restore'),[...pgArgs(s),'-d',s.db,'--exit-on-error','--no-owner','--no-privileges',join(backupDir,m.dump)]);
-    const before=fingerprint(s,run);
+    let before=fingerprint(s,run);
+    // A partial earlier run may already contain stored choices. In that case
+    // the field is pre-existing too and MUST participate in the full proof.
+    if(before.theme)before=fingerprint(s,run,false);
     if(before.tables!==+m.tables || before.history!==+m.mig_rows || before.applied!==+m.applied) throw Error('restore-count');
     const sql=readFileSync(join(root,MIGRATION.dir,'migration.sql'));
     if(hash(sql)!==MIGRATION.sqlSha256) throw Error('sql-pin');
     const applied=JSON.parse(run(join(s.pgBinDir,'psql'),[...pgArgs(s),'-d',s.db,'-XAt','-v','ON_ERROR_STOP=1','-c',`SELECT coalesce(json_agg(migration_name),'[]') FROM lcm._prisma_migrations WHERE finished_at IS NOT NULL`]));
     const pending=readdirSync(join(root,'prisma/migrations'),{withFileTypes:true}).filter(e=>e.isDirectory()&&!applied.includes(e.name)).map(e=>e.name);
-    if(before.planning?pending.length!==0:pending.length!==1||pending[0]!==MIGRATION.name) throw Error('pending-inventory');
+    if(before.theme?pending.length!==0:pending.length!==1||pending[0]!==MIGRATION.name) throw Error('pending-inventory');
     const url=`postgresql://${encodeURIComponent(s.osUsername)}@localhost:${s.port}/${s.db}?host=${encodeURIComponent(s.socketDir)}&schema=lcm`;
     // Only local installed executable; never npx or a network installer.
     run(tools.cli,['migrate','deploy','--schema=./prisma/schema.prisma'],{cwd:root,env:{...process.env,DATABASE_URL:url,PRISMA_SCHEMA_ENGINE_BINARY:tools.engine,PRISMA_ENGINES_MIRROR:'http://127.0.0.1:9'}});
-    const after=fingerprint(s,run),delta=before.planning?0:1;
-    if(!after.planning || after.tables!==before.tables+delta || after.history!==before.history+delta || after.applied!==before.applied+delta || after.proof!==before.proof) throw Error('migration-invariants');
-    proof={verified:'true',source:sha,run:runId,attempt,dumpSha:m.sha256,sqlSha:MIGRATION.sqlSha256,helperSha:hash(readFileSync(new URL('./deploy-host.sh',import.meta.url))),proof:after.proof};
+    const after=fingerprint(s,run,!before.theme),delta=before.theme?0:1;
+    if(!after.theme || after.tables!==before.tables || after.history!==before.history+delta || after.applied!==before.applied+delta || after.proof!==before.proof) throw Error('migration-invariants');
+    const q=sql=>run(join(s.pgBinDir,'psql'),[...pgArgs(s),'-d',s.db,'-XAt','-v','ON_ERROR_STOP=1','-c',sql]);
+    if(q(`SELECT count(*)=1 FROM information_schema.columns WHERE table_schema='lcm' AND table_name='User' AND column_name='uiTheme' AND data_type='text' AND is_nullable='NO' AND column_default='''jade''::text'`)!=='t')throw Error('theme-column');
+    if(q(`SELECT count(*)=1 FROM pg_constraint WHERE conrelid='lcm."User"'::regclass AND conname='User_uiTheme_check' AND contype='c' AND convalidated AND pg_get_constraintdef(oid)='CHECK (("uiTheme" = ANY (ARRAY[''jade''::text, ''aqua''::text, ''violet''::text, ''raspberry''::text, ''tangerine''::text])))'`)!=='t')throw Error('theme-check');
+    if(!before.theme && q(`SELECT count(*)=0 FROM lcm."User" WHERE "uiTheme" IS DISTINCT FROM 'jade'`)!=='t')throw Error('theme-default-backfill');
+    proof={verified:'true',source:sha,run:runId,attempt,dumpSha:m.sha256,sqlSha:MIGRATION.sqlSha256,helperSha:hash(readFileSync(new URL('./deploy-host.sh',import.meta.url))),proof:after.proof,image:m.image,dbIdentity:m.dbIdentity,expires:m.expires};
   } catch { failure=Error('local-restore-failed'); }
   finally {
     try { if(started)(deps.stop??stopPG)(stateDir,run); } catch { failure=Error('local-cleanup-failed'); }

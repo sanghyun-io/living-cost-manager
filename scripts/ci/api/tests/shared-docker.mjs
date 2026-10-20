@@ -15,8 +15,8 @@ else if(['image','container','network'].includes(cmd)&&a[1]==='ls') {
 else if(cmd==='network'&&a[1]==='create'){state.network[last]={Id:id(last),Labels:labels()};done(state.network[last].Id);}
 else if(cmd==='run') {
  const name=after('--name');if(a.includes('--rm')) {
-  if(a.includes('sha256sum'))done('229a1fa43233f74fef9110bf4d56307efbee93da1f8baeac3a3347588d1feb35  migration.sql');
-  else if(a.join(' ').includes("grep -c '^20'"))done('12');else done();
+  if(a.includes('sha256sum'))done('1ba3540c796a3e198803a6b9e3c49c60ae300adb5e329505cd25f5be9e06386b  migration.sql');
+  else if(a.join(' ').includes("grep -c '^20'"))done('13');else done();
  }else{state.container[name]={Id:id(name),Labels:labels()};done(state.container[name].Id);}
 }else if(cmd==='exec') {
  if(!Object.values(state.container).some(x=>x.Id===a[1]))process.exit(1);

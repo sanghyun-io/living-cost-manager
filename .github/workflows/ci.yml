@@ -436,7 +436,7 @@ jobs:
   # identity (CAS) and halts with a stable code on drift — no blind retry
   # (a later run RE-CLASSIFIES live state instead). The approved additive
   # migration is applied only when the candidate image's pending inventory is
-  # exactly `20261018110000_workspace_planning_state`. Rollback (manual-only,
+  # exactly `20261020120000_add_user_ui_theme`. Rollback (manual-only,
   # see runbook) never drops the table or restores over new writes.
   api-deploy:
     name: Backup-rehearse-migrate-promote API (production gate)
@@ -499,7 +499,7 @@ jobs:
             const fs = require("fs");
             const crypto = require("crypto");
             const meta = JSON.parse(fs.readFileSync("dist-api/metadata.json", "utf8"));
-            const sql = fs.readFileSync("prisma/migrations/20261018110000_workspace_planning_state/migration.sql");
+            const sql = fs.readFileSync("prisma/migrations/20261020120000_add_user_ui_theme/migration.sql");
             const got = crypto.createHash("sha256").update(sql).digest("hex");
             if (got !== meta.migrationSqlSha256) {
               console.error("metadata/sql drift: source hash " + got + " != metadata " + meta.migrationSqlSha256);

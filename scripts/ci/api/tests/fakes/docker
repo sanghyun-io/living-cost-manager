@@ -85,7 +85,7 @@ case "$CMD" in
       exit 0
     fi
     if [[ "$J" == *"node -e"* ]]; then
-      if [ "$(read_state container_image.txt)" = 'sha256:5d133132b544a0d5b07d471dab7e4a8a1dfb51d491be12ab7c7bb36c14ce667f' ]; then echo a2c7bd9af46d84dc88b2a36656c25949b57076b0
+      if [ "$(read_state container_image.txt)" = 'sha256:5afa33fb3d3c42d54a58e0957f4098c922318060967d86b2f26e76454a7d48e0' ]; then echo 02c70d1b9f463c000cfe8dc7132cab7b23d459ff
       else read_state health_local.txt; fi
       exit 0
     fi
@@ -104,6 +104,8 @@ case "$CMD" in
         *"finished_at IS NOT NULL ORDER"*) cat "$S/applied.txt" ;;
         *"finished_at IS NULL AND rolled_back_at IS NULL"*)
           [ -f "$S/aborted.txt" ] && cat "$S/aborted.txt" ;;
+        *"md5(string_agg(migration_name"*) echo d1667e6927e50ab9af3f5fae4ee96de7 ;;
+        *"SELECT checksum FROM"*) read_state image_sql_sha.txt ;;
         *"CREATE DATABASE"*)
           printf '%s\n' "$sql" >>"$S/createdb.log"
           has fail_createdb && exit 1 ;;
@@ -118,6 +120,7 @@ case "$CMD" in
         *to_regclass*) read_state planning_present.txt ;;
         *"md5(string_agg"*columns*) read_state cols_hash.txt ;;
         *"md5(string_agg"*conname*) read_state cons_hash.txt ;;
+        *"column_name='uiTheme'"*) read_state theme_present.txt ;;
         *"count(*)=0 FROM"*) read_state planning_zero.txt ;;
         *) echo "fake-docker: unmatched psql: $sql" >&2; exit 5 ;;
       esac
@@ -146,11 +149,11 @@ case "$CMD" in
         echo "Error: Prisma migrate deploy failed (injected lock timeout)" >&2
         exit 1
       fi
-      grep -qx 20261018110000_workspace_planning_state "$S/applied.txt" || \
-        { { cat "$S/applied.txt"; echo 20261018110000_workspace_planning_state; } | sort >"$S/applied.txt.n"; mv "$S/applied.txt.n" "$S/applied.txt"; }
-      t=$(read_state tables.txt); echo $((t+1)) >"$S/tables.txt"
+      grep -qx 20261020120000_add_user_ui_theme "$S/applied.txt" || \
+        { { cat "$S/applied.txt"; echo 20261020120000_add_user_ui_theme; } | sort >"$S/applied.txt.n"; mv "$S/applied.txt.n" "$S/applied.txt"; }
       m=$(read_state migrows.txt); echo $((m+1)) >"$S/migrows.txt"
       echo t >"$S/planning_present.txt"
+      echo t >"$S/theme_present.txt"
       echo t >"$S/planning_zero.txt"
       echo "Applying migration 20261018110000_workspace_planning_state"
       exit 0

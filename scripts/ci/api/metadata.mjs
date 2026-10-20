@@ -1,4 +1,5 @@
 import {MIGRATION, REPO, WORKFLOW_PATH,PROD} from './constants.mjs';
+import {BASE} from './runtime-overlay.mjs';
 export function validateMetadata(m, sha, env = process.env) {
   const exact = {schema:'lcm-api-archive-v1', repo:REPO, workflowPath:WORKFLOW_PATH,
     platform:'linux/arm64', sha, releaseShaLabel:sha, migrationName:MIGRATION.name,
@@ -11,7 +12,7 @@ export function validateMetadata(m, sha, env = process.env) {
   for (const [k,v] of Object.entries(exact)) if (!v || m[k] !== v) throw new Error(`metadata binding: ${k}`);
   if(!['runtime-overlay','full-linux-build'].includes(m.buildKind)||env.LCM_EXPECTED_BUILD_KIND&&m.buildKind!==env.LCM_EXPECTED_BUILD_KIND)throw Error('metadata build kind');
   if(m.buildKind==='runtime-overlay'){
-    if(m.baselineImageId!==PROD.currentImageId||m.baselineSource!==PROD.currentReleaseSha)throw Error('metadata baseline');
+    if(m.baselineImageId!==BASE.imageId||m.baselineSource!==BASE.source)throw Error('metadata baseline');
     for(const k of ['dependencyProofSha256','bundleSha256','baselineSafetySha256','overlayRecipeSha256'])if(!/^[a-f0-9]{64}$/.test(m[k]??''))throw Error('metadata overlay proof');
   }
   if (!/^sha256:[a-f0-9]{64}$/.test(m.imageId ?? '') || !/^[a-f0-9]{64}$/.test(m.archiveSha256 ?? '') ||
