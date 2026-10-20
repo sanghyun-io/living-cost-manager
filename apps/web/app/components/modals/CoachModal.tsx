@@ -89,7 +89,7 @@ export function CoachModal({
           <>
             {/* 동의 대기 화면 — 모달 본문에서 다운로드 가능함을 마지막으로 한 번 더 안내. */}
             {preferencesReady && awaitingConsent && preparationState === "idle" ? (
-              <Alert variant="light" color="blue" title={`${modelName} 시작`}>
+              <Alert variant="light" color="brand" title={`${modelName} 시작`}>
                 <Stack gap="sm">
                   <Text size="sm">
                     지출 요약과 절감 제안에 사용할 로컬 AI를 시작할까요?

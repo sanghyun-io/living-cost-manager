@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import { ColorSchemeScript, MantineProvider, mantineHtmlProps } from "@mantine/core";
+import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "./globals.css";
-import { theme } from "./theme";
+import "./workspace.css";
+import { ThemeProvider } from "./components/ThemeProvider";
 import { SITE_URL } from "./guide/site";
 
 export const metadata: Metadata = {
@@ -31,9 +32,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ColorSchemeScript defaultColorScheme="light" />
       </head>
       <body>
-        <MantineProvider theme={theme} defaultColorScheme="light">
+        <ThemeProvider>
           {children}
-        </MantineProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

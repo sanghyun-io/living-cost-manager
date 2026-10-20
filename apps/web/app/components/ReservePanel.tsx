@@ -161,7 +161,7 @@ export function ReservePanel({ planning, fixedCosts, asOf, canEdit, actions }: R
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
   const [addTarget, setAddTarget] = useState<string | null>(null);
 
-  if (views.length === 0 && candidates.length === 0) return null;
+  if (views.length === 0 && candidates.length === 0) return <section className="reserve-panel" aria-label="큰지출준비"><Text fw={600} size="sm">큰 지출 준비</Text><Text size="sm" c="dimmed" mt="sm">아직 준비할 연간 납부 항목이 없습니다. 항목에서 여러 달마다 납부하는 고정비를 추가하면 준비금을 기록할 수 있어요.</Text><Text size="xs" c="dimmed" mt="sm">준비금은 직접 기록한 금액이며, 실제 계좌 잔액이 아닙니다.</Text></section>;
 
   return (
     <section className="reserve-panel" aria-label="큰지출준비">

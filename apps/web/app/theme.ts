@@ -44,11 +44,11 @@ const amber: MantineColorsTuple = [
 ];
 
 export const theme = createTheme({
-  primaryColor: "blue",
-  autoContrast: true,
+  primaryColor: "brand",
+  autoContrast: false,
   // Both solid-action shades keep white button labels above AA contrast.
-  primaryShade: { light: 7, dark: 6 },
-  colors: { teal, rose, amber, blue: ["#eff5ff", "#dce8ff", "#b8d0ff", "#8db5ff", "#6798f5", "#487fe9", "#326ddd", "#245ac4", "#19479f", "#173a7a"] },
+  primaryShade: { light: 7, dark: 7 },
+  colors: { teal, rose, amber, brand: ["#E7F5EF", "#E7F5EF", "#66DDB0", "#66DDB0", "#66DDB0", "#00875F", "#00875F", "#00875F", "#00704F", "#00593E"] },
   fontFamily:
     "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif",
   headings: {

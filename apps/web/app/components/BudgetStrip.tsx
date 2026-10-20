@@ -16,7 +16,7 @@ export function BudgetStrip({ plan, canEdit, onIncomeChange }: BudgetStripProps)
   return (
     <section className="budget-strip" aria-label="이번 달 계획">
       <div className="budget-strip-primary">
-        <h1>이번 달 계획</h1>
+        <h2>이번 달 계획</h2>
         <Text size="sm" c="dimmed">월 환산 고정비 · 비교용</Text>
         <Text className="budget-strip-amount tnum">{formatWon(plan.monthlyExpense)}</Text>
       </div>

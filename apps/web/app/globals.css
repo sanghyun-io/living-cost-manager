@@ -10,14 +10,14 @@
   --text: var(--mantine-color-text);
   --muted: var(--mantine-color-dimmed);
   --line: var(--mantine-color-default-border);
-  --accent: var(--mantine-color-blue-7);
-  --accent-strong: var(--mantine-color-blue-8);
+  --accent: var(--mantine-color-brand-7);
+  --accent-strong: var(--mantine-color-brand-8);
   --rose: var(--mantine-color-rose-6);
   --amber-fg: var(--mantine-color-amber-7);
   --amber-bg: rgba(243, 173, 34, 0.14);
   --shadow-card: none;
   --shadow-card-hover: none;
-  --hero-accent: var(--mantine-color-blue-7);
+  --hero-accent: var(--mantine-color-brand-7);
   --shadow: var(--shadow-card);
   --shadow-lg: var(--shadow-card-hover);
   --radius: 8px;
@@ -27,8 +27,8 @@
   --app-bg: #191a1b;
   --amber-fg: var(--mantine-color-amber-4);
   --amber-bg: rgba(243, 173, 34, 0.18);
-  --hero-accent: var(--mantine-color-blue-3);
-  --accent-strong: var(--mantine-color-blue-3);
+  --hero-accent: var(--mantine-color-brand-3);
+  --accent-strong: var(--mantine-color-brand-3);
   --rose: var(--mantine-color-rose-4);
 }
 
@@ -811,7 +811,7 @@ body {
 :root .ledger-controls { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 0 0 12px; }
 .ledger-selector { display: flex; gap: 8px; align-items: center; min-width: 0; }
 .ledger-selector select { font: inherit; color: inherit; background: var(--mantine-color-body); border: 1px solid var(--mantine-color-default-border); border-radius: 6px; min-height: 44px; max-width: 280px; }
-.ledger-selector select:focus-visible { outline: 2px solid var(--mantine-color-blue-6); outline-offset: 2px; }
+.ledger-selector select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ledger-aggregate-selection { border: 1px solid var(--mantine-color-default-border); border-radius: 8px; margin-top: 12px; padding: 12px; }
 .ledger-edit-region { border: 0; padding: 0; margin: 0; min-width: 0; }
 .ledger-summary { padding: 16px 0; }
@@ -828,7 +828,7 @@ body {
 .quiet-home { padding-top: 24px; }
 .budget-strip { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 32px; align-items: center; padding-bottom: 24px; }
 .budget-strip > * { min-width: 0; }
-.budget-strip h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.budget-strip h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
 .budget-strip .budget-strip-amount { font-size: 32px; font-weight: 650; line-height: 1.35; letter-spacing: -0.04em; overflow-wrap: anywhere; }
 .budget-strip .budget-strip-value { font-size: 22px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 /* First screen = plan + next payments only. Management/analysis are one click away. */
@@ -863,7 +863,7 @@ body {
 .home-onboarding .mantine-Button-root { min-height: 44px; }
 .management-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding-block: 4px; }
 .management-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 4px; font: inherit; font-size: 15px; font-weight: 600; color: inherit; background: none; border: 0; cursor: pointer; }
-.management-toggle:focus-visible { outline: 3px solid var(--mantine-color-blue-6); outline-offset: 2px; }
+.management-toggle:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .management-toggle-chevron { font-size: 12px; }
 .management-panel { padding-top: 8px; }
 .management-panel[hidden] { display: none; }
@@ -950,7 +950,7 @@ body {
 }
 /* Optional product-tour portal: only the compact card receives pointer events. */
 .product-tour-layer { position: fixed; inset: 0; z-index: 190; pointer-events: none; }
-.product-tour-highlight { position: fixed; outline: 3px solid var(--mantine-color-blue-6); outline-offset: 3px; border-radius: 4px; pointer-events: none; }
+.product-tour-highlight { position: fixed; outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 4px; pointer-events: none; }
 .product-tour-card { position: fixed; box-sizing: border-box; padding: 12px; border: 1px solid var(--mantine-color-default-border); border-radius: 8px; background: var(--mantine-color-body); color: var(--mantine-color-text); box-shadow: 0 3px 12px #0002; pointer-events: auto; overflow: auto; font-size: 14px; line-height: 1.55; }
 .product-tour-heading, .product-tour-actions, .product-tour-invitation { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .product-tour-heading { justify-content: space-between; }
@@ -960,6 +960,6 @@ body {
 .product-tour-heading, .product-tour-actions { flex-shrink: 0; }
 .product-tour-actions { justify-content: flex-end; }
 .product-tour-card button { min-width: 44px; min-height: 44px; padding: 8px; border: 1px solid var(--mantine-color-default-border); border-radius: 4px; background: var(--mantine-color-default); color: inherit; font: inherit; cursor: pointer; }
-.product-tour-card button:focus-visible { outline: 3px solid var(--mantine-color-blue-6); outline-offset: 2px; }
+.product-tour-card button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .product-tour-card button:disabled { cursor: default; opacity: .5; }
 @media (forced-colors: active) { .product-tour-highlight { outline-color: Highlight; } .product-tour-card, .product-tour-card button { border-color: CanvasText; } }

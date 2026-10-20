@@ -50,6 +50,9 @@ import { useProductTour } from './lib/useProductTour';
 import { ProductTour } from './components/ProductTour';
 import { useCoachingPreferences } from "./lib/useCoachingPreferences";
 import { CoachingPreferencesPanel } from "./components/CoachingPreferencesPanel";
+import { WorkspaceNavigation, type WorkspaceView } from './components/WorkspaceNavigation';
+import { AppearanceSettings } from './components/AppearanceSettings';
+import { useUiTheme } from './lib/useUiTheme';
 
 export default function Home() {
   // Hook creation order respects render-time data flow:
@@ -57,6 +60,7 @@ export default function Home() {
   // The two async back-edges (auth → users/sync) go through latest-value refs
   // below — their handlers only run from events/post-boot effects.
   const ui = useUIState();
+  const [view, setView] = useState<WorkspaceView>('home');
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templateError, setTemplateError] = useState("");
   const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(false);
@@ -79,6 +83,13 @@ export default function Home() {
     getBudget: () => (budgetRef.current as BudgetDataApi).getCurrentBudgetSnapshot()
   });
   const budget = useBudgetData({ users, ui, session: auth.serverSession, marketingPersonal: !auth.serverSession && !users.currentUser?.serverUserId, planning: planningAdapterRef.current });
+  const appearance = useUiTheme(users, auth.serverSession, auth.serverApi?.baseUrl);
+  function navigate(next: WorkspaceView) {
+    setView(next);
+    if (next === 'items') budget.requestManagementOpen();
+    requestAnimationFrame(() => document.getElementById('view-heading')?.focus({ preventScroll: true }));
+  }
+  function revealItem(id: string) { setView('items'); budget.revealItem(id); }
   const coachingPrefs = useCoachingPreferences(budget.fixedCosts, users.currentUser?.id ?? null, auth.serverSession?.workspace?.id ?? null, auth.serverApi, auth.serverSession, users.currentUser?.serverUserId);
   const coach = useCoach({ budget, serverApi: auth.serverApi, protectedFixedCostIds: coachingPrefs.activeIds, coachingPreferencesReady: coachingPrefs.ready });
   const sync = useWorkspaceSync({ ui, auth, budget, coach, localUserId: budget.localScopeKey,
@@ -147,7 +158,7 @@ export default function Home() {
   // 둘러보기의 '항목 추가'·'납부일 확인' 단계는 접힌 항목 관리를 필요로 한다:
   // 해당 단계에서만 패널을 펼치고 다른 단계·포커스는 건드리지 않는다.
   useEffect(() => {
-    if (tourNeedsManagementOpen(tour.step)) budget.requestManagementOpen();
+    if (tourNeedsManagementOpen(tour.step)) { setView('items'); budget.requestManagementOpen(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tour.step]);
 
@@ -233,8 +244,12 @@ export default function Home() {
 
   return (
     <>
-      <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'} onClick={ledgers.aggregateMode ? undefined : budget.requestManagementOpen}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
+      <WorkspaceNavigation view={view} onChange={navigate} />
+      <div className="workspace-column">
+      <a className="skip-link" href={ledgers.aggregateMode ? '#aggregate-result' : '#fixed-costs'} onClick={ledgers.aggregateMode ? undefined : () => navigate('items')}>{ledgers.aggregateMode ? '합산 결과로 건너뛰기' : '고정비 편집으로 건너뛰기'}</a>
       <AppHeader
+        onOpenSettings={() => navigate('settings')}
+        contextLabel={new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long' }).format(referenceInstant)}
         ledgerControls={auth.serverSession ? <LedgerControls key={auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id} session={auth.serverSession} workspaces={sync.serverWorkspaces} onSwitch={sync.handleSelectServerWorkspace} ledgers={ledgers} canSwitch={!!budget.localScopeKey && !budget.saveError && !users.isSampleMode}
           onFocusIntent={focusIntent} focusRef={(destination, element) => { focusTargets.current[destination] = element; }} /> : null}
         saveError={budget.saveError}
@@ -257,6 +272,7 @@ export default function Home() {
         coachHeaderReadyLabel={coach.headerReadyLabel}
       />
       <main className="page-shell quiet-home">
+      <div className="view-heading"><div><p>{auth.serverSession?.workspace?.name ?? budget.profileName}</p><h1 id="view-heading" tabIndex={-1}>{{ home: '이번 주를 가볍게', items: '고정비 항목', plan: '생활비 계획', review: '이번 달 검토', settings: '내 설정' }[view]}</h1></div><span>입력한 기록 기준 · 실제 잔액 아님</span></div>
       <ProductTour tour={tour} signedIn={!!auth.serverSession && !users.isSampleMode} paused={tourPaused} readOnly={viewer} />
       {templateError ? <Text role="alert" aria-live="assertive" c="rose" mb="md">{templateError}</Text> : null}
       {users.templateReturnId ? <div className="workspace-note"><Text size="sm">템플릿으로 만든 새 공간입니다. 기존 데이터는 보존되어 있습니다.</Text><Button variant="default" onClick={() => setTemplateError(users.returnFromTemplate() ?? "")}>템플릿 적용 전 공간으로 돌아가기</Button></div> : null}
@@ -271,6 +287,7 @@ export default function Home() {
           </Button>
         </div>
       ) : null}
+      <div className="overview-layout" hidden={view !== 'home' && view !== 'plan'}>
       <section className="home-overview" aria-label="이번 달 계획과 납부 예정">
         <BudgetStrip
           plan={homePlan}
@@ -281,18 +298,19 @@ export default function Home() {
           fixedCosts={budget.fixedCosts}
           asOf={referenceInstant}
           plan={homePlan}
-          onRevealItem={budget.revealItem}
+          onRevealItem={revealItem}
           paydayDay={planning.loaded ? planning.data.paydayDay : null}
         />
         {budget.fixedCosts.length === 0 && canEdit ? (
           <div className="home-onboarding">
             <Text size="sm">고정비로 기록할 항목만 추가하면 됩니다. 변동지출·실제 잔액은 추적하지 않습니다.</Text>
-            <Button variant="default" onClick={budget.handleAddItem}>기록할 항목 추가</Button>
+            <Button variant="default" onClick={() => { navigate('items'); budget.handleAddItem(); }}>기록할 항목 추가</Button>
           </div>
         ) : null}
       </section>
       {planning.loaded ? (
         <WeeklyBudgetPanel
+          compact={view === 'home'}
           data={planning.data}
           asOf={referenceInstant}
           canEdit={planning.canEdit}
@@ -315,6 +333,8 @@ export default function Home() {
           actions={{ editReserve: planning.editReserve, deleteReserve: planning.deleteReserve, linkReserve: planning.linkReserve }}
         />
       ) : null}
+      </div>
+      <div hidden={view !== 'review'}>
       <MonthReviewPanel
         planning={planning.loaded ? planning.data : createDefaultWorkspacePlanningData()}
         fixedCosts={budget.fixedCosts}
@@ -334,10 +354,11 @@ export default function Home() {
           }
         }}
       />
+      </div>
       {users.isSampleMode ? <Text role="status" size="sm" mb="sm">샘플 체험 중 · 내 데이터와 분리된 예시입니다.</Text> : null}
       {budget.localRecoveryRequired ? <Button color="rose" variant="default" mb="sm" onClick={budget.handleExportRecovery}>저장 원본 내보내기</Button> : null}
 
-      <section className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
+      <section hidden={view !== 'items'} className="workspace" id="fixed-costs" tabIndex={-1} aria-label="고정비 편집">
         <div className="management-bar">
           <button
             type="button"
@@ -398,14 +419,13 @@ export default function Home() {
             </div>
           </fieldset>
         </div>
-        <CoachingPreferencesPanel items={budget.fixedCosts} {...coachingPrefs} canCloudAccess={coachingPrefs.canCloudAccess} />
         {/* 갱신 검토·분석은 읽기 전용(가계부 쓰기 없음): 전체를 감추는 fieldset 으로
             summary/버튼을 죽이지 않고 열 수 있게 한다. */}
         {reviewItems.length > 0 ? <details className="quiet-disclosure renewal-queue" aria-label="갱신 검토 작업목록">
           <summary>갱신 검토 · {reviewItems.length}건</summary>
           <Text size="sm" c="dimmed">오늘부터 30일간 미검토 · 해지 예정 · 변경 검토. 예정 절감은 실제 절감이 아닙니다.</Text>
           <div className="renewal-actions">
-            {reviewItems.map(item => <Button key={item.id} variant="subtle" onClick={() => budget.revealItem(item.id)}>
+            {reviewItems.map(item => <Button key={item.id} variant="subtle" onClick={() => revealItem(item.id)}>
               {item.name} · {item.renewalStatus === 'cancel-planned' ? '해지 예정' : item.renewalStatus === 'change-review' ? '변경 검토' : '임박 미검토'} 편집
             </Button>)}
           </div>
@@ -414,7 +434,7 @@ export default function Home() {
           <summary>지출 분석</summary>
           <div className="dashboard-overview">
             <MetricGrid summary={budget.summary} fixedCostCount={budget.fixedCosts.length} />
-            <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={homePlan.monthlyIncome} monthlyExpense={homePlan.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} onRequestEdit={budget.requestManagementOpen} />
+             <InsightsPanel fixedCosts={budget.fixedCosts} monthlyIncome={homePlan.monthlyIncome} monthlyExpense={homePlan.monthlyExpense} protectedFixedCostIds={coachingPrefs.activeIds} coachingPreferencesReady={coachingPrefs.ready} onKeepItem={coachingPrefs.ready ? coachingPrefs.toggle : undefined} onRequestEdit={() => navigate('items')} />
           </div>
           {budget.summary.monthlyExpense > 0 && (
               <details className="quiet-charts">
@@ -439,6 +459,10 @@ export default function Home() {
             )}
         </details>
       </section>
+      <div hidden={view !== 'settings'} className="settings-view">
+      <AppearanceSettings {...appearance} />
+      <section className="quiet-card settings-actions"><h2>계정과 데이터</h2><Text size="sm">로그인·동기화·공유·백업·개인정보와 계정 삭제를 관리합니다.</Text><Button variant="default" onClick={() => ui.setIsDataModalOpen(true)}>데이터 및 계정 관리</Button><Button variant="subtle" onClick={() => { setTemplateError(''); setTemplatesOpen(true); }}>템플릿</Button><Button variant="subtle" onClick={coach.openCoachModal}>지출 코치</Button></section>
+      <CoachingPreferencesPanel items={budget.fixedCosts} {...coachingPrefs} canCloudAccess={coachingPrefs.canCloudAccess} />
       <details className="quiet-disclosure workspace-tools" open={workspaceToolsOpen} onToggle={event => setWorkspaceToolsOpen(event.currentTarget.open)}>
         <summary>샘플 및 복구 도구</summary>
         <Text size="sm" c="dimmed">샘플은 내 데이터와 분리되며 서버로 업로드하지 않습니다.</Text>
@@ -451,6 +475,7 @@ export default function Home() {
         <Button variant="subtle" color={budget.localRecoveryRequired ? 'rose' : 'gray'} onClick={budget.handleExportRecovery}>{budget.localRecoveryRequired ? '저장 원본 내보내기' : '최근 교체 전 복구본 내보내기'}</Button>
         {auth.serverSession && !users.isSampleMode ? <Button variant="subtle" color="gray" onClick={budget.handleExportLegacySource}>이전 단일 가계부 원본(JSON) 내보내기</Button> : null}
       </details>
+      </div>
       </>}
       <TemplateModal key={auth.serverSession ? auth.serverSession.user.id + ':' + auth.serverSession.workspace?.id : users.currentUser?.id} opened={templatesOpen} onOpen={() => setTemplatesOpen(true)} onClose={() => setTemplatesOpen(false)} session={auth.serverSession}
         onLogin={() => { setTemplatesOpen(false); ui.setIsAuthModalOpen(true); }} canApply={users.isLoaded && !budget.saveError && !budget.localRecoveryRequired}
@@ -692,6 +717,7 @@ export default function Home() {
           onClose={() => ui.setIsCardModalOpen(false)}
         />
     </main>
+    </div>
     </>
   );
 }

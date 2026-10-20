@@ -12,6 +12,7 @@ import type { UIStateApi } from "./useUIState";
 import type { ServerAuthApi } from "./useServerAuth";
 import { persistTemplateProfile } from "./templates";
 import type { TemplateBlueprint } from "@living-cost-manager/shared";
+import type { UiTheme } from "@living-cost-manager/shared";
 
 /** Local (browser-only) user accounts and the active-user pointer. */
 interface UseLocalUsersOptions {
@@ -113,7 +114,7 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
     const identity = serverUser ?? auth.serverSession?.user;
     const nextUser = method === "server" && identity
       ? liveUsers.find((user) => user.serverUserId === identity.id) ?? createServerLocalUser(identity)
-      : createUser(userName);
+      : liveUsers.find(user => user.id === createUser(userName).id && !user.serverUserId) ?? createUser(userName);
     if (window.localStorage.getItem(getUserErasureKey(nextUser.id))) throw new Error("삭제된 계정입니다. 다시 로그인하세요.");
     if (currentUser?.id !== nextUser.id && isLoaded && saveBeforeSwitch && !saveBeforeSwitch()) throw new Error('현재 공간 저장에 실패하여 계정을 전환하지 않았습니다.');
     const isNewUser = !liveUsers.some((user) => user.id === nextUser.id);
@@ -302,6 +303,21 @@ export function useLocalUsers({ ui, auth, getBudget, saveBeforeSwitch }: UseLoca
   }
 
   return {
+    updateTheme(profileId: string, uiTheme: UiTheme, uiThemePending: boolean) {
+      if (latest.current.currentUser?.id !== profileId) return false;
+      let durable = false;
+      try {
+        if (window.localStorage.getItem(getUserErasureKey(profileId))) return false;
+        const registry = readLiveUsers();
+        if (registry.some(user => user.id === profileId)) {
+          window.localStorage.setItem(USERS_KEY, JSON.stringify(registry.map(user => user.id === profileId ? { ...user, uiTheme, uiThemePending } : user)));
+          durable = true;
+        }
+      } catch { /* preference stays usable in memory without claiming persistence */ }
+      setCurrentUser(user => user?.id === profileId ? { ...user, uiTheme, uiThemePending } : user);
+      setKnownUsers(users => users.map(user => user.id === profileId ? { ...user, uiTheme, uiThemePending } : user));
+      return durable;
+    },
     currentUser,
     knownUsers,
     isBootLoaded,

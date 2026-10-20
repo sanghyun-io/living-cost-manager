@@ -19,6 +19,7 @@ export interface WeeklyBudgetActions {
 }
 
 interface WeeklyBudgetPanelProps {
+  compact?: boolean;
   data: WorkspacePlanningData;
   /** 기준 시각(page 의 referenceInstant). 이 값으로 "이번 주"와 KST 오늘을 해석한다. */
   asOf: Date;
@@ -42,7 +43,7 @@ function formatRecordedAt(value: string): string {
 /** 주간 예산 + 최소 사용액 확인(보고서 제안 2). 사용 기록이 없으면 0원이 아니라
  * "사용액 기록 없음"을, 예산 미입력 시 "예산미설정"을 표시한다. */
 export function WeeklyBudgetPanel({
-  data, asOf, canEdit, isViewer, hasServer, serverSupport, serverConfirmed, serverDirty, conflict, saveError, actions
+  data, asOf, canEdit, isViewer, hasServer, serverSupport, serverConfirmed, serverDirty, conflict, saveError, actions, compact = false
 }: WeeklyBudgetPanelProps) {
   const [offset, setOffset] = useState(0);
   const [budgetDraft, setBudgetDraft] = useState("");
@@ -170,7 +171,10 @@ export function WeeklyBudgetPanel({
         </div>
       </div>
       {remaining !== null && remaining < 0 ? <Text size="xs" c="rose">기록 기준 예산을 넘었습니다. 실제 전 지출을 다 반영한 수치는 아닙니다.</Text> : null}
+      {budget !== null && budget > 0 && spent !== null ? <progress className="weekly-budget-progress" aria-label="기록된 예산 사용률" max={budget} value={Math.min(spent, budget)} /> : null}
 
+      <details className="weekly-entry" open={compact ? undefined : true}>
+      <summary>{canEdit ? '지출 기록 / 예산 설정' : '급여일 확인'}</summary>
       {canEdit ? (
         <div className="weekly-budget-edit">
           <div className="weekly-budget-row">
@@ -235,7 +239,7 @@ export function WeeklyBudgetPanel({
           <Text size="xs" c="dimmed">표시 범위를 넘는 급여일입니다.</Text>
         ) : null}
       </div>
-
+      </details>
       {feedback ? <Text size="xs" role="status" c={feedback.tone === "error" ? "rose" : "dimmed"}>{feedback.text}</Text> : null}
 
       <details className="weekly-budget-history">

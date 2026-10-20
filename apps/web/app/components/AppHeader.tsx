@@ -6,6 +6,8 @@ import type { HeaderStorageView } from "../lib/syncStatus";
 import type { ReactNode } from 'react';
 
 interface AppHeaderProps {
+  onOpenSettings?: () => void;
+  contextLabel?: string;
   ledgerControls?: ReactNode;
   saveError: string;
   onRetrySave: () => void;
@@ -40,6 +42,7 @@ interface AppHeaderProps {
 }
 
 export function AppHeader({
+  onOpenSettings, contextLabel,
   ledgerControls,
   saveError,
   onRetrySave,
@@ -79,7 +82,7 @@ export function AppHeader({
   return (
     <header className="app-header-shell">
       <Group className="app-header" justify="flex-end" gap="sm" wrap="wrap">
-        <Text fw={700} className="app-brand">생활비 관리자</Text>
+        <Text fw={700} className="app-brand">{contextLabel ?? '생활비 관리자'}</Text>
         {!saveError ? <Text className="save-status" size="xs" c="dimmed" title={storage.tooltip}>
           {storage.label}
           {storageTime}
@@ -121,6 +124,7 @@ export function AppHeader({
           </Button>
         ) : null}
         {/* 진입 라벨은 로그인 여부와 무관하게 '데이터 관리'로 통일한다. */}
+        {onOpenSettings ? <Button variant="subtle" onClick={onOpenSettings}>설정</Button> : null}
         <Button data-product-tour="data" variant="default" onClick={onOpenData}>
           데이터 관리
         </Button>

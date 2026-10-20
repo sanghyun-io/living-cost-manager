@@ -1,8 +1,13 @@
+import type { UiTheme } from '@living-cost-manager/shared';
+
 export type AppUser = {
   id: string;
   name: string;
   serverUserId?: string;
   templateReturnId?: string;
+  uiTheme?: UiTheme;
+  /** Unsent personal preference, never part of a financial backup. */
+  uiThemePending?: boolean;
 };
 
 export type StartupServerUser = {
