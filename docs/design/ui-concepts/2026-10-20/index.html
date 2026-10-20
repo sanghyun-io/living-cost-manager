@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>생활비 관리자 · UI 콘셉트 10선 비교 (2026.10)</title>
+<meta name="description" content="Living Cost Manager 리디자인을 위한 10개 상이한 아트디렉션 프로토타입 비교 갤러리. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#F4F3EF; --ink:#22201B; --mut:#6B675C; --line:#DFDCD2; --acc:#4A5568;
+    --card:#FFFFFF; --ok:#2F6B4F; --warn:#8A5A00;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;overflow-wrap:anywhere}
+  a{color:inherit}
+  button{font:inherit;cursor:pointer;color:inherit}
+  :focus-visible{outline:3px solid var(--ink);outline-offset:2px;border-radius:8px}
+  .wrap{max-width:1240px;margin:0 auto;padding:24px 20px 70px}
+  header{padding:8px 0 22px;border-bottom:2px solid var(--ink);margin-bottom:22px}
+  h1{font-size:clamp(24px,4vw,32px);font-weight:800;letter-spacing:-.035em}
+  .sub{color:var(--mut);font-size:14px;margin-top:6px;max-width:70ch}
+  .note{margin-top:14px;font-size:12.5px;color:var(--mut);border:1px dashed var(--line);border-radius:10px;padding:10px 14px;background:#FBFAF6;max-width:88ch}
+  /* preview */
+  .preview{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:26px}
+  .pv-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .pv-bar .pv-name{font-weight:800;letter-spacing:-.02em}
+  .pv-bar .pv-desc{color:var(--mut);font-size:12.5px}
+  .pv-actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .segbtns{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .segbtns button{padding:9px 14px;min-height:44px;background:#fff;color:var(--mut);font-size:13px;font-weight:700;border:0}
+  .segbtns button[aria-pressed="true"]{background:var(--ink);color:#fff}
+  .open-new{font-size:13px;font-weight:700;border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 14px;min-height:44px;display:inline-flex;align-items:center;text-decoration:none}
+  .frame-wrap{border:1px solid var(--line);border-radius:12px;background:#EDEBE4;overflow:hidden}
+  .frame-wrap iframe{display:block;width:100%;height:680px;border:0;background:#fff;transition:width .15s ease}
+  .frame-wrap[data-v="mobile"] iframe{width:390px;max-width:100%;margin:0 auto}
+  .frame-hint{font-size:11.5px;color:var(--mut);text-align:center;padding:8px 0 0}
+  /* cards */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  @media (min-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}
+  .c{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 18px 16px;display:grid;grid-template-columns:120px 1fr;gap:16px}
+  .c h2{font-size:17px;font-weight:800;letter-spacing:-.03em}
+  .c h2 small{display:block;font-size:11.5px;color:var(--mut);font-weight:700;letter-spacing:.04em;margin-top:2px}
+  .meta{font-size:13px;color:var(--mut);margin:8px 0 10px}
+  dl{font-size:13px;margin:0 0 12px}
+  dl div{display:flex;gap:8px;padding:3px 0}
+  dt{flex:none;width:34px;font-weight:800}
+  dt.good{color:var(--ok)} dt.risk{color:var(--warn)}
+  dd{margin:0;color:#3D3A33}
+  .acts{display:flex;gap:8px;flex-wrap:wrap}
+  .acts a,.acts button{border-radius:10px;padding:10px 14px;min-height:44px;font-size:13.5px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;border:1px solid var(--line);background:#fff}
+  .acts .prim{background:var(--ink);color:#fff;border-color:var(--ink)}
+  /* thumbs (pure CSS miniatures) */
+  .thumb{width:120px;height:150px;border-radius:10px;border:1px solid var(--line);overflow:hidden;position:relative;flex:none}
+  .t1{background:#F6F1E7}
+  .t1::before{content:"";position:absolute;left:12px;right:12px;top:26px;height:2px;background:#1A1712}
+  .t1::after{content:"";position:absolute;left:12px;right:12px;top:44px;height:74px;background:repeating-linear-gradient(#F6F1E7 0 16px,#D8CFBC 16px 17px);border-bottom:2px solid #1A1712}
+  .t1 .r{position:absolute;left:12px;top:12px;width:26px;height:8px;background:#9C3220}
+  .t2{background:#0E1B2A}
+  .t2 .a{position:absolute;left:0;top:0;bottom:0;width:30px;background:#152538;border-right:1px solid #28405C}
+  .t2 .b{position:absolute;left:38px;right:8px;top:10px;height:6px;background:#5FB2FF;opacity:.75}
+  .t2 .c2{position:absolute;left:38px;right:8px;top:24px;height:110px;background:repeating-linear-gradient(#101823 0 12px,#22303F 12px 13px);border:1px solid #28405C}
+  .t3{background:#fff}
+  .t3 .a{position:absolute;left:10px;right:10px;top:10px;height:14px;border:1px solid #E2E8E4;border-radius:6px;background:linear-gradient(90deg,#0B7A4F 25%,#F7FAF8 25%)}
+  .t3 .b{position:absolute;left:34px;top:32px;width:52px;height:10px;background:#0F1A14;border-radius:3px}
+  .t3 .c2{position:absolute;left:10px;right:10px;top:52px;height:86px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;background:none}
+  .t3 .c2 i{border:1px solid #E2E8E4;border-radius:6px;background:#fff}
+  .t4{background:#F2F1EA;border:3px solid #0A0A0A}
+  .t4 .a{position:absolute;left:0;right:0;top:0;height:16px;background:#FFD400;border-bottom:3px solid #0A0A0A}
+  .t4 .b{position:absolute;left:8px;top:26px;width:64px;height:40px;background:#fff;border:3px solid #0A0A0A}
+  .t4 .c2{position:absolute;right:8px;top:26px;width:26px;height:78px;background:#0A0A0A}
+  .t4 .d{position:absolute;left:8px;bottom:8px;right:8px;height:26px;background:#FFD400;border:3px solid #0A0A0A}
+  .t5{background:#0A1017}
+  .t5 .a{position:absolute;left:0;top:0;bottom:0;width:12px;background:#101823;border-right:1px solid #22303F}
+  .t5 .b{position:absolute;left:20px;top:14px;width:60px;height:44px;border:1px solid #22303F;border-radius:8px;background:#15202E}
+  .t5 .b2{position:absolute;left:24px;top:28px;width:40px;height:8px;background:#3BDBE8;border-radius:4px}
+  .t5 .c2{position:absolute;left:88px;top:14px;bottom:14px;width:26px;border:1px solid #22303F;border-radius:8px;background:repeating-linear-gradient(#101823 0 22px,#15202E 22px 24px)}
+  .t6{background:#FBFBF9}
+  .t6 .b{position:absolute;left:28px;top:34px;width:64px;height:9px;background:#1D1D1F;border-radius:3px;opacity:.85}
+  .t6 .l{position:absolute;left:14px;right:14px;height:1px;background:#E8E8E4}
+  .t7{background:#fff}
+  .t7 .g{position:absolute;left:8px;right:8px;top:16px;bottom:30px;background:
+    repeating-linear-gradient(#fff 0 18px,#DCD0DC 18px 19px),
+    repeating-linear-gradient(90deg,#fff 0 13.8px,#DCD0DC 13.8px 14.8px);border:1px solid #DCD0DC}
+  .t7 .h{position:absolute;left:8px;right:8px;top:8px;height:6px;background:#5A2A62}
+  .t7 .p{position:absolute;left:35.6px;top:53px;width:13.8px;height:18px;background:#F1E6F2;border:1px solid #7C4A8C}
+  .t8{background:#F8EFE4}
+  .t8 .l{position:absolute;top:12px;bottom:12px;width:17px;background:#FDF8F0;border:1px solid #DDC7AB;border-radius:4px}
+  .t8 .l:nth-child(1){left:7px}.t8 .l:nth-child(2){left:28px}.t8 .l:nth-child(3){left:49px;background:#fff;border-color:#B65C38}
+  .t8 .l:nth-child(4){left:70px}.t8 .l:nth-child(5){left:91px;border-style:dashed}
+  .t8 .f{position:absolute;left:9px;top:22px;width:13px;height:5px;background:#7A8B5B;border-radius:2px}
+  .t9{background:#F4F7F6}
+  .t9 .a{position:absolute;left:22px;right:22px;top:8px;bottom:8px;background:#fff;border:1px solid #DEE7E5;border-radius:10px}
+  .t9 .h{position:absolute;left:28px;right:28px;top:16px;height:34px;background:#0F766E;border-radius:8px}
+  .t9 .b{position:absolute;left:28px;right:28px;bottom:14px;height:14px;background:#fff;border:1px solid #DEE7E5;border-radius:7px}
+  .t10{background:#EEEEE2}
+  .t10 .a{position:absolute;left:0;top:0;bottom:0;width:56%;background:repeating-linear-gradient(#FDFDF6 0 20px,#D8D9C2 20px 22px);border-right:1px solid #D8D9C2}
+  .t10 .b{position:absolute;right:8px;left:62%;top:14px;height:50px;background:#FDFDF6;border:1px solid #D8D9C2;border-radius:6px}
+  .t10 .c2{position:absolute;right:8px;left:62%;top:72px;height:44px;background:#E2E7C8;border:1px solid #8B9A5B;border-radius:6px}
+  /* recs + footer */
+  .rec{margin-top:30px;border:2px solid var(--ink);border-radius:16px;background:var(--card);padding:20px}
+  .rec h2{font-size:19px;font-weight:800;letter-spacing:-.03em;margin-bottom:8px}
+  .rec ul{margin:10px 0 0 20px;font-size:14px}
+  .rec li{margin:6px 0}
+  footer{margin-top:30px;border-top:1px solid var(--line);padding-top:16px;font-size:12.5px;color:var(--mut)}
+  @media (max-width:760px){
+    .grid{grid-template-columns:1fr}
+    .c{grid-template-columns:1fr}
+    .thumb{width:100%;height:120px}
+    .frame-wrap iframe{height:560px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>생활비 관리자 · 리디자인 콘셉트 10선</h1>
+    <p class="sub">실제 제품 변경 없는 <strong>디자인 제안</strong>입니다. 같은 합성 데이터를 10개의 전혀 다른 구성·타이포·내비게이션으로 구현했습니다. 미리보기로 방향을 고른 뒤 실제 리디자인 범위를 결정하세요.</p>
+    <p class="note"><strong>데이터 고지:</strong> 모든 화면의 숫자는 합성 데모(2026.10 · 급여일 25일 · 월 예정 생활비 1,284,000원 = 선택 항목 표본 / 이번 주 예산 180,000 · 기록 사용 64,500 · 자동차보험 준비금 420,000/720,000)이며, 저장이·동기화·은행 연동이 없습니다. ‘예상’은 시뮬레이션이고 잔고가 아니며, ‘미입력’은 0원과 구분되는 상태입니다.</p>
+  </header>
+
+  <section class="preview" aria-label="콘셉트 미리보기">
+    <div class="pv-bar">
+      <span class="pv-name" id="pv-name">콘셉트 03 · 심플 소비자</span>
+      <span class="pv-desc" id="pv-desc">화이트/그린 · 상단 세그먼트 탭</span>
+      <div class="pv-actions">
+        <div class="segbtns" role="group" aria-label="뷰포트 선택">
+          <button id="v-m" aria-pressed="true">모바일 390px</button>
+          <button id="v-d" aria-pressed="false">데스크톱</button>
+        </div>
+        <a class="open-new" id="pv-open" href="concept-03.html" target="_blank" rel="noopener">새 탭에서 열기 ↗</a>
+      </div>
+    </div>
+    <div class="frame-wrap" id="frame-wrap" data-v="mobile">
+      <iframe id="pv-frame" src="concept-03.html" title="콘셉트 03 미리보기"></iframe>
+    </div>
+    <p class="frame-hint">모바일/데스크톱 토글은 미리보기 프레임 폭을 실제로 390px ↔ 가용폭 전체로 변경합니다. 각 콘셉트의 파일 링크는 새 탭에서 열립니다.</p>
+  </section>
+
+  <div class="grid" id="cards">
+
+    <article class="c">
+      <span class="thumb t1" aria-hidden="true"><span class="r"></span></span>
+      <div>
+        <h2>01 · 월간 장부<small>에디토리얼 · 아이보리/먹/주홍</small></h2>
+        <p class="meta">구성: 문서형 스크롤 장부(테이블 중심) · 내비: 상단 텍스트 링크</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>회고·기록이라는 업무 성격과 가장 조용하게 결부, 큰 세리프 숫자의 격식</dd></div>
+          <div><dt class="risk">주의</dt><dd>한눈에 상태 파악(글랜스)에 약함, 입력 위주의 사용성은 별도 설계 필요</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-01.html" data-name="콘셉트 01 · 월간 장부" data-desc="에디토리얼 장부 · 문서형 구성">미리보기</button><a href="concept-01.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t2" aria-hidden="true"><span class="a"></span><span class="b"></span><span class="c2"></span></span>
+      <div>
+        <h2>02 · 관제형 사이드바<small>네이비 · 고밀도 업무 도구</small></h2>
+        <p class="meta">구성: 좌측 상시 사이드바 + 툴바 탭 + 고밀도 표 · 내비: 사이드바(모바일은 상단 탭 스트립)</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>월간/주간/연간 탭 분리, 데스크톱 정보량 최대 — 다 항목 사용자에게 명확</dd></div>
+          <div><dt class="risk">주의</dt><dd>밀도가 부담·위압으로 느껴질 수 있음, 모바일에서는 축소판에 가까움</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-02.html" data-name="콘셉트 02 · 관제형 사이드바" data-desc="네이비 고밀도 · 사이드바">미리보기</button><a href="concept-02.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t3" aria-hidden="true"><span class="a"></span><span class="b"></span><span class="c2"><i></i><i></i><i></i></span></span>
+      <div>
+        <h2>03 · 심플 소비자<small>화이트/그린 · 프랜들리 피테크</small></h2>
+        <p class="meta">구성: 중앙 히어로 숫자 + 3개 플랫 패널 · 내비: 상단 세그먼트 탭(월간/주간/납부/준비금)</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>가장 익숙한 학습비용 0, 명암 대비·포커스 등 접근성 리스크 최소, 구현 원가 낮음</dd></div>
+          <div><dt class="risk">주의</dt><dd>차별화가 약해 보일 수 있음, 일반적 인상을 원하면 08·10의 방법론 결합 검토</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-03.html" data-name="콘셉트 03 · 심플 소비자" data-desc="화이트/그린 · 세그먼트 탭">미리보기</button><a href="concept-03.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t4" aria-hidden="true"><span class="a"></span><span class="b"></span><span class="c2"></span><span class="d"></span></span>
+      <div>
+        <h2>04 · 그리트<small>브루탈리스트 · 옐로/블랙 그리드</small></h2>
+        <p class="meta">구성: 굵은 테두리 비대칭 블록, 숫자를 그래픽으로 · 내비: 번호식 대형 링크(01–04)</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>브랜드 기억점 최강, 위계 스캔 속도 빠름, 디테일 없이 솔직한 느낌</dd></div>
+          <div><dt class="risk">주의</dt><dd>금융 정보와의 온도 차이(요란함), 디자인 시스템 유지 비용, 색상 접근성 재확인 필요</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-04.html" data-name="콘셉트 04 · 그리트" data-desc="브루탈 타이포 · 옐로 그리드">미리보기</button><a href="concept-04.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t5" aria-hidden="true"><span class="a"></span><span class="b"></span><span class="b2"></span><span class="c2"></span></span>
+      <div>
+        <h2>05 · 미드나잇<small>다크 프리미엄 · 시안 포인트</small></h2>
+        <p class="meta">구성: 좌 아이콘 레일 + 2분할(포커스 / D-타임라인), 모노 숫자 · 내비: 아이콘 레일</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>야간 확인 편안함, 납부 D-타임라인이 급여일 기반 서비스와 결부 좋음</dd></div>
+          <div><dt class="risk">주의</dt><dd>실외 밝은 화면에서 가독성 저하 우려, 트레이딩 화면 같은 압박 인상 가능</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-05.html" data-name="콘셉트 05 · 미드나잇" data-desc="다크 · 아이콘 레일 · 타임라인">미리보기</button><a href="concept-05.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t6" aria-hidden="true"><span class="b"></span><span class="l" style="top:56px"></span><span class="l" style="top:78px"></span><span class="l" style="top:100px"></span><span class="l" style="top:122px"></span></span>
+      <div>
+        <h2>06 · 페이퍼<small>Apple식 대규모 여백 · 뉴트럴</small></h2>
+        <p class="meta">구성: 라이트 웨이트 대형 숫자의 중앙 히어로 + 단일 컬럼 섹션 스크롤 · 내비: 상단 중앙 텍스트</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>가장 차분·가독성 우수, 한 화면 한 과제 원칙에 충실 — 불안한 금융 UX 완화</dd></div>
+          <div><dt class="risk">주의</dt><dd>화면당 정보량이 적어 비교 작업 시 스크롤 증가, 데스크톱에서 허전함</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-06.html" data-name="콘셉트 06 · 페이퍼" data-desc="여백 중심 · 단일 컬럼">미리보기</button><a href="concept-06.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t7" aria-hidden="true"><span class="h"></span><span class="g"></span><span class="p"></span></span>
+      <div>
+        <h2>07 · 캘린더 퍼스트<small>플럼 · 플래너형</small></h2>
+        <p class="meta">구성: 이번 달 격자가 메인 UI, 주(W) 선택 → 주간 카드 · 내비: 월 헤더 + 주 선택</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>급여일·납부일 기반 계획이라는 서비스 정신과 가장 정확히 결부, 미입력/0 구별이 캘린더에서 시각적</dd></div>
+          <div><dt class="risk">주의</dt><dd>준비금 등 장기 항목은 보조로 밀림, 소폭 화면에서 달격자가 빡빡함</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-07.html" data-name="콘셉트 07 · 캘린더 퍼스트" data-desc="플럼 플래너 · 달력 중심">미리보기</button><a href="concept-07.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t8" aria-hidden="true"><span class="l"></span><span class="l"></span><span class="l"></span><span class="l"></span><span class="l"></span><span class="f"></span></span>
+      <div>
+        <h2>08 · 주차 봉투<small>테라코타 · 엔벨로프 방법론</small></h2>
+        <p class="meta">구성: 5개 주차 수평 레인, 봉투(카테고리)별 진행률 · 내비: 상단 스트립 + 주간 레인(모바일 아코디언)</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>주간 예산 방법론 서사가 가장 선명, 주 간 비교가 눈으로 바로, 빈 봉투로 미입력 표현</dd></div>
+          <div><dt class="risk">주의</dt><dd>봉투 개념 사용자 교육 필요, 고정 납부가 레인에 묻힘, 폭 넓은 데스크톱에서 길이 증가</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-08.html" data-name="콘셉트 08 · 주차 봉투" data-desc="엔벨로프 · 수평 주간 레인">미리보기</button><a href="concept-08.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t9" aria-hidden="true"><span class="a"></span><span class="h"></span><span class="b"></span></span>
+      <div>
+        <h2>09 · 모바일 퍼스트<small>틸 · 대형 숫자 · 하단 탭</small></h2>
+        <p class="meta">구성: 390px가 원형인 단일 컬럼, 데스크톱에서는 폰 폭 유지 중앙 배치 · 내비: 엄지 영역 하단 탭 4개</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>실제 사용 순간(모바일 급속 기록)에 최우선, 목표 탭 영역 ≥44px, Web→앱 변환 용이</dd></div>
+          <div><dt class="risk">주의</dt><dd>데스크톱 사용자는 ‘모바일 확대판’으로 느낄 수 있음, 비교·회고 작업은 느림</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-09.html" data-name="콘셉트 09 · 모바일 퍼스트" data-desc="틸 · 하단 탭 · 대형 숫자">미리보기</button><a href="concept-09.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+
+    <article class="c">
+      <span class="thumb t10" aria-hidden="true"><span class="a"></span><span class="b"></span><span class="c2"></span></span>
+      <div>
+        <h2>10 · 갈라진 장부<small>뮤트 올리브 · 스플릿 가계</small></h2>
+        <p class="meta">구성: 좌측 부기(목록) + 우측 고정 요약, 상단 구성원 필터 · 내비: 상단 바 + 필터 칩</p>
+        <dl>
+          <div><dt class="good">강점</dt><dd>세대/공유 지출 시나리오에 최강, 필터 확장 경로 명확, 생산적이되 조용한 인상</dd></div>
+          <div><dt class="risk">주의</dt><dd>혼자 쓰면 스플릿의 의미가 줄음, 구성원 데이터 표시는 프라이버시 설계 필요</dd></div>
+        </dl>
+        <div class="acts"><button class="prim" data-href="concept-10.html" data-name="콘셉트 10 · 갈라진 장부" data-desc="올리브 스플릿 · 공유 장부">미리보기</button><a href="concept-10.html" target="_blank" rel="noopener">새 탭</a></div>
+      </div>
+    </article>
+  </div>
+
+  <section class="rec">
+    <h2>권장 방향 (가정 없이 2–3안 제시)</h2>
+    <p>“어떤 화면을 가장 오래 보는가”에 답이 갈립니다. 아래는 각각 다른 가정에 대한 추천이며, 하나를 정답으로 단정하지 않습니다.</p>
+    <ul>
+      <li><strong>07 캘린더 퍼스트</strong> — 이 서비스의 본질이 ‘은행’이 아니라 <em>급여일 기준 계획·납부·준비금</em>이므로, 시간 축(달력)이 정보 구조와 가장 정확히 결부됩니다. 주간 예산·월말 회고도 달력에서 자연스럽게 뻗음.</li>
+      <li><strong>03 심플 소비자</strong> — 리스크·구현 비용 최소의 기본기. 접근성·익숙함에서 가장 안전하며, 07의 캘린더를 패널 안에 넣는 하이브리드가 가장 무난한 절충입니다.</li>
+      <li><strong>09 모바일 퍼스트</strong> — 기록·확인이 하루 여러 번의 짧은 모바일 순간이라면 원형 그대로 시작하고, 데스크톱은 부차 뷰로. 08(주차 봉투)의 아코디언도 같은 흐름입니다.</li>
+    </ul>
+    <p style="margin-top:10px;font-size:13.5px;color:var(--mut)">결정 전 확인: 실제 사용 디바이스 비중, 사용자 중 ‘세대 공유’ 비율(→10), 기존 화면의 진입 흐름과의 결부. 이 갤러리는 파일 하나로 완결되며 어떤 서버 통신도 없습니다.</p>
+  </section>
+
+  <footer>
+    Living Cost Manager UI 콘셉트 프로토타입 · 2026-10-20 · 정적 HTML/inline CSS/JS만 사용 — 원격 폰트·CDN·네트워크 요청 없음. 시스템 폰트(Pretendard → Apple SD Gothic Neo 폴백).
+    모든 데이터는 합성 데모이며 실제 금융 정보·개인 정보가 아닙니다.
+  </footer>
+</div>
+<script>
+(function(){
+  var frame=document.getElementById('pv-frame'),
+      wrap=document.getElementById('frame-wrap'),
+      name=document.getElementById('pv-name'),
+      desc=document.getElementById('pv-desc'),
+      open=document.getElementById('pv-open'),
+      vm=document.getElementById('v-m'), vd=document.getElementById('v-d');
+  function load(href,n,d){
+    frame.src=href;
+    frame.setAttribute('title',n+' 미리보기');
+    name.textContent=n; desc.textContent=d;
+    open.setAttribute('href',href);
+  }
+  document.querySelectorAll('#cards button[data-href]').forEach(function(b){
+    b.addEventListener('click',function(){
+      load(b.getAttribute('data-href'),b.getAttribute('data-name'),b.getAttribute('data-desc'));
+      document.querySelector('.preview').scrollIntoView({behavior:'smooth',block:'start'});
+    });
+  });
+  vm.addEventListener('click',function(){
+    wrap.setAttribute('data-v','mobile');
+    vm.setAttribute('aria-pressed','true'); vd.setAttribute('aria-pressed','false');
+  });
+  vd.addEventListener('click',function(){
+    wrap.setAttribute('data-v','desktop');
+    vd.setAttribute('aria-pressed','true'); vm.setAttribute('aria-pressed','false');
+  });
+})();
+</script>
+</body>
+</html>

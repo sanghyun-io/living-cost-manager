@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 08 · 주차 봉투 —Living Cost Manager UI 제안</title>
+<meta name="description" content="테라코타 주차 봉투(envelope) 방식 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#F8EFE4; --card:#FDf8f0; --ink:#3A2A20; --mut:#8B7461; --terra:#B65C38; --terra-d:#8F4426;
+    --sand:#E8D5BE; --sage:#7A8B5A; --line:#DDC7AB;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.5;overflow-wrap:anywhere}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;cursor:pointer;background:none;border:0;color:inherit}
+  :focus-visible{outline:3px solid var(--terra-d);outline-offset:2px;border-radius:10px}
+  .pad{max-width:1240px;margin:0 auto;padding:18px 20px 60px}
+  /* header strip */
+  .mast{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:6px 2px 16px}
+  .mast h1{font-size:22px;font-weight:800;letter-spacing:-.03em}
+  .mast .total{margin-left:auto;text-align:right}
+  .mast .total b{font-size:26px;color:var(--terra-d);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  .mast .total span{display:block;font-size:11.5px;color:var(--mut)}
+  .chip{font-size:11.5px;font-weight:700;background:var(--card);border:1.5px solid var(--line);color:var(--terra-d);padding:5px 12px;border-radius:99px}
+  .back{font-size:13px;color:var(--mut);min-height:44px;display:inline-flex;align-items:center}
+  /* lanes */
+  .lanes{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;align-items:start}
+  .lane{background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 16px;box-shadow:0 3px 0 rgba(139,116,97,.14)}
+  .lane.now{border-color:var(--terra);box-shadow:0 3px 0 rgba(182,92,56,.35)}
+  .lane.future{background:repeating-linear-gradient(-45deg,#FBF3E7,#FBF3E7 10px,#F6EADB 10px,#F6EADB 20px);border-style:dashed}
+  .lane h2{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:14px;font-weight:800;margin-bottom:2px}
+  .lane .dates{font-size:11px;color:var(--mut);letter-spacing:.02em;margin-bottom:10px}
+  .lane .stat{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:var(--sand);color:var(--terra-d)}
+  .lane.now .stat{background:var(--terra);color:#fff}
+  .env{border-top:1.5px solid var(--line);padding:10px 2px 2px;margin-top:10px}
+  .env .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .env .name{font-size:12.5px;font-weight:700}
+  .env .amt{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .fill{height:8px;background:#EFE2CF;border-radius:6px;margin-top:6px;overflow:hidden;border:1px solid var(--line)}
+  .fill i{display:block;height:100%;background:var(--sage)}
+  .fill.over i{background:var(--terra)}
+  .env .left{font-size:11px;color:var(--mut);margin-top:3px}
+  .env .left b{color:var(--ink)}
+  .pending{border:1.5px dashed var(--mut);border-radius:10px;padding:10px 12px;margin-top:12px;font-size:12px;color:var(--mut);background:transparent}
+  .pending b{color:var(--ink)}
+  .pending .zero{font-weight:800;color:var(--terra-d)}
+  /* bottom row */
+  .row2{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-top:16px}
+  .panel{background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:16px 18px}
+  .panel h3{font-size:13.5px;font-weight:800;margin-bottom:10px}
+  .panel .it{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px dashed var(--line);font-size:13px}
+  .panel .it:first-of-type{border-top:0}
+  .panel .it b{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .savebar{height:14px;border:1.5px solid var(--terra-d);border-radius:8px;overflow:hidden;background:#fff;margin:10px 0 6px}
+  .savebar i{display:block;height:100%;width:58%;background:var(--terra)}
+  .footnote{font-size:12px;color:var(--mut);margin-top:14px}
+  /* mobile accordion */
+  @media (max-width:900px){
+    .lanes{grid-template-columns:1fr 1fr}
+  }
+  @media (max-width:640px){
+    .lanes{grid-template-columns:1fr;gap:0}
+    .lane{border-radius:0;border-left:0;border-right:0;border-top:0;box-shadow:none}
+    .lane:first-child{border-top:1.5px solid var(--line)}
+    .lane summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;padding:2px 0 8px;min-height:44px}
+    .lane summary::-webkit-details-marker{display:none}
+    .lane summary::after{content:"펼치기";font-size:11px;font-weight:800;color:var(--terra-d);border:1.5px solid var(--terra);border-radius:99px;padding:3px 10px}
+    .lane[open] summary::after{content:"접기"}
+    .lane .body-c{display:block}
+    .row2{grid-template-columns:1fr}
+  }
+  @media (min-width:641px){
+    .lane details{display:block}
+    .lane summary{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="pad">
+  <div class="mast">
+    <h1>10월 · 주차 봉투</h1>
+    <span class="chip">DEMO · 합성 데이터</span>
+    <a class="back" href="index.html">← 비교 갤러리</a>
+    <div class="total">
+      <b>1,284,000원</b><span>10월 예정 생활비 (표본 항목 · 전체 아님)</span>
+    </div>
+  </div>
+
+  <div class="lanes">
+    <details class="lane" open>
+      <summary><span>W1 · 10.5–10.11</span></summary>
+      <div class="body-c">
+        <h2>W1 <span class="stat">지남</span></h2>
+        <p class="dates">10.5 – 10.11 · 기록 기준</p>
+        <div class="env"><div class="top"><span class="name">변동비 봉투</span><span class="amt">128,000 / 150,000</span></div><div class="fill" role="progressbar" aria-valuenow="85" aria-valuemin="0" aria-valuemax="100" aria-label="W1 변동비 봉투 150,000원 중 128,000원 기록, 85%"><i style="width:85%"></i></div><p class="left">남은 <b>22,000</b></p></div>
+      </div>
+    </details>
+
+    <details class="lane" open>
+      <summary><span>W2 · 10.12–10.18</span></summary>
+      <div class="body-c">
+        <h2>W2 <span class="stat">지남</span></h2>
+        <p class="dates">10.12 – 10.18 · 기록 기준</p>
+        <div class="env"><div class="top"><span class="name">변동비 봉투</span><span class="amt">143,200 / 150,000</span></div><div class="fill" role="progressbar" aria-valuenow="95" aria-valuemin="0" aria-valuemax="100" aria-label="W2 변동비 봉투 150,000원 중 143,200원 기록, 95%"><i style="width:95%"></i></div><p class="left">남은 <b>6,800</b></p></div>
+      </div>
+    </details>
+
+    <details class="lane now" open>
+      <summary><span>W3 · 이번 주</span></summary>
+      <div class="body-c">
+        <h2>W3 <span class="stat">이번 주</span></h2>
+        <p class="dates">10.19 – 10.25 · 급여일 포함</p>
+        <div class="env">
+          <div class="top"><span class="name">생활 봉투</span><span class="amt">64,500 / 180,000</span></div>
+          <div class="fill" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="이번 주 봉투 180,000원 중 기록된 사용 64,500원, 36%"><i style="width:36%"></i></div>
+          <p class="left">남은 <b>115,500</b> (기록 기준)</p>
+        </div>
+        <div class="env">
+          <div class="top"><span class="name">고정 봉투</span><span class="amt">650,000</span></div>
+          <p class="left">10.25 <b>월세</b> 준비 · 급여 당일</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="lane" open>
+      <summary><span>W4 · 10.26–11.1</span></summary>
+      <div class="body-c">
+        <h2>W4 <span class="stat">예정</span></h2>
+        <p class="dates">10.26 – 11.1</p>
+        <div class="env">
+          <div class="top"><span class="name">고정 봉투</span><span class="amt">49,000</span></div>
+          <p class="left">10.27 <b>통신비</b></p>
+        </div>
+        <p class="pending">변동비 봉투: 예산 <b>미배정</b> · 사용 <span class="zero">미입력</span> <br>(<span class="zero">미입력 ≠ 0원</span>)</p>
+      </div>
+    </details>
+
+    <details class="lane future" open>
+      <summary><span>11W1 · 계획 중</span></summary>
+      <div class="body-c">
+        <h2>11W1 <span class="stat">계획</span></h2>
+        <p class="dates">11.2 – 11.8</p>
+        <div class="env">
+          <div class="top"><span class="name">생활 봉투</span><span class="amt">계획 350,000</span></div>
+          <div class="fill" role="img" aria-label="다음 주 계획 봉투 350,000원 — 사용 기록 미입력 상태"><i style="width:0%"></i></div>
+          <p class="left">사용 <span style="font-weight:800;color:var(--terra-d)">미입력</span> — 빈 봉투입니다</p>
+        </div>
+        <p class="pending">급여일 다음 달 첫 주 · <b>계획만</b> 존재</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <h3>연간 준비금 — 자동차보험</h3>
+      <div class="savebar" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="자동차보험 준비금 목표 720,000원 중 420,000원 적립, 58%"><i></i></div>
+      <div class="it"><span>적립됨</span><b>420,000원</b></div>
+      <div class="it"><span>목표 (2027.01)</span><b>720,000원</b></div>
+      <div class="it"><span>남은 목표</span><b>300,000원</b></div>
+    </div>
+    <div class="panel">
+      <h3>월말 회고 · 예상 한 줄</h3>
+      <div class="it"><span>9월 계획 준수</span><b>3 / 4주 (합성)</b></div>
+      <div class="it"><span>10월 말 예상 여유</span><b>약 34,000원*</b></div>
+      <p class="footnote">* 예상(시뮬레이션) — 잔고·보장 아님. 봉투 단위는 데모 예시이며 실제 계좌와 무관합니다. 이 화면은 디자인 목업이고 값이 저장되지 않습니다.</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

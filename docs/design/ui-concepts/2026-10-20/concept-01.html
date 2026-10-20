@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 01 · 월간 장부 —Living Cost Manager UI 제안</title>
+<meta name="description" content="에디토리얼 장부 레이아웃 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#F6F1E7; --ink:#1A1712; --muted:#6E6353; --rule:#D8CFBC; --rule-strong:#1A1712;
+    --red:#9C3220; --paper:#FCF8F0;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+    --serif:Georgia,"AppleMyungjo","Myungjo",serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;overflow-wrap:anywhere}
+  a{color:inherit}
+  :focus-visible{outline:3px solid var(--red);outline-offset:2px}
+  .wrap{max-width:820px;margin:0 auto;padding:0 20px}
+  /* masthead */
+  .topbar{border-bottom:1px solid var(--rule);padding:10px 0;font-size:12.5px;letter-spacing:.06em;color:var(--muted)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .badge{border:1px solid var(--red);color:var(--red);padding:1px 8px;font-weight:700}
+  nav{text-align:right}
+  nav a{margin-left:18px;text-decoration:none;border-bottom:1px solid var(--rule-strong);padding-bottom:1px}
+  nav a:hover,nav a[aria-current]{color:var(--red);border-color:var(--red)}
+  /* chapter head */
+  header.chapter{padding:56px 0 28px;border-bottom:3px double var(--rule-strong)}
+  .chapter-date{font-size:13px;letter-spacing:.24em;color:var(--muted);text-transform:uppercase}
+  h1{font-family:var(--serif);font-weight:400;font-size:clamp(34px,7vw,52px);line-height:1.15;margin:10px 0 18px}
+  h1 .kr{font-family:var(--sans);font-weight:800;letter-spacing:-.02em}
+  .lead-fig{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-top:8px}
+  .lead-fig b{font-family:var(--serif);font-size:clamp(40px,9vw,64px);font-weight:400;letter-spacing:-.01em}
+  .lead-fig .cap{font-size:13px;color:var(--muted);max-width:34ch}
+  .lead-fig .cap em{color:var(--red);font-style:normal;font-weight:700}
+  /* sections */
+  section{padding:40px 0 8px}
+  h2{font-family:var(--serif);font-weight:400;font-size:24px;margin-bottom:4px}
+  h2 .kr{font-family:var(--sans);font-weight:800}
+  .h2sub{font-size:12.5px;color:var(--muted);margin-bottom:18px}
+  /* ledger table */
+  .ledger{width:100%;border-collapse:collapse}
+  .ledger caption{text-align:left;font-size:12px;color:var(--muted);padding-bottom:8px}
+  .ledger th{font-size:11.5px;letter-spacing:.12em;color:var(--muted);text-align:left;font-weight:600;border-bottom:2px solid var(--rule-strong);padding:8px 10px 8px 0}
+  .ledger td{border-bottom:1px solid var(--rule);padding:13px 10px 13px 0;vertical-align:baseline}
+  .ledger .num{text-align:right;font-family:var(--serif);font-size:17px;white-space:nowrap;padding-right:0}
+  .ledger th.num-h{text-align:right}
+  .ledger .d{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+  .ledger tr.total td{border-bottom:3px double var(--rule-strong);font-weight:800}
+  .ledger tr.total .num{color:var(--red)}
+  .footnote{font-size:12px;color:var(--muted);margin-top:10px}
+  /* week block */
+  .week{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--rule-strong)}
+  .week>div{padding:20px 22px}
+  .week>div+div{border-left:1px solid var(--rule)}
+  .week .big{font-family:var(--serif);font-size:30px}
+  .week .lbl{font-size:12px;letter-spacing:.1em;color:var(--muted)}
+  .meter{height:6px;background:var(--rule);margin-top:12px;position:relative}
+  .meter i{position:absolute;inset:0 auto 0 0;width:36%;background:var(--red)}
+  .unwritten{border:1px dashed var(--muted);padding:14px 22px;margin-top:-1px;color:var(--muted);font-size:13.5px;grid-column:1/-1;background:repeating-linear-gradient(45deg,transparent,transparent 12px,rgba(110,99,83,.06) 12px,rgba(110,99,83,.06) 24px)}
+  .unwritten b{color:var(--ink)}
+  /* schedule */
+  ul.sched{list-style:none;border-top:1px solid var(--rule-strong)}
+  ul.sched li{display:flex;gap:16px;align-items:baseline;border-bottom:1px solid var(--rule);padding:12px 0}
+  ul.sched .date{font-family:var(--serif);font-size:19px;min-width:74px}
+  ul.sched .amt{margin-left:auto;font-family:var(--serif);font-size:19px;white-space:nowrap}
+  ul.sched .dd{font-size:11.5px;color:var(--red);letter-spacing:.08em}
+  /* reserve */
+  .reserve{border:1px solid var(--rule-strong);padding:22px;background:var(--paper)}
+  .reserve .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .reserve .row b{font-family:var(--serif);font-size:26px}
+  .meter.reserve-m{height:10px;margin-top:14px}
+  .meter.reserve-m i{width:58%;background:var(--ink)}
+  .meter.reserve-m s{position:absolute;inset:0 0 0 58%;text-decoration:none;background:repeating-linear-gradient(90deg,var(--rule) 0 4px,transparent 4px 8px)}
+  .reserve .tags{display:flex;gap:14px;font-size:12.5px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+  /* retrospective */
+  .retro p{max-width:60ch}
+  .retro .quote{border-left:3px solid var(--red);padding:6px 0 6px 18px;font-family:var(--serif);font-size:19px;margin:14px 0 6px}
+  /* footer */
+  footer{margin-top:56px;border-top:3px double var(--rule-strong);padding:22px 0 44px;font-size:12px;color:var(--muted)}
+  footer a{color:var(--red)}
+  @media (max-width:640px){
+    nav a{margin-left:12px;font-size:13px}
+    .week{grid-template-columns:1fr}
+    .week>div+div{border-left:0;border-top:1px solid var(--rule)}
+    .ledger thead{position:absolute;left:-9999px}
+    .ledger tr{display:block;border-bottom:1px solid var(--rule);padding:8px 0}
+    .ledger td{display:flex;border:0;padding:3px 0}
+    .ledger td::before{content:attr(data-h);font-size:11.5px;letter-spacing:.1em;color:var(--muted);min-width:80px;padding-top:4px}
+    .ledger .num{text-align:right;margin-left:auto}
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <span><span class="badge">DEMO</span>&nbsp;&nbsp;디자인 프로토타입 · 합성 데이터</span>
+    <nav aria-label="주 이동">
+      <a href="#plan">계획</a><a href="#ledger">장부</a><a href="#week">이번 주</a><a href="#pay">납부</a><a href="#reserve">준비금</a><a href="index.html">← 비교</a>
+    </nav>
+  </div>
+</div>
+
+<div class="wrap">
+<header class="chapter" id="plan">
+  <p class="chapter-date">2026년 10월 · 통권 제10호 · 급여일 기준 25일</p>
+  <h1><span class="kr">이번 달</span> 장부</h1>
+  <div class="lead-fig">
+    <b>1,284,000<span style="font-size:.45em">원</span></b>
+    <p class="cap"><em>10월 예정 생활비</em> — 아래 장부는 그중 일부 항목만 담은 표본입니다.</p>
+  </div>
+</header>
+
+<section id="ledger">
+  <h2>10월 <span class="kr">장부 초</span></h2>
+  <p class="h2sub">복식부기처럼 남기는 한 달 계획 · 실제 지출 확정 전 기록</p>
+  <table class="ledger">
+    <caption>표본 항목 4개 (전체 항목 아님 · 합성 데이터)</caption>
+    <thead>
+      <tr><th scope="col">날짜</th><th scope="col">적요</th><th scope="col" class="num-h">예정액</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="d" data-h="날짜">10.01~</td><td data-h="적요">식비 계획</td><td class="num" data-h="예정액">280,000</td></tr>
+      <tr><td class="d" data-h="날짜">10.01~</td><td data-h="적요">교통 계획</td><td class="num" data-h="예정액">90,000</td></tr>
+      <tr><td class="d" data-h="날짜">10.25</td><td data-h="적요">월세</td><td class="num" data-h="예정액">650,000</td></tr>
+      <tr><td class="d" data-h="날짜">10.27</td><td data-h="적요">통신비</td><td class="num" data-h="예정액">49,000</td></tr>
+      <tr class="total"><td class="d" data-h="">합계</td><td data-h="적요">표본 항목 소계 · 외 여유 계획 215,000</td><td class="num" data-h="합계">1,284,000</td></tr>
+    </tbody>
+  </table>
+  <p class="footnote">* 표본 4개 소계 1,069,000원 + 미기재 항목 여유 215,000원 = 월 예정액. 데모 값이며 실제 거래와 무관합니다.</p>
+</section>
+
+<section id="week">
+  <h2>급여 후 <span class="kr">첫 주</span></h2>
+  <p class="h2sub">10.19–10.25 · 기록 기준만 표시, 실제 카드 사용액과 다를 수 있음</p>
+  <div class="week">
+    <div>
+      <p class="lbl">이번 주 예산</p>
+      <p class="big">180,000원</p>
+    </div>
+    <div>
+      <p class="lbl">기록된 사용</p>
+      <p class="big">64,500원 <span style="font-size:.5em;color:var(--muted)">/ 남은 115,500원</span></p>
+      <div class="meter" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="이번 주 예산 180,000원 중 기록된 사용 64,500원, 36%"><i></i></div>
+    </div>
+    <p class="unwritten">다음 주(11.2–11.8) 계획 <b>350,000원</b> — 사용 기록 <b>미입력</b>입니다. 0원이 아닙니다.</p>
+  </div>
+</section>
+
+<section id="pay">
+  <h2>납부 <span class="kr">달력</span></h2>
+  <p class="h2sub">급여일(10.25) 기준 예정</p>
+  <ul class="sched">
+    <li><span class="date">10.25</span><span>월세 <span class="dd">D-5 · 급여 당일</span></span><span class="amt">650,000</span></li>
+    <li><span class="date">10.27</span><span>통신비 <span class="dd">D-7</span></span><span class="amt">49,000</span></li>
+  </ul>
+</section>
+
+<section id="reserve">
+  <h2>연간 지출 <span class="kr">준비금</span></h2>
+  <p class="h2sub">미리 모아두는 큰 지출</p>
+  <div class="reserve">
+    <div class="row"><span>자동차보험</span><b>420,000 <span style="font-size:.5em;color:var(--muted)">/ 목표 720,000</span></b></div>
+    <div class="meter reserve-m" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="자동차보험 준비금 목표 720,000원 중 420,000원 적립, 58%"><i></i><s aria-hidden="true"></s></div>
+    <div class="tags"><span>적립 58%</span><span>남은 목표 300,000원</span><span>월 100,000원 계획이면 2027.01 완료 예상</span></div>
+  </div>
+</section>
+
+<section id="retro" class="retro">
+  <h2>월말 <span class="kr">회고</span></h2>
+  <p class="h2sub">2026.09 회고 미리보기 (합성)</p>
+  <p class="quote">“9주는 계획대로, 4주는 외식이 길었다.”</p>
+  <p>이번 달 같은 계획이라면 10월 말 여유흡 약 34,000원 — <strong>예상(시뮬레이션)</strong>이며 잔고나 보장이 아닙니다.</p>
+</section>
+
+<footer>
+  <p>이 화면은 디자인 목업입니다. 데이터는 합성 샘플이며 저장·동기화되지 않습니다. 은행 연결·자동 수집 없음.</p>
+  <p><a href="index.html">← 모든 콘셉트 비교하기</a></p>
+</footer>
+</div>
+</body>
+</html>

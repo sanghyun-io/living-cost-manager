@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 07 · 캘린더 퍼스트 —Living Cost Manager UI 제안</title>
+<meta name="description" content="플럼 컬러의 캘린더 중심 플래너 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#FCF8FA; --plum:#5A2A62; --plum2:#7C4A8C; --tint:#F1E6F2; --tint2:#E6D3E9;
+    --ink:#2B1F2E; --mut:#7A6A7C; --line:#DCD0DC; --gold:#B08A2E; --green:#3F7D5A;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;overflow-wrap:anywhere}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;cursor:pointer;background:none;border:0;color:inherit}
+  :focus-visible{outline:3px solid var(--plum2);outline-offset:2px;border-radius:8px}
+  .sheet{max-width:1000px;margin:0 auto;padding:20px 20px 60px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 4px 18px}
+  .month{font-size:clamp(24px,4vw,30px);font-weight:800;letter-spacing:-.03em;color:var(--plum)}
+  .navbtns{display:flex;gap:6px}
+  .navbtns button{width:44px;height:44px;border:1.5px solid var(--line);border-radius:12px;color:var(--mut);font-size:18px;background:#fff}
+  .badge{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .tag{font-size:11.5px;font-weight:700;color:var(--plum);background:var(--tint);border:1px solid var(--tint2);padding:4px 10px;border-radius:99px}
+  .back{font-size:13.5px;color:var(--mut);min-height:44px;display:flex;align-items:center}
+  .back:hover{color:var(--plum)}
+  /* calendar */
+  .cal{background:#fff;border:1.5px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 2px 14px rgba(90,42,98,.06)}
+  .dows{display:grid;grid-template-columns:repeat(7,1fr);background:var(--plum);color:#F4E9F5}
+  .dows span{padding:10px 4px;text-align:center;font-size:12px;font-weight:700;letter-spacing:.06em}
+  .dows span:nth-child(7){color:#F2C9D4}
+  .grid7{display:grid;grid-template-columns:repeat(7,1fr)}
+  .day{min-height:76px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:6px 7px;position:relative;background:#fff}
+  .day:nth-child(7n){border-right:0}
+  .day .n{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .day.dim .n{color:#C9BCC9}
+  .day.sat .n{color:#A64C6E}
+  .day.today{background:var(--tint)}
+  .day.today .n{display:inline-flex;background:var(--plum);color:#fff;border-radius:99px;padding:1px 8px;font-weight:800}
+  .ev{display:block;margin-top:5px;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 6px;line-height:1.35;letter-spacing:-.01em}
+  .ev.pay{background:var(--gold);color:#fff}
+  .ev.bill{background:var(--tint2);color:var(--plum)}
+  .wk{position:absolute;top:6px;right:7px;font-size:9.5px;font-weight:800;color:var(--mut);letter-spacing:.05em}
+  button.wkpick{display:block;width:100%;text-align:left}
+  button.wkpick:hover .day,button.wkpick[aria-pressed="true"] .day{outline:3px solid var(--plum2);outline-offset:-3px;background:#FBF5FC}
+  button.wkpick[aria-pressed="true"] .day{background:var(--tint)}
+  /* legend + detail */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--mut);padding:12px 4px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .duo{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;margin-top:22px}
+  .card{background:#fff;border:1.5px solid var(--line);border-radius:18px;padding:20px}
+  .card h2{font-size:13px;font-weight:800;color:var(--plum);letter-spacing:.04em;margin-bottom:4px}
+  .card .range{font-size:12.5px;color:var(--mut);margin-bottom:14px}
+  .big{font-size:30px;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+  .big small{font-size:14px;color:var(--mut);font-weight:600;letter-spacing:0}
+  .bar{height:9px;background:var(--tint);border-radius:99px;overflow:hidden;margin:14px 0 8px}
+  .bar i{display:block;height:100%;background:var(--plum2)}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed var(--line);font-size:14px}
+  .kv b{font-variant-numeric:tabular-nums}
+  .kv .nonev{color:var(--mut);font-weight:700;border:1.5px dashed var(--mut);border-radius:8px;padding:0 8px;font-size:12px}
+  .month-sum{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .month-sum .lab{font-size:12.5px;color:var(--mut)}
+  footer{margin-top:26px;font-size:12.5px;color:var(--mut);text-align:center}
+  [hidden]{display:none !important}
+  @media (max-width:760px){
+    .duo{grid-template-columns:1fr}
+    .day{min-height:64px;padding:4px}
+    .ev{font-size:9px;padding:1px 4px;margin-top:3px}
+    .wk{display:none}
+    .sheet{padding:14px 12px 48px}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <h1 class="month">2026년 10월</h1>
+    <div class="navbtns" aria-hidden="false">
+      <button aria-label="지난달 (데모: 전환되지 않음)" title="디자인 목업 — 월 전환 비활성">‹</button>
+      <button aria-label="다음달 (데모: 전환되지 않음)" title="디자인 목업 — 월 전환 비활성">›</button>
+    </div>
+    <div class="badge">
+      <span class="tag">DEMO · 캘린더 우선 설계</span>
+      <a class="back" href="index.html">← 비교</a>
+    </div>
+  </header>
+
+  <div class="cal">
+    <div class="dows"><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span></div>
+    <div class="grid7" role="group" aria-label="2026년 10월 달력 · 합성 이벤트">
+      <!-- W: 9.28–10.4 -->
+      <span class="day dim"><span class="n">28</span></span><span class="day dim"><span class="n">29</span></span><span class="day dim"><span class="n">30</span></span>
+      <span class="day"><span class="n">1</span></span><span class="day"><span class="n">2</span></span><span class="day sat"><span class="n">3</span></span><span class="day"><span class="n">4</span></span>
+      <!-- W1 10.5–11 -->
+      <button class="wkpick" data-week="w1" aria-pressed="false"><span class="day"><span class="wk">W1</span><span class="n">5</span></span></button>
+      <span class="day"><span class="n">6</span></span><span class="day"><span class="n">7</span></span><span class="day"><span class="n">8</span></span><span class="day"><span class="n">9</span></span>
+      <span class="day sat"><span class="n">10</span></span><span class="day"><span class="n">11</span></span>
+      <!-- W2 12–18 -->
+      <button class="wkpick" data-week="w2" aria-pressed="false"><span class="day"><span class="wk">W2</span><span class="n">12</span></span></button>
+      <span class="day"><span class="n">13</span></span><span class="day"><span class="n">14</span></span><span class="day"><span class="n">15</span></span><span class="day"><span class="n">16</span></span>
+      <span class="day sat"><span class="n">17</span></span><span class="day"><span class="n">18</span></span>
+      <!-- W3 19–25 current -->
+      <button class="wkpick" data-week="w3" aria-pressed="true"><span class="day today"><span class="wk">이번주</span><span class="n">19</span></span></button>
+      <span class="day today"><span class="n">20</span><span class="ev bill">오늘</span></span>
+      <span class="day"><span class="n">21</span></span><span class="day"><span class="n">22</span></span><span class="day"><span class="n">23</span></span>
+      <span class="day sat"><span class="n">24</span></span>
+      <button class="wkpick" data-week="w3"><span class="day today"><span class="n">25</span><span class="ev pay">급여·월세</span></span></button>
+      <!-- W4 26–11.1 -->
+      <button class="wkpick" data-week="w4" aria-pressed="false"><span class="day"><span class="wk">W4</span><span class="n">26</span></span></button>
+      <span class="day"><span class="n">27</span><span class="ev bill">통신비</span></span>
+      <span class="day"><span class="n">28</span></span><span class="day"><span class="n">29</span></span><span class="day"><span class="n">30</span></span>
+      <span class="day sat"><span class="n">31</span><span class="ev bill">월말 회고</span></span>
+      <span class="day dim"><span class="n">1</span></span>
+      <!-- Nov W1 -->
+      <button class="wkpick" data-week="nw1" aria-pressed="false"><span class="day dim"><span class="wk">11W1</span><span class="n">2</span></span></button>
+      <span class="day dim"><span class="n">3</span></span><span class="day dim"><span class="n">4</span></span><span class="day dim"><span class="n">5</span></span><span class="day dim"><span class="n">6</span></span>
+      <span class="day dim sat"><span class="n">7</span></span><span class="day dim"><span class="n">8</span></span>
+    </div>
+  </div>
+  <p class="legend">
+    <span><i style="background:var(--gold)"></i>급여·고정납부</span>
+    <span><i style="background:var(--tint2)"></i>예정/이벤트</span>
+    <span><i style="background:var(--tint)"></i>이번 주 · 오늘</span>
+    <span>주(W) 헤더를 누르면 아래 주간 카드가 그 주를 보여줍니다</span>
+  </p>
+
+  <div class="duo">
+    <div class="card">
+      <h2 id="wk-title">이번 주 (10.19–10.25)</h2>
+      <p class="range" id="wk-range">주간 예산과 기록된 사용 · 급여일 25일 포함 주</p>
+      <div class="month-sum"><span class="big" id="wk-used">64,500원</span><small id="wk-budget-lbl" style="font-size:14px;color:var(--mut)">/ 예산 180,000원</small></div>
+      <div class="bar" id="wk-bar-wrap" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="이번 주 예산 180,000원 중 기록된 사용 64,500원, 36%"><i id="wk-bar" style="width:36%"></i></div>
+      <div class="kv"><span>남은 예산 (기록 기준)</span><b id="wk-left">115,500원</b></div>
+      <div class="kv"><span>이 주 예정 납부</span><b id="wk-pay">10.25 월세 650,000원</b></div>
+    </div>
+    <div class="card">
+      <h2>10월 한눈에</h2>
+      <p class="range">월 예정 생활비 · 급여일 기준</p>
+      <p class="big">1,284,000원 <small>표본 항목 + 여유계획</small></p>
+      <div class="kv"><span>오늘까지 기록된 사용</span><b>335,700원</b></div>
+      <div class="kv"><span>다가오는 납부</span><b>699,000원</b></div>
+      <div class="kv"><span>자동차보험 준비금</span><b>420,000 / 720,000</b></div>
+      <div class="kv"><span>10월 말 예상 여유</span><b>약 34,000원 <span class="nonev">예상·시뮬</span></b></div>
+    </div>
+  </div>
+
+  <footer>디자인 프로토타입입니다 · 달력과 숫자는 합성 샘플이며 저장·동기화되지 않습니다 · <a href="index.html" style="color:var(--plum)">← 모든 콘셉트</a></footer>
+</div>
+<script>
+(function(){
+  var DATA={
+    w1:{t:"W1 (10.5–10.11)",r:"지나간 주 · 기록 기준(합성 표본)",u:128000,b:150000,left:22000,pay:"—"},
+    w2:{t:"W2 (10.12–10.18)",r:"지나간 주 · 기록 기준(합성 표본)",u:143200,b:150000,left:6800,pay:"—"},
+    w3:{t:"이번 주 (10.19–10.25)",r:"주간 예산과 기록된 사용 · 급여일 25일 포함 주",u:64500,b:180000,left:115500,pay:"10.25 월세 650,000원"},
+    w4:{t:"W4 (10.26–11.1)",r:"예산 미배정 · 사용 미입력",u:null,b:null,left:null,pay:"10.27 통신비 49,000원"},
+    nw1:{t:"11월 W1 (11.2–11.8)",r:"계획만 세워둔 주 — 사용 기록 미입력(0원 아님)",u:null,b:350000,left:null,pay:"—"}
+  };
+  var f=function(n){return n==null?null:n.toLocaleString('ko-KR')+'원'};
+  document.querySelectorAll('.wkpick').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var w=DATA[btn.getAttribute('data-week')];if(!w)return;
+      document.querySelectorAll('.wkpick[aria-pressed="true"]').forEach(function(x){x.setAttribute('aria-pressed','false')});
+      btn.setAttribute('aria-pressed','true');
+      document.getElementById('wk-title').textContent=w.t;
+      document.getElementById('wk-range').textContent=w.r;
+      document.getElementById('wk-used').innerHTML = w.u==null?'<span style="border:1.5px dashed var(--mut);border-radius:10px;padding:2px 12px;font-size:20px">미입력</span>':f(w.u);
+      document.getElementById('wk-budget-lbl').textContent = w.b==null?'/ 예산 미배정':'/ 예산 '+f(w.b);
+      var bar=document.getElementById('wk-bar'), wrap=document.getElementById('wk-bar-wrap');
+      if(w.u==null||w.b==null){bar.style.width='0%';wrap.setAttribute('aria-valuenow','0');wrap.setAttribute('aria-label',w.t+' — 사용 미입력');}
+      else{var pc=Math.round(w.u*100/w.b);bar.style.width=pc+'%';wrap.setAttribute('aria-valuenow',String(pc));wrap.setAttribute('aria-label',w.t+' 예산 '+f(w.b)+' 중 기록 '+f(w.u)+', '+pc+'%');}
+      document.getElementById('wk-left').textContent = w.left==null?'—':f(w.left);
+      document.getElementById('wk-pay').textContent=w.pay;
+    });
+  });
+})();
+</script>
+</body>
+</html>

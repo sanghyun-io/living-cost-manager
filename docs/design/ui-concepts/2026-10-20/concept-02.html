@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 02 · 관제형 사이드바 —Living Cost Manager UI 제안</title>
+<meta name="description" content="네이비 고밀도 사이드바 대시보드 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#0E1B2A; --panel:#152538; --panel2:#1B2E44; --line:#28405C; --txt:#E8EEF5;
+    --mut:#94A9C2; --acc:#5FB2FF; --ok:#4ADE9B; --warn:#FFB454; --crit:#FF7B7B;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+  a{color:inherit;text-decoration:none}
+  :focus-visible{outline:3px solid var(--acc);outline-offset:1px}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  .app{display:grid;grid-template-columns:216px minmax(0,1fr);min-height:100vh}
+  .app>div{min-width:0}
+  /* sidebar */
+  aside{background:var(--panel);border-right:1px solid var(--line);padding:14px 0;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .brand{padding:0 16px 14px;border-bottom:1px solid var(--line)}
+  .brand b{font-size:14px;letter-spacing:-.02em}
+  .brand .demo{display:inline-block;margin-top:6px;font-size:10px;font-weight:700;color:var(--bg);background:var(--acc);padding:1px 7px;letter-spacing:.08em}
+  .side-nav{padding:10px 8px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .side-nav .grp{font-size:10px;letter-spacing:.14em;color:var(--mut);padding:12px 10px 4px}
+  .side-nav a,.side-nav button{display:flex;align-items:center;gap:10px;padding:10px 10px;min-height:44px;border-radius:6px;color:var(--mut)}
+  .side-nav a:hover,.side-nav button:hover{background:var(--panel2);color:var(--txt)}
+  .side-nav [aria-current="page"],.side-nav button[aria-selected="true"]{background:var(--panel2);color:var(--txt);box-shadow:inset 2px 0 0 var(--acc)}
+  .side-nav svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8}
+  .side-foot{padding:12px 16px;border-top:1px solid var(--line);color:var(--mut);font-size:11px}
+  /* toolbar */
+  .toolbar{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+  .toolbar h1{font-size:15px;font-weight:700;margin-right:auto}
+  .crumb{color:var(--mut);font-size:11.5px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{padding:8px 14px;min-height:44px;color:var(--mut)}
+  .seg button[aria-selected="true"]{background:var(--panel2);color:var(--txt)}
+  select{font:inherit;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-height:40px}
+  /* main */
+  main{padding:18px;display:grid;gap:14px;grid-template-columns:repeat(12,minmax(0,1fr));align-content:start;min-width:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;min-width:0}
+  .card h2{font-size:11px;letter-spacing:.12em;color:var(--mut);font-weight:600;margin-bottom:10px}
+  .span12{grid-column:span 12}.span8{grid-column:span 8}.span6{grid-column:span 6}.span4{grid-column:span 4}
+  .kpi{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .kpi b{font-size:30px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  .kpi span{color:var(--mut)}
+  .delta{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line)}
+  .delta.ok{color:var(--ok);border-color:var(--ok)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .twrap{overflow-x:auto;-webkit-overflow-scrolling:touch;min-width:0;border-radius:6px}
+  .twrap table{min-width:420px}
+  .twrap:focus-visible{outline:3px solid var(--acc);outline-offset:1px}
+  th{text-align:left;color:var(--mut);font-weight:600;font-size:10.5px;letter-spacing:.1em;border-bottom:1px solid var(--line);padding:7px 8px 7px 0;white-space:nowrap}
+  td{border-bottom:1px solid #1D3350;padding:9px 8px 9px 0}
+  td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .chip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:4px}
+  .chip.due{color:var(--warn);background:rgba(255,180,84,.12)}
+  .chip.plan{color:var(--acc);background:rgba(95,178,255,.12)}
+  .chip.none{color:var(--mut);background:rgba(148,169,194,.12);border:1px dashed var(--mut)}
+  .bar{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--acc)}
+  .bar.ok i{background:var(--ok)}
+  .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+  .mini{background:var(--panel2);border-radius:6px;padding:10px 12px}
+  .mini b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+  .mini span{color:var(--mut);font-size:11px}
+  .note{font-size:11px;color:var(--mut)}
+  .panes{display:grid;gap:14px;grid-column:1/-1;grid-template-columns:subgrid}
+  [hidden]{display:none !important}
+  footer.card{color:var(--mut);font-size:11px}
+  @media (max-width:1020px){.span8,.span6{grid-column:span 12}.span4{grid-column:span 6}}
+  @media (max-width:760px){
+    .app{grid-template-columns:minmax(0,1fr)}
+    aside{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+    .side-nav{flex-direction:row;overflow-x:auto;gap:6px;padding:8px 12px}
+    .side-nav .grp{display:none}
+    .side-nav a,.side-nav button{white-space:nowrap;flex:none}
+    .side-foot{display:none}
+    main{padding:12px}
+    .span4{grid-column:span 12}
+    .grid2{grid-template-columns:minmax(0,1fr)}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <b>생활비 관리자</b><br>
+      <span class="demo">DEMO 목업</span>
+    </div>
+    <nav class="side-nav" aria-label="메인 메뉴">
+      <p class="grp">이번 달</p>
+      <a href="#overview" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>개요</a>
+      <a href="#weekly"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h12"/></svg>주간 예산</a>
+      <a href="#pay"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>납부 일정</a>
+      <p class="grp">장기</p>
+      <a href="#reserve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM4 8l2-4h12l2 4"/></svg>연간 준비금</a>
+      <a href="#retro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 8l7-5 7 5"/></svg>월말 회고</a>
+      <p class="grp">링크</p>
+      <a href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg>비교 갤러리</a>
+    </nav>
+    <p class="side-foot">2026.10.20 (화) 기준 · 합성 데이터</p>
+  </aside>
+
+  <div>
+    <div class="toolbar">
+      <h1>2026년 10월 <span class="crumb">/ 급여일 기준 10.25</span></h1>
+      <div class="seg" role="tablist" aria-label="조회 구분">
+        <button role="tab" id="t-month" aria-selected="true" aria-controls="pane-month">월간</button>
+        <button role="tab" id="t-week" aria-selected="false" aria-controls="pane-week">주간</button>
+        <button role="tab" id="t-year" aria-selected="false" aria-controls="pane-year">연간</button>
+      </div>
+      <label class="crumb" for="period">기간</label>
+      <select id="period" title="디자인 목업 — 목록만 표시, 전환 동작하지 않습니다" aria-label="기간 (데모: 동작하지 않음)"><option>2026-10</option><option>2026-09</option></select>
+    </div>
+
+    <main>
+      <!-- 월간 -->
+      <div class="panes" id="pane-month" role="tabpanel" aria-labelledby="t-month">
+        <div class="card span8" id="overview">
+          <h2>월 예정 생활비</h2>
+          <div class="kpi"><b>1,284,000원</b><span>선택 항목 표본 · 전체 아님</span><span class="delta ok">계획 유지</span></div>
+          <div class="bar" style="margin:12px 0 6px" role="progressbar" aria-valuenow="26" aria-valuemin="0" aria-valuemax="100" aria-label="월 계획 1,284,000원 중 오늘까지 기록된 사용 335,700원, 26%"><i style="width:26%"></i></div>
+          <div class="twrap" tabindex="0" role="region" aria-label="월 예정 생활비 표본 항목 표 — 화면이 좁으면 가로로 스크롤됩니다">
+          <table>
+            <thead><tr><th>항목</th><th>구분</th><th class="r">예정액</th><th class="r">기록</th></tr></thead>
+            <tbody>
+              <tr><td>식비</td><td><span class="chip plan">변동</span></td><td class="r">280,000</td><td class="r">253,200</td></tr>
+              <tr><td>교통</td><td><span class="chip plan">변동</span></td><td class="r">90,000</td><td class="r">82,500</td></tr>
+              <tr><td>월세</td><td><span class="chip due">고정</span></td><td class="r">650,000</td><td class="r">미납(D-5)</td></tr>
+              <tr><td>통신비</td><td><span class="chip due">고정</span></td><td class="r">49,000</td><td class="r">미납(D-7)</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p class="note">표본 4개 소계 1,069,000원. 나머지 215,000원은 미기재 항목 여유 계획. 기록 값은 사용자가 입력한 것만 반영하며 실제 출금과 다를 수 있습니다.</p>
+        </div>
+        <div class="card span4" id="weekly">
+          <h2>이번 주 (10.19–10.25)</h2>
+          <div class="grid2">
+            <div class="mini"><b>180,000</b><span>주간 예산</span></div>
+            <div class="mini"><b>64,500</b><span>기록된 사용</span></div>
+          </div>
+          <div class="bar ok" style="margin:12px 0 6px" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="주간 예산 180,000원 중 기록된 사용 64,500원, 36% 사용"><i style="width:36%"></i></div>
+          <p class="kpi" style="font-size:15px"><b style="font-size:22px">115,500원</b><span>남음(기록 기준)</span></p>
+          <p class="note" style="margin-top:10px">다음 주(11.2–11.8): 계획 350,000원 · 사용 <span class="chip none">미입력</span> <br>미입력은 0원과 다른 상태입니다.</p>
+        </div>
+        <div class="card span8" id="pay">
+          <h2>예정 납부 (고정지출)</h2>
+          <div class="twrap" tabindex="0" role="region" aria-label="예정 납부 표 — 좁은 화면에서 가로 스크롤 가능">
+          <table>
+            <thead><tr><th>일시</th><th>항목</th><th>상태</th><th class="r">금액</th></tr></thead>
+            <tbody>
+              <tr><td>10.25 (일)</td><td>월세</td><td><span class="chip due">D-5 · 급여일 동일</span></td><td class="r">650,000</td></tr>
+              <tr><td>10.27 (화)</td><td>통신비</td><td><span class="chip due">D-7</span></td><td class="r">49,000</td></tr>
+              <tr><td>11.10</td><td>관리비(표본)</td><td><span class="chip plan">계획</span></td><td class="r">95,000</td></tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+        <div class="card span4" id="reserve">
+          <h2>연간 준비금</h2>
+          <p class="kpi"><b>420,000</b><span>/ 자동차보험 목표 720,000</span></p>
+          <div class="bar" style="margin:10px 0 6px" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="자동차보험 준비금 목표 720,000원 중 420,000원 적립, 58%"><i style="width:58%"></i></div>
+          <p class="note">남은 목표 300,000원 · 월 100,000원 적립 계획(예상)</p>
+        </div>
+        <div class="card span12" id="retro">
+          <h2>예상 &amp; 월말 회고</h2>
+          <p class="note">현재 계획 유지 시 10월 말 여유흡 약 34,000원 — <b>예상(시뮬레이션)</b>이며 실제 잔고가 아니고 자동 보정하지 않습니다. 회고: 9월은 3주 계획 준수, 4주 초과(합성).</p>
+        </div>
+      </div>
+
+      <!-- 주간 -->
+      <div class="panes" id="pane-week" role="tabpanel" aria-labelledby="t-week" hidden>
+        <div class="card span12">
+          <h2>10월 주차별 (기록 기준)</h2>
+          <div class="twrap" tabindex="0" role="region" aria-label="주차별 표 — 좁은 화면에서 가로 스크롤 가능">
+          <table>
+            <thead><tr><th>주차</th><th class="r">주간 예산</th><th class="r">기록된 사용</th><th>상태</th><th style="width:30%">사용률</th></tr></thead>
+            <tbody>
+              <tr><td>W2 10.12–10.18</td><td class="r">150,000</td><td class="r">143,200</td><td><span class="chip plan">완료</span></td><td><div class="bar" role="progressbar" aria-valuenow="95" aria-valuemin="0" aria-valuemax="100" aria-label="W2 사용률 95%"><i style="width:95%"></i></div></td></tr>
+              <tr><td>W3 10.19–10.25 (현재)</td><td class="r">180,000</td><td class="r">64,500</td><td><span class="chip due">진행</span></td><td><div class="bar ok" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="현재 주 사용률 36%"><i style="width:36%"></i></div></td></tr>
+              <tr><td>W4 10.26–11.01</td><td class="r">—</td><td class="r"><span class="chip none">미입력</span></td><td><span class="chip plan">예산 미배정</span></td><td>—</td></tr>
+              <tr><td>11월 W1 11.02–11.08</td><td class="r">350,000</td><td class="r"><span class="chip none">미입력</span></td><td><span class="chip plan">계획만</span></td><td>—</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p class="note">미입력(기록 없음)과 0원(기록됨)은 다른 셀입니다. W2 합성값은 표본입니다.</p>
+        </div>
+      </div>
+
+      <!-- 연간 -->
+      <div class="panes" id="pane-year" role="tabpanel" aria-labelledby="t-year" hidden>
+        <div class="card span12">
+          <h2>연간 지출 준비금 현황</h2>
+          <div class="twrap" tabindex="0" role="region" aria-label="연간 준비금 표 — 좁은 화면에서 가로 스크롤 가능">
+          <table>
+            <thead><tr><th>준비금</th><th>목표월</th><th class="r">목표액</th><th class="r">적립</th><th style="width:30%">달성</th></tr></thead>
+            <tbody>
+              <tr><td>자동차보험</td><td>2027.01</td><td class="r">720,000</td><td class="r">420,000</td><td><div class="bar ok" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="자동차보험 58%"><i style="width:58%"></i></div></td></tr>
+              <tr><td>명절 선물(표본)</td><td>2027.02</td><td class="r">300,000</td><td class="r">80,000</td><td><div class="bar" role="progressbar" aria-valuenow="27" aria-valuemin="0" aria-valuemax="100" aria-label="명절 선물 27%"><i style="width:27%"></i></div></td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p class="note">준비금은 계획상 목표 추적 화면입니다. 실제 저축 상품·잔고와 무관한 합성 데이터.</p>
+        </div>
+      </div>
+
+      <div class="card span12">
+        <p>이 화면은 디자인 목업입니다 — 합성 데이터, 저장·동기화·은행 연동 없음. <a href="index.html" style="color:var(--acc)">← 비교 갤러리</a></p>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+(function(){
+  var tabs=document.querySelectorAll('[role="tab"]');
+  tabs.forEach(function(t){
+    t.addEventListener('click',function(){
+      tabs.forEach(function(x){x.setAttribute('aria-selected','false')});
+      t.setAttribute('aria-selected','true');
+      document.querySelectorAll('[role="tabpanel"]').forEach(function(p){p.hidden=true});
+      document.getElementById(t.getAttribute('aria-controls')).hidden=false;
+    });
+  });
+})();
+</script>
+</body>
+</html>

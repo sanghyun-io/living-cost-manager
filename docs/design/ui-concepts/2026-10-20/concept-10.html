@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 10 · 갈라진 장부 —Living Cost Manager UI 제안</title>
+<meta name="description" content="뮤트 올리브 스플릿 가계 장부 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#EEEEE2; --pane:#F7F7EE; --card:#FDFDF6; --ink:#262A1C; --mut:#6E725C;
+    --olive:#5D6B35; --olive-d:#48542A; --clay:#A8552F; --line:#D8D9C2; --sage:#8B9A5B;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;overflow-wrap:anywhere}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;cursor:pointer;color:inherit;background:none;border:0}
+  :focus-visible{outline:3px solid var(--olive);outline-offset:2px;border-radius:8px}
+  .shell{max-width:1280px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+  header.top{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--pane)}
+  header.top .logo{font-weight:800;letter-spacing:-.03em;font-size:17px;color:var(--olive-d)}
+  header.top .logo span{color:var(--clay)}
+  .filters{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+  .filters button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:9px 16px;min-height:44px;font-size:13.5px;color:var(--mut)}
+  .filters button[aria-pressed="true"]{background:var(--olive);border-color:var(--olive);color:#F6F7EC;font-weight:700}
+  .demo{font-size:11px;font-weight:800;color:var(--olive-d);background:#E2E7C8;border:1px solid var(--sage);padding:3px 10px;border-radius:99px}
+  .back{color:var(--mut);font-size:13.5px;min-height:44px;display:flex;align-items:center}
+  .split{display:grid;grid-template-columns:1.15fr .85fr;gap:0;flex:1}
+  /* left ledger */
+  .ledger{padding:24px 22px 40px;border-right:1px solid var(--line)}
+  .ledger .head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .ledger h1{font-size:19px;font-weight:800;letter-spacing:-.03em}
+  .ledger .meta{color:var(--mut);font-size:12.5px}
+  .entry{display:grid;grid-template-columns:52px 1fr auto;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 16px;margin-bottom:10px}
+  .entry .day{font-size:12px;color:var(--mut);text-align:center;line-height:1.3}
+  .entry .day b{display:block;font-size:16px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .entry .who{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:1px 8px;margin-left:8px;vertical-align:1px}
+  .who.me{background:#E2E7C8;color:var(--olive-d)}
+  .who.b{background:#F0DCC8;color:var(--clay)}
+  .who.fix{background:var(--bg);color:var(--mut);border:1px solid var(--line)}
+  .entry .name{font-size:14.5px}
+  .entry .name small{display:block;color:var(--mut);font-size:12px}
+  .entry .amt{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .entry .amt u{text-decoration:none;display:block;font-size:11px;font-weight:600;color:var(--mut)}
+  .entry.plan{border-style:dashed;background:transparent}
+  .entry.empty{border:1.5px dashed var(--mut);background:none;color:var(--mut);font-size:13px;grid-template-columns:1fr;text-align:center;padding:16px}
+  .entry.empty b{color:var(--ink)}
+  /* right summary */
+  .sum{padding:24px 22px 40px;display:flex;flex-direction:column;gap:14px;background:var(--pane)}
+  .sum .sticky{position:sticky;top:16px;display:flex;flex-direction:column;gap:14px}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
+  .box h2{font-size:12px;letter-spacing:.1em;color:var(--mut);font-weight:800;margin-bottom:8px}
+  .box .big{font-size:28px;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums;color:var(--olive-d)}
+  .box .big small{font-size:13px;color:var(--mut);font-weight:600;letter-spacing:-.01em}
+  .meter{height:9px;background:var(--bg);border-radius:99px;overflow:hidden;margin:12px 0 6px}
+  .meter i{display:block;height:100%;background:var(--sage);border-radius:99px}
+  .meter.clay i{background:var(--clay)}
+  .lines{margin-top:6px}
+  .ln{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px dashed var(--line);font-size:13.5px}
+  .ln:first-child{border-top:0}
+  .ln b{font-variant-numeric:tabular-nums}
+  .pilln{border:1.5px dashed var(--mut);color:var(--mut);border-radius:99px;font-size:11px;padding:0 9px;font-weight:700}
+  footer{padding:16px 22px;border-top:1px solid var(--line);font-size:12.5px;color:var(--mut);background:var(--pane)}
+  footer a{color:var(--olive-d);font-weight:700}
+  @media (max-width:900px){
+    .split{grid-template-columns:1fr}
+    .sum{order:-1;border-bottom:1px solid var(--line)}
+    .sum .sticky{position:static}
+    .ledger{border-right:0}
+    .filters{margin-left:0;width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <span class="logo">생활비 장부<span>.</span></span>
+    <span class="demo">DEMO · 합성</span>
+    <div class="filters" role="group" aria-label="구성원 필터 (데모: 버튼 선택 상태만 바뀝니다 · 목록은 필터링되지 않음)">
+      <button aria-pressed="true">전체</button>
+      <button aria-pressed="false">나</button>
+      <button aria-pressed="false">구성원 B</button>
+    </div>
+    <a class="back" href="index.html">← 비교</a>
+  </header>
+
+  <div class="split">
+    <main class="ledger">
+      <div class="head">
+        <h1>2026년 10월 장부</h1>
+        <span class="meta">급여일 10.25 · 기록 기준 · 합성 표본</span>
+      </div>
+
+      <div class="entry">
+        <span class="day"><b>05</b>10월</span>
+        <span class="name">식비 — 장보기<small>변동지출 · 기록</small></span>
+        <span class="amt">41,200원<u>나</u></span>
+      </div>
+      <div class="entry">
+        <span class="day"><b>12</b>10월</span>
+        <span class="name">교통 — 정기권<small>변동지출 · 기록</small></span>
+        <span class="amt">52,500원<u>구성원 B</u></span>
+      </div>
+      <div class="entry">
+        <span class="day"><b>19</b>10월</span>
+        <span class="name">식비 — 이번 주<small>이번 주 기록의 일부</small></span>
+        <span class="amt">23,300원<u>나</u></span>
+      </div>
+      <div class="entry plan">
+        <span class="day"><b>25</b>10월</span>
+        <span class="name">월세<small>고정지출 · 급여 당일 · D-5</small></span>
+        <span class="amt">650,000원<u>예정</u></span>
+      </div>
+      <div class="entry plan">
+        <span class="day"><b>27</b>10월</span>
+        <span class="name">통신비<small>고정지출 · D-7</small></span>
+        <span class="amt">49,000원<u>예정</u></span>
+      </div>
+      <div class="entry empty">
+        다음 주(11.2–11.8) 계획 <b>350,000원</b> · 사용 <b>미입력</b> — 비어 있는 칸이지 0원이 아닙니다
+      </div>
+      <div class="entry">
+        <span class="day"><b>09</b>월말</span>
+        <span class="name">9월 회고 메모<small>“4주차 외식 초과” (합성)</small></span>
+        <span class="amt">1,247,000원<u>/ 계획 1,250,000</u></span>
+      </div>
+    </main>
+
+    <aside class="sum" aria-label="요약">
+      <div class="sticky">
+        <div class="box">
+          <h2>10월 예정 생활비</h2>
+          <p class="big">1,284,000<small>원</small></p>
+          <p style="font-size:12.5px;color:var(--mut)">왼쪽 장부는 그중 일부 항목 표본입니다 — 전체 목록이 아니에요</p>
+          <div class="meter" role="progressbar" aria-valuenow="26" aria-valuemin="0" aria-valuemax="100" aria-label="월 계획 1,284,000원 중 오늘까지 기록된 사용 335,700원, 26%"><i style="width:26%"></i></div>
+          <div class="lines"><div class="ln"><span>오늘까지 기록</span><b>335,700원</b></div></div>
+        </div>
+
+        <div class="box">
+          <h2>이번 주 · 10.19–10.25</h2>
+          <p class="big">115,500<small>원 남음(기록 기준)</small></p>
+          <div class="meter" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="이번 주 예산 180,000원 중 기록된 사용 64,500원, 36%"><i style="width:36%"></i></div>
+          <div class="lines">
+            <div class="ln"><span>예산</span><b>180,000원</b></div>
+            <div class="ln"><span>기록된 사용</span><b>64,500원</b></div>
+          </div>
+        </div>
+
+        <div class="box">
+          <h2>연간 준비금</h2>
+          <p class="big">420,000<small>/ 720,000</small></p>
+          <div class="meter clay" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="자동차보험 준비금 목표 720,000원 중 420,000원 적립, 58%"><i style="width:58%"></i></div>
+          <div class="lines">
+            <div class="ln"><span>자동차보험 · 남은 목표</span><b>300,000원 <span class="pilln">2027.01</span></b></div>
+            <div class="ln"><span>10월 말 예상 여유</span><b>약 34,000원 <span class="pilln">예상</span></b></div>
+          </div>
+          <p style="font-size:11.5px;color:var(--mut);margin-top:8px">예상은 시뮬레이션이며 잔고·보장이 아닙니다. 자동이체·계좌 연동 없음.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    디자인 프로토타입 — 모든 내역은 합성 샘플이며 저장·동기화되지 않습니다. 구성원 이름은 가칭(나 / 구성원 B). <a href="index.html">← 10개 콘셉트 비교</a>
+  </footer>
+</div>
+<script>
+(function(){
+  var f=document.querySelectorAll('.filters button');
+  f.forEach(function(b){
+    b.addEventListener('click',function(){
+      f.forEach(function(x){x.setAttribute('aria-pressed','false')});
+      b.setAttribute('aria-pressed','true');
+      // 데모: 버튼 선택 상태만 변경 — 목록 필터·저장 동작 없음
+    });
+  });
+})();
+</script>
+</body>
+</html>

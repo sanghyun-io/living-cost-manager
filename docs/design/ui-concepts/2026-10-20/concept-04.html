@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 04 · 그리트 —Living Cost Manager UI 제안</title>
+<meta name="description" content="브루탈리스트 타이포 그리트 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --paper:#F2F1EA; --blk:#0A0A0A; --yl:#FFD400; --red:#D62828; --wht:#FFFFFF;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--blk);font-family:var(--sans);font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+  a{color:inherit;text-decoration:none}
+  :focus-visible{outline:4px solid var(--red);outline-offset:2px}
+  .frame{max-width:1200px;margin:0 auto;border:4px solid var(--blk);background:var(--wht)}
+  /* top strip */
+  .strip{display:flex;align-items:stretch;border-bottom:4px solid var(--blk);background:var(--yl)}
+  .strip .cell{padding:12px 16px;border-right:4px solid var(--blk);font-weight:900;letter-spacing:-.02em;display:flex;align-items:center;min-height:56px}
+  .strip .title{flex:1}
+  .strip a{min-width:44px;justify-content:center}
+  .strip a:hover,.strip a.on{background:var(--blk);color:var(--yl)}
+  /* numbered nav */
+  nav.bignum{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:4px solid var(--blk)}
+  nav.bignum a{padding:18px 16px;border-right:2px solid var(--blk);min-height:64px}
+  nav.bignum a:last-child{border-right:0}
+  nav.bignum a small{display:block;font-size:11px;letter-spacing:.18em;font-weight:700}
+  nav.bignum a b{font-size:clamp(18px,2.6vw,26px);letter-spacing:-.04em}
+  nav.bignum a:hover{background:var(--yl)}
+  /* hero grid */
+  .hero{display:grid;grid-template-columns:1.4fr 1fr;border-bottom:4px solid var(--blk)}
+  .hero .fig{padding:36px 28px;border-right:4px solid var(--blk)}
+  .hero .fig small{display:block;font-size:13px;font-weight:800;letter-spacing:.14em;margin-bottom:10px}
+  .hero .fig b{font-size:clamp(44px,8vw,84px);font-weight:900;letter-spacing:-.05em;display:block;line-height:1}
+  .hero .fig u{text-decoration:none;background:var(--yl);padding:0 6px;font-weight:900;font-size:14px;display:inline-block;margin-top:14px}
+  .hero .side{background:var(--blk);color:var(--wht);padding:28px}
+  .hero .side h2{font-size:13px;letter-spacing:.2em;margin-bottom:14px;color:var(--yl)}
+  .hero .side li{list-style:none;display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:2px solid #333;font-weight:700}
+  .hero .side li:last-child{border-bottom:0}
+  .hero .side .amt{font-variant-numeric:tabular-nums}
+  .stamp{display:inline-block;border:3px solid var(--red);color:var(--red);font-weight:900;padding:1px 8px;transform:rotate(-3deg);font-size:12px}
+  /* blocks */
+  .blocks{display:grid;grid-template-columns:repeat(12,1fr)}
+  .blk{border-right:2px solid var(--blk);border-bottom:4px solid var(--blk);padding:26px 22px}
+  .b7{grid-column:span 7}.b5{grid-column:span 5}.b6{grid-column:span 6}.b12{grid-column:span 12;border-right:0}
+  .blk:last-child{border-right:0}
+  .blk h3{font-size:15px;font-weight:900;letter-spacing:.04em;margin-bottom:14px}
+  .blk h3 span{background:var(--yl);padding:2px 8px}
+  .lane{display:grid;grid-template-columns:90px 1fr 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:2px dashed var(--blk);font-weight:700}
+  .lane:last-child{border-bottom:0}
+  .lane .no{font-size:20px;font-weight:900}
+  .lane .val{text-align:right;font-variant-numeric:tabular-nums;font-weight:900;font-size:17px}
+  .lane .tag{font-size:11px;background:var(--blk);color:var(--yl);padding:2px 8px;font-weight:800}
+  .lane .tag.ghost{background:none;color:var(--blk);border:2px dashed var(--blk)}
+  /* segment bar */
+  .segs{display:flex;gap:5px;margin-top:14px}
+  .segs i{flex:1;height:30px;border:3px solid var(--blk)}
+  .segs i.f{background:var(--blk)}
+  .segs i.p{background:var(--yl)}
+  .cap{font-size:12px;font-weight:700;margin-top:10px}
+  /* details disclosure */
+  details{border:3px solid var(--blk);margin-top:14px;background:var(--wht)}
+  summary{cursor:pointer;font-weight:900;padding:14px 16px;min-height:48px;display:flex;align-items:center;gap:10px;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"+";background:var(--yl);border:2px solid var(--blk);width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex:none}
+  details[open] summary::before{content:"−"}
+  details .in{border-top:3px solid var(--blk);padding:16px}
+  .mock{font-size:11px;letter-spacing:.1em;border:2px solid var(--blk);padding:1px 7px;font-weight:800;background:var(--paper)}
+  .btnrow{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}
+  .btnrow a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border:3px solid var(--blk);font-weight:900;background:var(--yl);box-shadow:5px 5px 0 var(--blk)}
+  .btnrow a.ghost{background:var(--wht);box-shadow:5px 5px 0 #bbb}
+  footer{padding:22px;font-size:12.5px;font-weight:700;background:var(--paper);border-top:4px solid var(--blk)}
+  footer a{background:var(--blk);color:var(--yl);padding:2px 10px}
+  @media (max-width:760px){
+    .hero{grid-template-columns:1fr}
+    .hero .fig{border-right:0;border-bottom:4px solid var(--blk)}
+    .blocks{grid-template-columns:1fr}
+    .blk{grid-column:auto !important;border-right:0}
+    nav.bignum{grid-template-columns:1fr 1fr}
+    nav.bignum a{border-bottom:2px solid var(--blk)}
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="strip">
+    <div class="cell title">LIVING COST / 2026.10</div>
+    <div class="cell"><span class="stamp">목업</span></div>
+    <a class="cell" href="index.html" aria-label="비교 갤러리로 이동">←←</a>
+  </div>
+
+  <nav class="bignum" aria-label="주 메뉴">
+    <a href="#plan"><small>01_</small><b>월 계획</b></a>
+    <a href="#week"><small>02_</small><b>이번 주</b></a>
+    <a href="#pay"><small>03_</small><b>납부일</b></a>
+    <a href="#save"><small>04_</small><b>준비금</b></a>
+  </nav>
+
+  <div class="hero" id="plan">
+    <div class="fig">
+      <small>10월 예정 생활비 — 합성</small>
+      <b>1,284,000<span style="font-size:.35em">원</span></b>
+      <u>표본 항목만 포함 · 전체 아님</u>
+      <div class="segs" role="img" aria-label="월 계획 24개 구간 중 오늘까지 기록된 사용 비율 약 26%에 해당하는 6개 구간 채워짐">
+        <i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <p class="cap">오늘까지 기록 335,700원 / 1,284,000원 (26%) — 기록 기준</p>
+    </div>
+    <div class="side" id="pay">
+      <h2>다가오는 납부 / 급여일 10.25</h2>
+      <ul>
+        <li><span>10.25 <b>월세</b></span><span class="amt">650,000</span></li>
+        <li><span>10.27 <b>통신비</b></span><span class="amt">49,000</span></li>
+        <li><span>표본 외 항목</span><span class="amt">여유 215,000</span></li>
+      </ul>
+      <p class="cap" style="color:#ccc">자동이체 아님 · 이 앱이 하는 건 '계획 적어두기'</p>
+    </div>
+  </div>
+
+  <div class="blocks">
+    <div class="blk b7" id="week">
+      <h3><span>02</span> 이번 주 레인 — 10.19 ~ 10.25</h3>
+      <div class="lane"><span class="no">예산</span><span>이번 주 예산</span><span class="val">180,000</span></div>
+      <div class="lane"><span class="no">기록</span><span>사용 기록됨 <span class="tag">36%</span></span><span class="val">64,500</span></div>
+      <div class="lane"><span class="no">잔여</span><span>남은 예산 (기록 기준)</span><span class="val">115,500</span></div>
+      <div class="lane"><span class="no">다음</span><span>11.2–11.8 계획 <span class="tag ghost">사용 미입력 ≠ 0</span></span><span class="val">350,000</span></div>
+      <details>
+        <summary>월말 회고 — 9월 미리보기 <span class="mock">목업</span></summary>
+        <div class="in">
+          <div class="lane"><span class="no">9월</span><span>계획 대비 기록</span><span class="val">1,247,000 / 1,250,000</span></div>
+          <div class="lane"><span class="no">주</span><span>계획을 지킨 주</span><span class="val">3 / 4</span></div>
+          <p class="cap">메모: “4주차 외식 초과” — 합성.</p>
+        </div>
+      </details>
+    </div>
+    <div class="blk b5" id="save">
+      <h3><span>04</span> 자동차보험 준비금</h3>
+      <p style="font-weight:900;font-size:clamp(30px,5vw,44px);letter-spacing:-.04em">420,000<span style="font-size:.4em;font-weight:800"> / 720,000</span></p>
+      <div class="segs" role="img" aria-label="준비금 10개 구간 중 6개 적립, 약 58%">
+        <i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i></i><i></i><i></i><i></i>
+      </div>
+      <p class="cap">남은 목표 300,000원 · 월 100,000원 적립이면 2027.01 완료 '예상'(시뮬)</p>
+      <div class="btnrow">
+        <a href="#save" aria-disabled="true" title="디자인 목업이라 동작하지 않습니다">적립하기 <span class="mock" style="margin-left:8px">목업</span></a>
+      </div>
+    </div>
+    <div class="blk b12" style="background:var(--yl);border-bottom:0">
+      <h3>예상 한 줄</h3>
+      <p style="font-weight:900;font-size:20px;letter-spacing:-.03em">계획대로면 10월 말 여유 약 34,000원 — <span style="background:var(--blk);color:var(--yl);padding:2px 10px">예상(시뮬레이션)</span> · 잔고 아님 · 보장 없음</p>
+    </div>
+  </div>
+
+  <footer>
+    4px 격자의 이 화면은 <b>디자인 프로토타입</b>입니다. 숫자는 모두 합성 샘플, 저장·동기화·수납 없음. <a href="index.html">← 비교</a>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>콘셉트 05 · 미드나잇 —Living Cost Manager UI 제안</title>
+<meta name="description" content="다크 프리미엄 미드나잇/시안 디자인 프로토타입. 합성 데모 데이터.">
+<style>
+  :root{
+    --bg:#0A1017; --pnl:#101823; --pnl2:#15202E; --line:#22303F; --txt:#E9F2F8;
+      --mut:#8FA6B8; --cy:#3BDBE8; --cy-dim:#1D9AA6; --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    --sans:"Pretendard Variable","Pretendard",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14.5px;line-height:1.55;overflow-wrap:anywhere}
+  a{color:inherit;text-decoration:none}
+  :focus-visible{outline:3px solid var(--cy);outline-offset:2px}
+  .app{display:grid;grid-template-columns:64px 1.15fr .85fr;min-height:100vh}
+  /* icon rail */
+  .rail{border-right:1px solid var(--line);background:var(--pnl);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:6px;position:sticky;top:0;height:100vh}
+  .rail .mark{width:34px;height:34px;border:2px solid var(--cy);display:grid;place-items:center;font-weight:900;color:var(--cy);margin-bottom:14px;font-family:var(--mono)}
+  .rail a{width:48px;height:48px;display:grid;place-items:center;border-radius:12px;color:var(--mut)}
+  .rail a:hover{background:var(--pnl2);color:var(--txt)}
+  .rail a[aria-current]{background:var(--pnl2);color:var(--cy);box-shadow:inset 0 0 0 1px var(--cy-dim)}
+  .rail svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7}
+  .rail .spacer{flex:1}
+  /* focus column */
+  .focus{padding:30px 34px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .topline{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+  .topline h1{font-size:17px;font-weight:700;letter-spacing:.01em}
+  .pill{font-size:11px;font-family:var(--mono);letter-spacing:.08em;color:var(--cy);border:1px solid var(--cy-dim);padding:3px 10px;border-radius:99px}
+  .now{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,var(--pnl2),var(--pnl));padding:26px}
+  .now .lbl{color:var(--mut);font-size:12.5px;letter-spacing:.12em}
+  .num-xl{font-family:var(--mono);font-size:clamp(42px,7vw,64px);letter-spacing:-.03em;line-height:1.05;margin:8px 0 2px}
+  .num-xl small{font-size:.35em;color:var(--mut);letter-spacing:0}
+  .of{color:var(--mut);font-family:var(--mono);font-size:14px}
+  .track{height:10px;border-radius:99px;background:var(--pnl);border:1px solid var(--line);margin:18px 0 8px;overflow:hidden}
+  .track i{display:block;height:100%;width:36%;background:var(--cy);box-shadow:0 0 12px rgba(59,219,232,.5)}
+  .sub{display:flex;gap:22px;flex-wrap:wrap;color:var(--mut);font-size:13px;margin-top:4px}
+  .sub b{color:var(--txt);font-family:var(--mono)}
+  .monthly{margin-top:22px;padding:20px 26px;border:1px dashed var(--line);border-radius:18px}
+  .monthly .num-xl{font-size:clamp(30px,5vw,44px)}
+  .ghost{border:1px solid var(--line);border-radius:18px;padding:18px 22px;margin-top:22px;color:var(--mut);font-size:13px;background:var(--pnl)}
+  .ghost b{color:var(--txt)}
+  .ghost .zero{color:var(--cy);font-family:var(--mono);border-bottom:1px dotted var(--cy)}
+  /* timeline column */
+  .stream{padding:30px 28px;display:flex;flex-direction:column;gap:14px}
+  .stream h2{font-size:12.5px;letter-spacing:.16em;color:var(--mut);margin-bottom:2px}
+  .evt{display:grid;grid-template-columns:56px 1fr auto;gap:14px;align-items:center;border:1px solid var(--line);border-radius:14px;background:var(--pnl);padding:14px 16px}
+  .evt .d{font-family:var(--mono);font-size:12px;color:var(--mut);text-align:center;line-height:1.3}
+  .evt .d b{display:block;color:var(--txt);font-size:15px}
+  .evt .t b{display:block;font-size:14.5px}
+  .evt .t span{color:var(--mut);font-size:12px}
+  .evt .a{font-family:var(--mono);font-size:15px;white-space:nowrap}
+  .evt.hot{border-color:var(--cy-dim)}
+  .evt.hot .a{color:var(--cy)}
+  /* whatif */
+  .whatif{border:1px solid var(--line);border-radius:14px;background:var(--pnl);padding:18px 20px;margin-top:auto}
+  .whatif label{font-size:12.5px;letter-spacing:.08em;color:var(--mut);display:flex;justify-content:space-between}
+  .whatif output{font-family:var(--mono);color:var(--cy)}
+  input[type=range]{width:100%;accent-color:var(--cy);height:44px;margin-top:6px}
+  .whatif p{font-size:12.5px;color:var(--mut);margin-top:6px}
+  .whatif p b{color:var(--txt);font-family:var(--mono)}
+  .foot{font-size:11.5px;color:var(--mut);border-top:1px solid var(--line);padding-top:12px}
+  .foot a{color:var(--cy)}
+  @media (max-width:980px){
+    .app{grid-template-columns:1fr}
+    .rail{position:static;flex-direction:row;height:auto;width:auto;justify-content:space-around;padding:8px 10px;border-right:0;border-bottom:1px solid var(--line)}
+    .rail .mark{margin:0 8px 0 0}
+    .rail .spacer{display:none}
+    .focus{border-right:0;padding:22px 18px}
+    .stream{padding:22px 18px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="주 내비게이션">
+    <span class="mark" aria-hidden="true">생</span>
+    <a href="#focus" aria-current="page" aria-label="개요"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg></a>
+    <a href="#week" aria-label="이번 주"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></a>
+    <a href="#pay" aria-label="납부"><svg viewBox="0 0 24 24"><path d="M4 9h16M4 9l2-5h12l2 5M4 9v10h16V9"/></svg></a>
+    <a href="#save" aria-label="준비금"><svg viewBox="0 0 24 24"><path d="M5 19V8m7 11V5m7 14v-8"/></svg></a>
+    <a href="#retro" aria-label="회고"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 3-6.2M4 4v4h4"/></svg></a>
+    <span class="spacer"></span>
+    <a href="index.html" aria-label="비교 갤러리"><svg viewBox="0 0 24 24"><path d="M9 4h11M9 12h11M9 20h11M4 4h.01M4 12h.01M4 20h.01"/></svg></a>
+  </nav>
+
+  <section class="focus" id="focus">
+    <div class="topline">
+      <h1>2026년 10월 · 진행중</h1>
+      <span class="pill">DEMO / 합성</span>
+    </div>
+
+    <div class="now" id="week">
+      <p class="lbl">이번 주 — 기록된 사용</p>
+      <p class="num-xl">64,500<small>원</small></p>
+      <p class="of">/ 주간 예산 180,000원 · 10.19–10.25</p>
+      <div class="track" role="progressbar" aria-valuenow="36" aria-valuemin="0" aria-valuemax="100" aria-label="이번 주 예산 180,000원 중 기록된 사용 64,500원, 36%"><i></i></div>
+      <div class="sub">
+        <span>남음(기록 기준) <b>115,500</b></span>
+        <span>실시간 잔액 아님</span>
+      </div>
+    </div>
+
+    <div class="monthly">
+      <p class="lbl">월 예정 생활비 · 표본 항목 기준</p>
+      <p class="num-xl">1,284,000<small>원</small></p>
+      <p class="of">전체 항목이 아닌 선택 표본 · 여유 계획 215,000 포함</p>
+    </div>
+
+    <div class="ghost">
+      다음 주(11.2–11.8) 계획 <b>350,000</b> · 사용 <span class="zero">미입력</span> — <b>미입력</b>은 <span class="zero">0</span>이 아닙니다. 기록이 아직 없다는 상태 표시입니다.
+    </div>
+
+    <div class="whatif">
+      <label for="wf">하루 사용 가정 <output id="wfv">50,000원</output></label>
+      <input type="range" id="wf" min="0" max="90000" step="1000" value="50000" aria-describedby="wfn">
+      <p id="wfn">오늘부터 10.31까지 12일 × <b id="wfd">50,000</b>원 → 기록 335,700 + 가정 600,000 = <b id="wft">935,700원</b> <span id="wfs"></span> — <b>예상(시뮬레이션)</b>, 잔고·보장 아님. 저장되지 않습니다.</p>
+    </div>
+  </section>
+
+  <aside class="stream" id="pay">
+    <h2>D-타임라인 / 급여일 10.25 기준</h2>
+    <div class="evt hot">
+      <span class="d"><b>25</b>10월</span>
+      <span class="t"><b>월세</b><span>급여 당일 납부 · 고정지출</span></span>
+      <span class="a">650,000</span>
+    </div>
+    <div class="evt">
+      <span class="d"><b>27</b>10월</span>
+      <span class="t"><b>통신비</b><span>고정지출</span></span>
+      <span class="a">49,000</span>
+    </div>
+    <div class="evt">
+      <span class="d"><b>31</b>10월</span>
+      <span class="t"><b>월말 회고 미리보기</b><span>합성: 9월 계획 준수 3/4주</span></span>
+      <span class="a">—</span>
+    </div>
+    <div class="evt" id="save">
+      <span class="d"><b>27.01</b>목표</span>
+      <span class="t"><b>자동차보험 준비금</b><span>목표 720,000 중 적립됨</span></span>
+      <span class="a">420,000</span>
+    </div>
+    <div class="track" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="자동차보험 준비금 목표 720,000원 중 420,000원 적립, 58%" style="margin-top:0"><i style="width:58%;box-shadow:none;background:var(--cy-dim)"></i></div>
+
+    <div id="retro" class="whatif" style="margin-top:auto">
+      <h2 style="margin-bottom:8px">10월 말 예상 한 줄</h2>
+      <p style="margin:0;color:var(--txt);font-size:15px">계획대로면 여유 <b style="color:var(--cy);font-family:var(--mono)">약 34,000원</b> — 예상(시뮬레이션)</p>
+      <p class="foot" style="margin-top:12px">이 화면은 디자인 목업 · 합성 데이터 · 저장/동기화/은행 연동 없음. <a href="index.html">← 비교</a></p>
+    </div>
+  </aside>
+</div>
+<script>
+(function(){
+  var r=document.getElementById('wf'),o=document.getElementById('wfv'),d=document.getElementById('wfd'),
+      t=document.getElementById('wft'),s=document.getElementById('wfs');
+  function fmt(n){return Math.round(n).toLocaleString('ko-KR')}
+  function upd(){
+    var v=+r.value, used=335700, plan=1284000, proj=used+v*12;
+    o.value=fmt(v)+'원'; d.textContent=fmt(v)+'원';
+    t.textContent=fmt(proj)+'원';
+    var diff=plan-proj;
+    s.innerHTML = diff>=0
+      ? '→ 계획 내 (<b style="color:#7CE6A9">여유 '+fmt(diff)+'</b> 예상)'
+      : '→ 계획 초과 (<b style="color:#FF8A80">'+fmt(-diff)+'</b> 예상)';
+  }
+  r.addEventListener('input',upd); upd();
+})();
+</script>
+</body>
+</html>

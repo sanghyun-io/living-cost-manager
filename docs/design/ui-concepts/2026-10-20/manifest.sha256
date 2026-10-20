@@ -1,0 +1,25 @@
+# manifest.sha256 — LCM UI 콘셉트 아카이브 (2026-10-20)
+# 형식: <sha256>  <bytes>  <이 폴더 기준 상대경로> (경로사전순, 본 manifest 자체 제외)
+# 11개 HTML(index + concept-01..10) 바이트는 최초 산출물 원본과 대조 동일함(sha256 확인).
+# r2 재검 증거 이미지는 재검 라운드 5장만 보관. 1차 라운드 원시 로그·구 스크린샷은 미보관.
+# 합성 데이터 canonical 기준값: 월예산 1,284,000 / 주간 배분 180,000 / 사용 64,500 / 잔여 115,500 / 예비 720,000·420,000·300,000 (원)
+# 일부 화면의 파생 표시값(15,500 / 184,500 / 1,415,700 등)은 데모 인터랙션 합성 계산이며 이미지 수치까지 전량 일치 보장은 아님.
+75867c7b04d3e63f43164451f7310bbab1e34e867a1df97264ac9bb4ca84ac42  4666  README.md
+39e1940743e6d24c77d74bad848fb72ecb30292012daa13ed5ed4d4e72a3f777  10897  concept-01.html
+27c239556eb75df4af0782c61a0f37818dfc7b030d6089e2a59b589b4044bf35  16186  concept-02.html
+2380d069b0faadccec2aa45097cd6ba5f565b2590f217c88c6eb2c4c6740ad97  13757  concept-03.html
+bf155b54f1f9c6a9c03da6776a71af0a445f1321ec84427c9bad65d2c232358f  10130  concept-04.html
+657763d45ba543be98ae9570c438ab8674d9036aacd966d82506a3b454258bb5  10388  concept-05.html
+61c05d562c7f1707ca4a8d4419646611123a9efd2faae065a656fb7b0cdbdb65  8071  concept-06.html
+601a25a7c217df51222288d32c0cf7105be7733dade278e0d3a0654279bb4962  13220  concept-07.html
+aeba3ec80e4a75c32702a2e285902a66e9d9f08598356764c3b0cbdb20b061d9  10120  concept-08.html
+723a6dd8ca782782a24abfca7aa7e1300508d6cbe6619e1aa078ab5733696a82  11135  concept-09.html
+2541014ae2171445f3027c09d6d3cce74a6f711d882c645a6983c39f29a02037  10336  concept-10.html
+27559605f90b4ca77847f9bf8db31553e44ab5b70dd2c8e635595c0e5bed163e  24503  index.html
+ce23a4670aff59c28921daa8e6e5aa54bb37871880cd4bbcf6a8ad7a7d12d14a  4532  qa/README.md
+68389a2829455d78687552121f6e44fdfa8f9a3d85af21ba22efd179cb17f643  66760  qa/shots/concept-02-1440-r2.jpg
+0c76cf0fd76a2cdb0c0d498df4c295e1a9dd1f9fdb63f6f39f6e3105013e4cb9  25408  qa/shots/concept-02-390-r2.jpg
+4a0b5b4d5ed154dd00e933f11ec93331de18a7ce2a9346bb2efa55da0fcbc0f7  48593  qa/shots/concept-09-1440-r2.jpg
+5766f44e78f92fe23c547715efa9440174876d6783341abfe536948d16e7c977  54208  qa/shots/contact-sheet-r2.jpg
+834d3fbc923f71ace46dae0e12e43f8e098febecab5a70fab9743c803237d1bf  66025  qa/shots/index-02-preview-r2.jpg
+4248b090596534f8eb2f3a12faf72b3fd26107f41d8786f93e4b71f8125dbf2d  3399  verify-archive.mjs
