@@ -474,6 +474,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
+      - name: Preflight shared artifact contract
+        run: |
+          set -eu
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
+          test -f "$ROOT/tools/cicd/pipeline.py"
+          /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" preflight --service living-cost-manager
+
       - name: Setup Node (pinned exact 24.18.0)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -601,6 +608,26 @@ jobs:
             --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
             --tmp-dir "$GITHUB_WORKSPACE/.lcm-opskv-tmp"
 
+      - name: Archive verified API image and trace metadata
+        id: archive_api
+        if: success()
+        continue-on-error: true
+        env:
+          API_ARCHIVE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-api
+        run: |
+          set -u
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
+          if /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" archive \
+            --service living-cost-manager --environment production \
+            --deployment-id "$API_ARCHIVE_ID" --verified-deployment \
+            --file dist-api/image.tar.gz --file dist-api/metadata.json; then
+            echo 'archived=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'archived=false' >> "$GITHUB_OUTPUT"
+            echo 'API artifact archive failed after verified promotion; deployment was not retried or rolled back. Preserve the exact local image tar and metadata for operator recovery.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - name: Remove large transient files and off-host backup copy (always)
         if: always()
         run: |
@@ -609,7 +636,14 @@ jobs:
           node scripts/ci/api/deploy.mjs cleanup-job \
             --sha "${{ github.sha }}" --run "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" || rc=1
           node scripts/ci/api/deploy.mjs cleanup-copy --out-dir "$GITHUB_WORKSPACE/.lcm-offhost-backup" || rc=1
-          rm -rf "$GITHUB_WORKSPACE/.lcm-opskv-tmp" "$GITHUB_WORKSPACE/dist-api"
+          rm -rf "$GITHUB_WORKSPACE/.lcm-opskv-tmp"
+          if [ "${{ steps.archive_api.outcome }}" = "failure" ] && \
+             [ -f "$GITHUB_WORKSPACE/dist-api/image.tar.gz" ] && \
+             [ -f "$GITHUB_WORKSPACE/dist-api/metadata.json" ]; then
+            echo "Retained exact API candidate files at $GITHUB_WORKSPACE/dist-api after external archive failure; inspect and dispose through an operator-reviewed exact-path action." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            rm -rf "$GITHUB_WORKSPACE/dist-api"
+          fi
           exit "$rc"
 
   # Production Pages deploy — SAME run as the tested build. The artifact
@@ -721,6 +755,13 @@ jobs:
             --attempt "${{ github.run_attempt }}" \
             --workflow-meta "$META_JSON"
 
+      - name: Preflight shared artifact contract
+        run: |
+          set -eu
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
+          test -f "$ROOT/tools/cicd/pipeline.py"
+          /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" preflight --service living-cost-manager
+
       - name: Deploy to Cloudflare Pages (token/Account via env only)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -757,3 +798,31 @@ jobs:
             [ -n "${verified}" ] || { echo "release-meta on ${origin} does not match ${GITHUB_SHA}"; exit 1; }
             curl -fsSL -o /dev/null -w "%{http_code} ${origin}/\n" "https://${origin}/"
           done
+
+      - name: Archive verified Pages release files
+        if: success()
+        continue-on-error: true
+        env:
+          UI_ARCHIVE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-ui
+        run: |
+          set -u
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
+          tmpdir="$(mktemp -d "$RUNNER_TEMP/lcm-pages-archive.XXXXXX")" || {
+            echo 'Pages artifact archive temp unavailable; deployment remains successful.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          trap 'rm -rf "$tmpdir"' EXIT
+          if ! node scripts/ci/archive-budget.mjs "$GITHUB_WORKSPACE/release"; then
+            echo 'Pages artifact archive blocked by source-size/peak/reserve/floor budget; deployment remains successful.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! tar -czf "$tmpdir/lcm-pages-release.tar.gz" -C release .; then
+            echo 'Pages release packaging failed after verified deployment.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" archive \
+            --service living-cost-manager --environment production \
+            --deployment-id "$UI_ARCHIVE_ID" --verified-deployment \
+            --file "$tmpdir/lcm-pages-release.tar.gz"; then
+            echo 'Pages artifact archive failed after verified deployment; deployment was not retried or rolled back.' >> "$GITHUB_STEP_SUMMARY"
+          fi
