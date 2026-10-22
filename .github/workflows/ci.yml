@@ -477,7 +477,7 @@ jobs:
       - name: Preflight shared artifact contract
         run: |
           set -eu
-          ROOT="$HOME/.local/share/gamjaworld-cli/releases/5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7"
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
           test -f "$ROOT/tools/cicd/pipeline.py"
           /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" preflight --service living-cost-manager
 
@@ -616,7 +616,7 @@ jobs:
           API_ARCHIVE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-api
         run: |
           set -u
-          ROOT="$HOME/.local/share/gamjaworld-cli/releases/5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7"
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
           if /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" archive \
             --service living-cost-manager --environment production \
             --deployment-id "$API_ARCHIVE_ID" --verified-deployment \
@@ -758,7 +758,7 @@ jobs:
       - name: Preflight shared artifact contract
         run: |
           set -eu
-          ROOT="$HOME/.local/share/gamjaworld-cli/releases/5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7"
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
           test -f "$ROOT/tools/cicd/pipeline.py"
           /usr/bin/python3 "$ROOT/tools/cicd/pipeline.py" preflight --service living-cost-manager
 
@@ -806,7 +806,7 @@ jobs:
           UI_ARCHIVE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-ui
         run: |
           set -u
-          ROOT="$HOME/.local/share/gamjaworld-cli/releases/5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7"
+          ROOT="$HOME/.local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9"
           tmpdir="$(mktemp -d "$RUNNER_TEMP/lcm-pages-archive.XXXXXX")" || {
             echo 'Pages artifact archive temp unavailable; deployment remains successful.' >> "$GITHUB_STEP_SUMMARY"
             exit 0

@@ -27,7 +27,8 @@ def run_block(step_name):
 
 class ArtifactHookContract(unittest.TestCase):
     def test_fixed_bundle_and_contract_preflight_before_mutations(self):
-        self.assertIn("5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7", WORKFLOW)
+        self.assertIn("38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9", WORKFLOW)
+        self.assertNotIn("5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7", WORKFLOW)
         self.assertIn('test -f "$ROOT/tools/cicd/pipeline.py"', WORKFLOW)
         api = WORKFLOW.split("api-deploy:", 1)[1].split("# Production Pages deploy", 1)[0]
         self.assertLess(api.index("pipeline.py\" preflight --service living-cost-manager"), api.index("install-helper"))
@@ -82,7 +83,7 @@ class ArtifactHookContract(unittest.TestCase):
             files.mkdir(parents=True)
             (files / "image.tar.gz").write_bytes(b"fake image archive")
             (files / "metadata.json").write_text('{"kind":"trace-only"}')
-            helper = home / ".local/share/gamjaworld-cli/releases/5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7/tools/cicd"
+            helper = home / ".local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9/tools/cicd"
             helper.mkdir(parents=True)
             (helper / "pipeline.py").write_text(textwrap.dedent('''\
                 import json, os, sys
@@ -118,7 +119,7 @@ class ArtifactHookContract(unittest.TestCase):
             budget_dest = workspace / "scripts/ci/archive-budget.mjs"
             budget_dest.parent.mkdir(parents=True)
             shutil.copy2(ROOT / "scripts/ci/archive-budget.mjs", budget_dest)
-            helper = home / ".local/share/gamjaworld-cli/releases/5f4be635abf51fceed452dd59c66db4eee3c414203be655848953b7538491fe7/tools/cicd"
+            helper = home / ".local/share/gamjaworld-cli/releases/38669d285e6df82afe1f70b063096c4a12d637924e56fd8919d345774daad5f9/tools/cicd"
             helper.mkdir(parents=True)
             (helper / "pipeline.py").write_text(textwrap.dedent('''\
                 import json, os, sys, tarfile
